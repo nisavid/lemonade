@@ -243,11 +243,11 @@ bool Router::should_enforce_gpu_memory_capacity(const ModelInfo& model_info,
     }
     if (model_info.recipe == "sd-cpp") {
         std::string backend = options.get_option("sd-cpp_backend");
-        return backend == "vulkan" || starts_with(backend, "rocm");
+        return backend.empty() || backend == "vulkan" || starts_with(backend, "rocm");
     }
     if (model_info.recipe == "whispercpp") {
         std::string backend = options.get_option("whispercpp_backend");
-        return backend == "vulkan";
+        return backend.empty() || backend == "vulkan";
     }
     return (model_info.device & DEVICE_GPU) != 0;
 }
@@ -308,9 +308,9 @@ double Router::get_total_gpu_capacity_gb() const {
         }
     };
 
+    // Server::get_vram_usage() currently samples AMD DRM counters, so keep
+    // planner capacity in the same telemetry domain.
     accumulate_gpu_capacity("amd_gpu", config_->enable_dgpu_gtt());
-    accumulate_gpu_capacity("nvidia_gpu", config_->enable_dgpu_gtt());
-    accumulate_gpu_capacity("metal", true);
 
     return total_capacity_gb;
 }
