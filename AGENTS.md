@@ -6,6 +6,17 @@ This file provides guidance to agent driven code reviews when working with this 
 
 Lemonade is a local LLM server providing GPU and NPU acceleration for running large language models on consumer hardware. It exposes OpenAI-compatible, Ollama-compatible, and Anthropic-compatible REST APIs, plus a WebSocket Realtime API. It supports multiple backends: llama.cpp, FastFlowLM, RyzenAI, whisper.cpp, stable-diffusion.cpp, and Kokoro TTS.
 
+## Fork Stewardship
+
+This repository is `nisavid/lemonade`, a fork of upstream Lemonade (`lemonade-sdk/lemonade`) at <https://github.com/lemonade-sdk/lemonade> and <https://lemonade-server.ai/>. Upstream maintainers own the product language, architecture, conventions, and public documentation unless this fork intentionally diverges.
+
+- Treat upstream docs, source, release notes, and website as the canonical source for Lemonade behavior. Use [CONTEXT.md](CONTEXT.md) as a compact scout map and glossary, not as a replacement for upstream sources.
+- Before finalizing specs, plans, or implementations, scout the relevant upstream docs and code paths, infer the maintainers' intent, and record durable findings in the narrowest useful agent-facing doc.
+- By default, changes in this repo are fork-local and should be pushed only to this fork's origin. Do not open upstream PRs, create upstream issues, or assume upstream submission intent unless the user explicitly says so.
+- Preserve upstream commit identity and history shape during fork sync work. Do not use rebase, force-push, or history-replacing sync flows for upstream updates unless the user explicitly requests that behavior.
+- Keep the fork owner in the role of intent, taste, UX feedback, pragmatic judgment, engineering management, and architectural discretion. Agents are expected to do the research, source reading, implementation planning, validation, and documentation needed to make that judgment actionable.
+- Keep agent-facing docs progressive and scout-oriented: capture non-obvious policy, source maps, vocabulary, and false-assumption guardrails; avoid duplicating large sections of upstream documentation that agents can re-read directly.
+
 ## Architecture
 
 ### Executables
@@ -56,9 +67,9 @@ All core endpoints are registered under **4 path prefixes**:
 
 **WebSocket Realtime API**: OpenAI-compatible Realtime protocol for real-time audio transcription. Binds to an OS-assigned port (9000+), exposed via the `websocket_port` field in the `/health` endpoint response.
 
-**Internal endpoints:** `POST /internal/shutdown`
+**Internal endpoints:** `POST /internal/shutdown`, `POST /internal/set`, `GET /internal/config`, `POST /internal/cleanup-cache`
 
-Optional API key auth via `LEMONADE_API_KEY` env var (regular API endpoints) or `LEMONADE_ADMIN_API_KEY` env var (full access including internal endpoints). Clients prefer `LEMONADE_ADMIN_API_KEY` if set. CORS enabled on all routes.
+Optional API key auth via `LEMONADE_API_KEY` env var (regular API endpoints) or `LEMONADE_ADMIN_API_KEY` env var (regular plus internal endpoints). Clients prefer `LEMONADE_ADMIN_API_KEY` if set. Internal endpoints remain restricted to loopback regardless of API key. CORS enabled on all routes.
 
 ### Desktop & Web App
 
@@ -199,3 +210,30 @@ These MUST be maintained in all changes:
 - UI/frontend changes are handled by core maintainers only
 - Python formatting with Black is required
 - PRs trigger CI for linting, formatting, and integration tests
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues for `nisavid/lemonade`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The repo uses the default five-label triage vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo with upstream-derived vocabulary and source maps. See `CONTEXT.md`, `docs/agents/domain.md`, `docs/agents/fork-stewardship.md`, `docs/agents/research-map.md`, and `docs/agents/architecture-map.md`.
+
+## Operating Policy
+
+- This repository uses agentic engineering and operations. Agents should perform assigned tasks autonomously until they reach a boundary that requires stakeholder policy or an unavailable control surface.
+- The user reserves authority over project initiatives and over initiation or continuation of work sessions. Within an active user-directed session, agents should drive execution, review loops, commits, publication steps, and cleanup unless escalation is required.
+- Escalate when a decision or action impacts stakeholder concerns and the stakeholder's policy is unknown or uncertain.
+- Escalate when an action must be taken but the agent lacks an autonomous control surface for it.
+- When escalating a decision and a set of plausible, distinct choices is known, use a multiple-choice input tool if one is available in the interactive context. Include a way for the human operator to provide custom input.
+- When escalating an action with a known prescribed path, present the steps clearly for the human operator to perform. Prefer fewer steps; present commands in easily copyable blocks, and prefer a single one-line command when practical.
+- For every escalation, make the return contract clear: state exactly what result, confirmation, artifact, or output is needed to hand control back to the agent, and make it easy to validate.
+- Prefer verified repository facts over guesses or aspirational guidance.
+- When adding new agent-facing instructions, ask whether the information is durable, non-obvious, and useful before scouting a task.
+- Remove guidance that becomes redundant with ordinary file discovery.
