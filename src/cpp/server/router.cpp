@@ -297,22 +297,24 @@ double Router::get_total_gpu_capacity_gb() const {
     }
 
     const json& devices = system_info["devices"];
-    double total_capacity_gb = 0.0;
+    double single_device_capacity_gb = 0.0;
 
     auto accumulate_gpu_capacity = [&](const std::string& key, bool include_virtual_memory) {
         if (!devices.contains(key)) return;
         json dev_list = devices[key].is_array() ? devices[key] : json::array({devices[key]});
         for (const auto& device : dev_list) {
             if (!device.is_object() || !device.value("available", false)) continue;
-            total_capacity_gb += gpu_capacity_from_device_json(device, include_virtual_memory);
+            single_device_capacity_gb = std::max(single_device_capacity_gb,
+                                                 gpu_capacity_from_device_json(device, include_virtual_memory));
         }
     };
 
-    // Server::get_vram_usage() currently samples AMD DRM counters, so keep
-    // planner capacity in the same telemetry domain.
+    // Lemonade does not track per-request GPU placement, so do not treat memory
+    // as pooled across cards. The sampler provides aggregate pressure; this
+    // capacity is the largest single observable AMD device.
     accumulate_gpu_capacity("amd_gpu", config_->enable_dgpu_gtt());
 
-    return total_capacity_gb;
+    return single_device_capacity_gb;
 }
 
 double Router::estimate_gpu_memory_occupancy_gb(const ModelInfo& model_info,
