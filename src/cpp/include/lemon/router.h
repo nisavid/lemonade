@@ -137,6 +137,7 @@ private:
     double get_total_gpu_capacity_gb() const;
     double sample_total_gpu_occupancy_gb() const;
     double get_lemonade_gpu_occupancy_gb() const;
+    bool is_gpu_resident_server(const WrappedServer& server) const;
     bool should_enforce_gpu_memory_capacity(const ModelInfo& model_info,
                                             const RecipeOptions& options) const;
     void enforce_gpu_memory_capacity(const ModelInfo& model_info,
