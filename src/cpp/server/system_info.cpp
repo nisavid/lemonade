@@ -515,7 +515,8 @@ json SystemInfo::get_device_dict() {
         if (amd_igpu.available) {
             json gpu_json = {
                 {"name", amd_igpu.name},
-                {"available", amd_igpu.available}
+                {"available", amd_igpu.available},
+                {"gpu_type", "integrated"}
             };
             if (amd_igpu.vram_gb > 0) {
                 gpu_json["vram_gb"] = amd_igpu.vram_gb;
@@ -535,7 +536,8 @@ json SystemInfo::get_device_dict() {
             if (gpu.available) {
                 json gpu_json = {
                     {"name", gpu.name},
-                    {"available", gpu.available}
+                    {"available", gpu.available},
+                    {"gpu_type", "discrete"}
                 };
                 if (gpu.vram_gb > 0) {
                     gpu_json["vram_gb"] = gpu.vram_gb;

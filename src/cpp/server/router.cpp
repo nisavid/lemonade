@@ -281,15 +281,6 @@ double Router::get_lemonade_gpu_occupancy_gb() const {
     return total;
 }
 
-static double gpu_capacity_from_device_json(const json& device, bool include_virtual_memory) {
-    double vram_gb = device.value("vram_gb", 0.0);
-    double virtual_mem_gb = device.value("virtual_mem_gb", 0.0);
-    if (include_virtual_memory) {
-        return vram_gb + virtual_mem_gb;
-    }
-    return vram_gb > 0.0 ? vram_gb : virtual_mem_gb;
-}
-
 double Router::get_total_gpu_capacity_gb() const {
     json system_info = SystemInfoCache::get_system_info_with_cache();
     if (!system_info.contains("devices") || !system_info["devices"].is_object()) {
@@ -299,20 +290,25 @@ double Router::get_total_gpu_capacity_gb() const {
     const json& devices = system_info["devices"];
     double single_device_capacity_gb = 0.0;
 
-    auto accumulate_gpu_capacity = [&](const std::string& key, bool include_virtual_memory) {
+    auto accumulate_gpu_capacity = [&](const std::string& key) {
         if (!devices.contains(key)) return;
         json dev_list = devices[key].is_array() ? devices[key] : json::array({devices[key]});
         for (const auto& device : dev_list) {
             if (!device.is_object() || !device.value("available", false)) continue;
-            single_device_capacity_gb = std::max(single_device_capacity_gb,
-                                                 gpu_capacity_from_device_json(device, include_virtual_memory));
+            const bool is_integrated_gpu = device.value("gpu_type", "") == "integrated";
+            const double capacity_gb = gpu_memory_capacity_from_pools_gb(
+                device.value("vram_gb", 0.0),
+                device.value("virtual_mem_gb", 0.0),
+                is_integrated_gpu,
+                config_->enable_dgpu_gtt());
+            single_device_capacity_gb = std::max(single_device_capacity_gb, capacity_gb);
         }
     };
 
     // Lemonade does not track per-request GPU placement, so do not treat memory
     // as pooled across cards. The sampler provides aggregate pressure; this
     // capacity is the largest single observable AMD device.
-    accumulate_gpu_capacity("amd_gpu", config_->enable_dgpu_gtt());
+    accumulate_gpu_capacity("amd_gpu");
 
     return single_device_capacity_gb;
 }

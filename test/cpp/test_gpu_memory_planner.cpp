@@ -7,6 +7,7 @@
 
 using lemon::GpuMemoryAdmissionInputs;
 using lemon::GpuMemoryResident;
+using lemon::gpu_memory_capacity_from_pools_gb;
 using lemon::plan_gpu_memory_admission;
 
 static void expect_evictions(const char* name,
@@ -20,6 +21,15 @@ static void expect_evictions(const char* name,
         std::printf("\n want:");
         for (const auto& value : expected) std::printf(" %s", value.c_str());
         std::printf("\n");
+    }
+    assert(ok);
+}
+
+static void expect_capacity(const char* name, double actual, double expected) {
+    bool ok = actual == expected;
+    std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
+    if (!ok) {
+        std::printf("  got: %.3f GB\n want: %.3f GB\n", actual, expected);
     }
     assert(ok);
 }
@@ -79,6 +89,24 @@ int main() {
         expect_evictions("auto capacity uses current memory available to Lemonade",
                          plan.models_to_evict,
                          {});
+    }
+
+    {
+        expect_capacity("APU capacity includes GTT when dGPU GTT is disabled",
+                        gpu_memory_capacity_from_pools_gb(0.5, 63.5, true, false),
+                        64.0);
+    }
+
+    {
+        expect_capacity("dGPU capacity ignores GTT by default",
+                        gpu_memory_capacity_from_pools_gb(16.0, 64.0, false, false),
+                        16.0);
+        expect_capacity("dGPU capacity includes GTT when enabled",
+                        gpu_memory_capacity_from_pools_gb(16.0, 64.0, false, true),
+                        80.0);
+        expect_capacity("dGPU capacity is unavailable when VRAM is unavailable and GTT is disabled",
+                        gpu_memory_capacity_from_pools_gb(0.0, 20.0, false, false),
+                        0.0);
     }
 
     std::printf("\nAll GPU memory planner cases passed\n");

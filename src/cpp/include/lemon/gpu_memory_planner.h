@@ -30,4 +30,9 @@ struct GpuMemoryAdmissionPlan {
 
 GpuMemoryAdmissionPlan plan_gpu_memory_admission(const GpuMemoryAdmissionInputs& inputs);
 
+double gpu_memory_capacity_from_pools_gb(double vram_gb,
+                                         double virtual_mem_gb,
+                                         bool is_integrated_gpu,
+                                         bool enable_discrete_gpu_gtt);
+
 } // namespace lemon
