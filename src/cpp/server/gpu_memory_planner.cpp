@@ -50,4 +50,18 @@ GpuMemoryAdmissionPlan plan_gpu_memory_admission(const GpuMemoryAdmissionInputs&
     return plan;
 }
 
+double gpu_memory_capacity_from_pools_gb(double vram_gb,
+                                         double virtual_mem_gb,
+                                         bool is_integrated_gpu,
+                                         bool enable_discrete_gpu_gtt) {
+    const double safe_vram_gb = std::max(0.0, vram_gb);
+    const double safe_virtual_mem_gb = std::max(0.0, virtual_mem_gb);
+
+    if (is_integrated_gpu || enable_discrete_gpu_gtt) {
+        return safe_vram_gb + safe_virtual_mem_gb;
+    }
+
+    return safe_vram_gb;
+}
+
 } // namespace lemon

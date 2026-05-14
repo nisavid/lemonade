@@ -1,5 +1,6 @@
 #include <lemon/model_manager.h>
 #include <lemon/gguf_metadata.h>
+#include <lemon/gpu_memory_planner.h>
 #include <lemon/runtime_config.h>
 #include <lemon/hf_variants.h>
 #include <lemon/utils/json_utils.h>
@@ -1646,15 +1647,20 @@ std::map<std::string, ModelInfo> ModelManager::filter_models_by_backend(
         // Because we have mixed types this just makes every device_type an array.
         nlohmann::json dev_list = devices.is_array() ? devices : nlohmann::json{devices};
 
-        // Expand this later to accommodate mixed pools
-        MemoryAllocBehavior dev_mem_alloc_behavior = MemoryAllocBehavior::Hardware;
-        if (dev_type == "amd_igpu")
-            dev_mem_alloc_behavior = MemoryAllocBehavior::Largest;
-        if (enable_dgpu_gtt)
-            dev_mem_alloc_behavior = MemoryAllocBehavior::Unified;
-
         for (const auto& dev : dev_list) {
-            curr_mem_pool_gb = get_max_memory_of_device(dev, dev_mem_alloc_behavior);
+            if (dev_type == "amd_gpu") {
+                curr_mem_pool_gb = gpu_memory_capacity_from_pools_gb(
+                    dev.value("vram_gb", 0.0),
+                    dev.value("virtual_mem_gb", 0.0),
+                    dev.value("gpu_type", "") == "integrated",
+                    enable_dgpu_gtt);
+            } else {
+                // Expand this later to accommodate mixed pools
+                MemoryAllocBehavior dev_mem_alloc_behavior = MemoryAllocBehavior::Hardware;
+                if (enable_dgpu_gtt)
+                    dev_mem_alloc_behavior = MemoryAllocBehavior::Unified;
+                curr_mem_pool_gb = get_max_memory_of_device(dev, dev_mem_alloc_behavior);
+            }
             largest_mem_pool_gb = largest_mem_pool_gb < curr_mem_pool_gb ? curr_mem_pool_gb : largest_mem_pool_gb;
         }
     }
