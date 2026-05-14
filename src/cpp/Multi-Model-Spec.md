@@ -24,6 +24,16 @@ Examples:
 
 ModelInfo and WrappedServer include an explicit enum field for tracking the model type. This field is used throughout the codebase (e.g., in `llamacpp_server.cpp`) to adjust settings based on model type.
 
+### GPU Memory Occupancy
+
+The `max_gpu_memory_occupancy_gb` config key controls the maximum GPU memory Lemonade may occupy. Use `-1` for auto, which uses detected GPU capacity. For each load, the active capacity is the minimum of:
+- the configured capacity, or detected total capacity when configured as auto
+- free GPU memory plus the GPU memory currently occupied by loaded Lemonade models
+
+Before loading a GPU model, Router predicts the candidate model's occupancy. It uses GGUF metadata for llama.cpp models when available, including layer count, KV head count, key/value length, and configured context size for a conservative KV-cache estimate. If metadata is missing, it falls back to model size plus overhead.
+
+If projected occupancy exceeds the active capacity, Router dry-runs a largest-to-smallest eviction plan using loaded models' measured occupancy. If the candidate fits after the planned evictions, Router evicts those models and proceeds. If the candidate cannot fit even after evicting all eligible loaded GPU models, the load fails without evicting anything.
+
 ### Least Recently Used Cache
 
 When loading a new WrappedServer of a given TYPE:
@@ -50,7 +60,7 @@ Only one model can occupy the NPU at a time. The following recipes use the NPU:
 
 When loading a WrappedServer with an NPU recipe, any existing NPU-using WrappedServer is evicted regardless of type or `--max-loaded-models` settings.
 
-> Note: CPU and GPU have no inherent model limit beyond available RAM. Since RAM usage is not tracked, the error handling policy (evict-all-on-failure) serves as the fallback mechanism.
+> Note: CPU memory is not tracked. GPU loads are constrained by `max_gpu_memory_occupancy_gb` when GPU capacity can be detected.
 
 **Recipe to Device Mapping:**
 | Recipe | Device(s) |

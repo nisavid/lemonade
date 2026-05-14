@@ -31,6 +31,7 @@ This file captures implementation landmarks that are useful before changing Lemo
 
 - Model type controls the LRU bucket: LLM, embedding, reranking, audio, image, or TTS.
 - `max_loaded_models` applies per model type, not globally.
+- `max_gpu_memory_occupancy_gb` applies across loaded GPU models. Router dry-runs largest-to-smallest GPU evictions and leaves existing models loaded when the requested model cannot fit.
 - Busy `WrappedServer` instances are protected from eviction until their active request ends.
 - Non-file-not-found load failures trigger an evict-all-and-retry path.
 - Exclusive NPU recipes evict other NPU users; FLM has recipe-specific coexistence rules.

@@ -119,6 +119,7 @@ class TestConfigEnvVars(unittest.TestCase):
             "LEMONADE_EXTRA_MODELS_DIR": "/tmp/lemon_extra_models_test",
             "LEMONADE_GLOBAL_TIMEOUT": "999",
             "LEMONADE_MAX_LOADED_MODELS": "3",
+            "LEMONADE_MAX_GPU_MEMORY_OCCUPANCY_GB": "12.5",
             # Recipe-option env vars
             "LEMONADE_CTX_SIZE": "2048",
         }
@@ -160,6 +161,10 @@ class TestConfigEnvVars(unittest.TestCase):
 
     def test_max_loaded_models(self):
         self.assertEqual(self.snapshot["max_loaded_models"], 3)
+
+    def test_max_gpu_memory_occupancy_gb(self):
+        self.assertIsInstance(self.snapshot["max_gpu_memory_occupancy_gb"], float)
+        self.assertEqual(self.snapshot["max_gpu_memory_occupancy_gb"], 12.5)
 
     def test_max_loaded_models_in_health(self):
         health = requests.get(HEALTH, timeout=TIMEOUT_DEFAULT).json()
@@ -417,6 +422,10 @@ class TestDefaults(unittest.TestCase):
 
     def test_default_max_loaded_models(self):
         self.assertEqual(self.snapshot["max_loaded_models"], 1)
+
+    def test_default_max_gpu_memory_occupancy_gb(self):
+        self.assertIsInstance(self.snapshot["max_gpu_memory_occupancy_gb"], float)
+        self.assertEqual(self.snapshot["max_gpu_memory_occupancy_gb"], -1.0)
 
     def test_default_ctx_size(self):
         self.assertEqual(self.snapshot["ctx_size"], 4096)

@@ -139,7 +139,8 @@ Server::Server(std::shared_ptr<RuntimeConfig> config, const std::string& cache_d
 
     router_ = std::make_unique<Router>(config_.get(),
                                        model_manager_.get(),
-                                       backend_manager_.get());
+                                       backend_manager_.get(),
+                                       [this]() { return get_vram_usage(); });
 
     LOG(DEBUG, "Server") << "Debug logging enabled - subprocess output will be visible" << std::endl;
 
@@ -3477,9 +3478,9 @@ double Server::get_gpu_usage() {
 double Server::get_vram_usage() {
 #ifdef __linux__
     // Linux: Read from AMD sysfs
-    // For dGPU: return VRAM used
+    // For dGPU: return VRAM used unless dGPU GTT is enabled
     // For APU: return VRAM + GTT used
-    // On multi-GPU systems, return memory from GPU with highest utilization
+    // On multi-GPU systems, return total memory across all visible GPUs
     try {
         std::string drm_path = "/sys/class/drm";
 
@@ -3487,9 +3488,8 @@ double Server::get_vram_usage() {
             return -1.0;
         }
 
-        double highest_usage = -1.0;
-        std::string highest_card;
-        double highest_card_memory = 0.0;
+        bool found_memory_info = false;
+        uint64_t total_memory = 0;
 
         for (const auto& entry : fs::directory_iterator(drm_path)) {
             std::string card_name = entry.path().filename().string();
@@ -3499,23 +3499,17 @@ double Server::get_vram_usage() {
 
             std::string device_path = entry.path().string() + "/device";
 
-            // Read GPU utilization to find the most active GPU
-            double gpu_usage = 0.0;
-            std::ifstream busy_file(device_path + "/gpu_busy_percent");
-            if (busy_file.is_open()) {
-                busy_file >> gpu_usage;
-                busy_file.close();
-            }
-
             // Check if this is a dGPU (has board_info) or APU (no board_info)
             bool is_dgpu = fs::exists(device_path + "/board_info");
 
             // Read VRAM used
             uint64_t vram_used = 0;
+            bool found_card_memory_info = false;
             std::ifstream vram_file(device_path + "/mem_info_vram_used");
             if (vram_file.is_open()) {
                 vram_file >> vram_used;
                 vram_file.close();
+                found_card_memory_info = true;
             }
 
             // Read GTT used
@@ -3524,25 +3518,23 @@ double Server::get_vram_usage() {
             if (gtt_file.is_open()) {
                 gtt_file >> gtt_used;
                 gtt_file.close();
+                found_card_memory_info = true;
             }
 
             // Skip if no memory info found
-            if (vram_used == 0 && gtt_used == 0) {
+            if (!found_card_memory_info) {
                 continue;
             }
 
             // Calculate memory for this card
-            uint64_t card_memory = is_dgpu ? vram_used : (vram_used + gtt_used);
-
-            // Track the GPU with highest utilization
-            if (gpu_usage > highest_usage || highest_usage < 0) {
-                highest_usage = gpu_usage;
-                highest_card = card_name;
-                highest_card_memory = card_memory / (1024.0 * 1024.0 * 1024.0); // Convert to GB
-            }
+            found_memory_info = true;
+            const bool include_gtt = !is_dgpu || (config_ && config_->enable_dgpu_gtt());
+            total_memory += include_gtt ? (vram_used + gtt_used) : vram_used;
         }
 
-        return highest_card_memory > 0 ? highest_card_memory : -1.0;
+        return found_memory_info
+            ? total_memory / (1024.0 * 1024.0 * 1024.0)
+            : -1.0;
     } catch (...) {
         return -1.0;
     }

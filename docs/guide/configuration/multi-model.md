@@ -4,9 +4,11 @@ Lemonade supports loading multiple models simultaneously, allowing you to keep f
 
 ## Configuration
 
-Configure via `lemonade config set max_loaded_models=N`. See [Server Configuration](./README.md).
+Configure the per-type slot limit via `lemonade config set max_loaded_models=N`. Configure the GPU memory budget via `lemonade config set max_gpu_memory_occupancy_gb=N`. See [Server Configuration](./README.md).
 
 **Default:** `1` (one model of each type). Use `-1` for unlimited.
+
+`max_gpu_memory_occupancy_gb` defaults to `-1`, which means Lemonade uses the detected total GPU capacity. At load time, Lemonade uses the smaller of the configured budget and the memory currently available to Lemonade: free GPU memory plus the GPU memory already occupied by loaded Lemonade models.
 
 ## Model Types
 
@@ -27,7 +29,8 @@ Each type has its own independent LRU cache, all sharing the same slot limit set
     - `flm` supports loading 1 ASR model, 1 LLM, and 1 embedding model on the NPU at the same time.
     - `ryzenai-llm` supports loading exactly 1 LLM, which uses the entire NPU.
     - `whispercpp` supports loading exactly 1 ASR model at a time, which uses the entire NPU.
-- **CPU/GPU:** No inherent limits beyond available RAM. Multiple models can coexist on CPU or GPU.
+- **GPU:** Lemonade predicts the requested model's GPU occupancy before starting the backend. If the projected occupancy exceeds the active GPU memory budget, loaded GPU models are evicted from largest to smallest until the requested model fits.
+- **CPU:** No inherent limit beyond available RAM.
 
 ## Eviction Policy
 
@@ -35,6 +38,11 @@ When a model slot is full:
 1. The least recently used model of that type is evicted
 2. The new model is loaded
 3. If loading fails (except file-not-found errors), all models are evicted and the load is retried
+
+When a GPU memory budget would be exceeded:
+1. Lemonade dry-runs the eviction plan before unloading anything
+2. Loaded GPU models are selected from largest to smallest predicted or measured occupancy
+3. If the requested model cannot fit even after evicting all eligible models, the load fails and existing models remain loaded
 
 Models currently processing inference requests cannot be evicted until they finish.
 

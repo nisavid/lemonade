@@ -26,6 +26,7 @@ If you are using a standalone `lemond` exectable, the default location is `~/.ca
   "log_level": "info",
   "global_timeout": 300,
   "max_loaded_models": 1,
+  "max_gpu_memory_occupancy_gb": -1.0,
   "no_broadcast": false,
   "extra_models_dir": "",
   "models_dir": "auto",
@@ -82,6 +83,7 @@ If you are using a standalone `lemond` exectable, the default location is `~/.ca
 | `log_level` | string | "info" | Logging level (trace, debug, info, warning, error, fatal, none) |
 | `global_timeout` | int | 300 | Timeout in seconds for HTTP, inference, and readiness checks |
 | `max_loaded_models` | int | 1 | Max models per type slot. Use -1 for unlimited |
+| `max_gpu_memory_occupancy_gb` | number | -1.0 | Max GPU memory occupancy in GB. Use -1 for auto, which uses detected GPU capacity |
 | `no_broadcast` | bool | false | Disable UDP broadcasting for server discovery |
 | `extra_models_dir` | string | "" | Secondary directory to scan for GGUF model files |
 | `models_dir` | string | "auto" | Directory for cached model files. "auto" follows HF_HUB_CACHE / HF_HOME / platform default |
