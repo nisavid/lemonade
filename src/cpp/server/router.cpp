@@ -288,15 +288,14 @@ double Router::get_total_gpu_capacity_gb() const {
     }
 
     const json& devices = system_info["devices"];
-    double largest_capacity_gb = 0.0;
+    double total_capacity_gb = 0.0;
 
     auto accumulate_gpu_capacity = [&](const std::string& key, bool include_virtual_memory) {
         if (!devices.contains(key)) return;
         json dev_list = devices[key].is_array() ? devices[key] : json::array({devices[key]});
         for (const auto& device : dev_list) {
             if (!device.is_object() || !device.value("available", false)) continue;
-            largest_capacity_gb = std::max(largest_capacity_gb,
-                                           gpu_capacity_from_device_json(device, include_virtual_memory));
+            total_capacity_gb += gpu_capacity_from_device_json(device, include_virtual_memory);
         }
     };
 
@@ -304,7 +303,7 @@ double Router::get_total_gpu_capacity_gb() const {
     accumulate_gpu_capacity("nvidia_gpu", config_->enable_dgpu_gtt());
     accumulate_gpu_capacity("metal", true);
 
-    return largest_capacity_gb;
+    return total_capacity_gb;
 }
 
 double Router::estimate_gpu_memory_occupancy_gb(const ModelInfo& model_info,
@@ -346,7 +345,8 @@ double Router::estimate_gpu_memory_occupancy_gb(const ModelInfo& model_info,
 }
 
 void Router::enforce_gpu_memory_capacity(const ModelInfo& model_info,
-                                         const RecipeOptions& options) {
+                                         const RecipeOptions& options,
+                                         const WrappedServer* replacement_server) {
     if (!should_enforce_gpu_memory_capacity(model_info, options)) return;
 
     const double total_capacity_gb = get_total_gpu_capacity_gb();
@@ -355,11 +355,18 @@ void Router::enforce_gpu_memory_capacity(const ModelInfo& model_info,
         return;
     }
 
+    const double replacement_occupancy_gb =
+        replacement_server && (replacement_server->get_device_type() & DEVICE_GPU)
+            ? std::max(0.0, replacement_server->get_gpu_memory_occupancy_gb())
+            : 0.0;
     const double total_gpu_occupancy_gb = sample_total_gpu_occupancy_gb();
-    const double lemonade_occupancy_gb = get_lemonade_gpu_occupancy_gb();
-    const double free_capacity_gb = total_gpu_occupancy_gb >= 0.0
+    const double current_lemonade_occupancy_gb = get_lemonade_gpu_occupancy_gb();
+    const double lemonade_occupancy_gb =
+        std::max(0.0, current_lemonade_occupancy_gb - replacement_occupancy_gb);
+    double free_capacity_gb = total_gpu_occupancy_gb >= 0.0
         ? std::max(0.0, total_capacity_gb - total_gpu_occupancy_gb)
-        : std::max(0.0, total_capacity_gb - lemonade_occupancy_gb);
+        : std::max(0.0, total_capacity_gb - current_lemonade_occupancy_gb);
+    free_capacity_gb += replacement_occupancy_gb;
 
     GpuMemoryAdmissionInputs inputs;
     inputs.configured_capacity_gb = config_->max_gpu_memory_occupancy_gb();
@@ -368,6 +375,7 @@ void Router::enforce_gpu_memory_capacity(const ModelInfo& model_info,
     inputs.lemonade_occupancy_gb = lemonade_occupancy_gb;
     inputs.candidate_occupancy_gb = estimate_gpu_memory_occupancy_gb(model_info, options);
     for (const auto& server : loaded_servers_) {
+        if (server.get() == replacement_server) continue;
         if (server->get_device_type() & DEVICE_GPU) {
             inputs.residents.push_back({
                 server->get_model_name(),
@@ -497,7 +505,8 @@ void Router::load_model(const std::string& model_name,
             }
         }
 
-        enforce_gpu_memory_capacity(model_info, effective_options);
+        const bool requested_gpu = should_enforce_gpu_memory_capacity(model_info, effective_options);
+        enforce_gpu_memory_capacity(model_info, effective_options, reload_existing);
 
         if (reload_existing) {
             WrappedServer* server_to_reload = find_server_by_model_name(canonical_model_name);
@@ -527,9 +536,10 @@ void Router::load_model(const std::string& model_name,
         new_server->update_access_time();
 
         // CRITICAL: Release lock before slow backend startup
-        const double predicted_gpu_occupancy_gb =
-            estimate_gpu_memory_occupancy_gb(model_info, effective_options);
-        const double gpu_occupancy_before_load = sample_total_gpu_occupancy_gb();
+        const double predicted_gpu_occupancy_gb = requested_gpu
+            ? estimate_gpu_memory_occupancy_gb(model_info, effective_options)
+            : 0.0;
+        const double gpu_occupancy_before_load = requested_gpu ? sample_total_gpu_occupancy_gb() : -1.0;
         lock.unlock();
 
         // Load the backend (this can take 30-60 seconds)
@@ -557,16 +567,16 @@ void Router::load_model(const std::string& model_name,
             new_server->update_access_time();
 
             // Add to loaded servers
-            double gpu_occupancy_gb = predicted_gpu_occupancy_gb;
-            const double gpu_occupancy_after_load = sample_total_gpu_occupancy_gb();
-            if (gpu_occupancy_before_load >= 0.0 &&
-                gpu_occupancy_after_load >= gpu_occupancy_before_load) {
-                double measured_delta = gpu_occupancy_after_load - gpu_occupancy_before_load;
-                if (measured_delta > 0.0) {
-                    gpu_occupancy_gb = measured_delta;
-                }
-            }
             if (new_server->get_device_type() & DEVICE_GPU) {
+                double gpu_occupancy_gb = predicted_gpu_occupancy_gb;
+                const double gpu_occupancy_after_load = sample_total_gpu_occupancy_gb();
+                if (gpu_occupancy_before_load >= 0.0 &&
+                    gpu_occupancy_after_load >= gpu_occupancy_before_load) {
+                    double measured_delta = gpu_occupancy_after_load - gpu_occupancy_before_load;
+                    if (measured_delta > 0.0) {
+                        gpu_occupancy_gb = measured_delta;
+                    }
+                }
                 new_server->set_gpu_memory_occupancy_gb(gpu_occupancy_gb);
             }
             loaded_servers_.push_back(std::move(new_server));
@@ -604,7 +614,7 @@ void Router::load_model(const std::string& model_name,
             std::unique_ptr<WrappedServer> retry_server = create_backend_server(model_info);
             retry_server->set_model_metadata(canonical_model_name, model_info.checkpoint(), model_type, device_type, effective_options);
             retry_server->update_access_time();
-            const double retry_gpu_occupancy_before_load = sample_total_gpu_occupancy_gb();
+            const double retry_gpu_occupancy_before_load = requested_gpu ? sample_total_gpu_occupancy_gb() : -1.0;
 
             lock.unlock();
 
@@ -614,16 +624,16 @@ void Router::load_model(const std::string& model_name,
 
                 lock.lock();
 
-                double retry_gpu_occupancy_gb = predicted_gpu_occupancy_gb;
-                const double retry_gpu_occupancy_after_load = sample_total_gpu_occupancy_gb();
-                if (retry_gpu_occupancy_before_load >= 0.0 &&
-                    retry_gpu_occupancy_after_load >= retry_gpu_occupancy_before_load) {
-                    double measured_delta = retry_gpu_occupancy_after_load - retry_gpu_occupancy_before_load;
-                    if (measured_delta > 0.0) {
-                        retry_gpu_occupancy_gb = measured_delta;
-                    }
-                }
                 if (retry_server->get_device_type() & DEVICE_GPU) {
+                    double retry_gpu_occupancy_gb = predicted_gpu_occupancy_gb;
+                    const double retry_gpu_occupancy_after_load = sample_total_gpu_occupancy_gb();
+                    if (retry_gpu_occupancy_before_load >= 0.0 &&
+                        retry_gpu_occupancy_after_load >= retry_gpu_occupancy_before_load) {
+                        double measured_delta = retry_gpu_occupancy_after_load - retry_gpu_occupancy_before_load;
+                        if (measured_delta > 0.0) {
+                            retry_gpu_occupancy_gb = measured_delta;
+                        }
+                    }
                     retry_server->set_gpu_memory_occupancy_gb(retry_gpu_occupancy_gb);
                 }
                 loaded_servers_.push_back(std::move(retry_server));

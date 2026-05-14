@@ -3478,9 +3478,9 @@ double Server::get_gpu_usage() {
 double Server::get_vram_usage() {
 #ifdef __linux__
     // Linux: Read from AMD sysfs
-    // For dGPU: return VRAM used
+    // For dGPU: return VRAM used unless dGPU GTT is enabled
     // For APU: return VRAM + GTT used
-    // On multi-GPU systems, return memory from GPU with highest utilization
+    // On multi-GPU systems, return total memory across all visible GPUs
     try {
         std::string drm_path = "/sys/class/drm";
 
@@ -3488,9 +3488,7 @@ double Server::get_vram_usage() {
             return -1.0;
         }
 
-        double highest_usage = -1.0;
-        std::string highest_card;
-        double highest_card_memory = 0.0;
+        uint64_t total_memory = 0;
 
         for (const auto& entry : fs::directory_iterator(drm_path)) {
             std::string card_name = entry.path().filename().string();
@@ -3499,14 +3497,6 @@ double Server::get_vram_usage() {
             }
 
             std::string device_path = entry.path().string() + "/device";
-
-            // Read GPU utilization to find the most active GPU
-            double gpu_usage = 0.0;
-            std::ifstream busy_file(device_path + "/gpu_busy_percent");
-            if (busy_file.is_open()) {
-                busy_file >> gpu_usage;
-                busy_file.close();
-            }
 
             // Check if this is a dGPU (has board_info) or APU (no board_info)
             bool is_dgpu = fs::exists(device_path + "/board_info");
@@ -3533,17 +3523,13 @@ double Server::get_vram_usage() {
             }
 
             // Calculate memory for this card
-            uint64_t card_memory = is_dgpu ? vram_used : (vram_used + gtt_used);
-
-            // Track the GPU with highest utilization
-            if (gpu_usage > highest_usage || highest_usage < 0) {
-                highest_usage = gpu_usage;
-                highest_card = card_name;
-                highest_card_memory = card_memory / (1024.0 * 1024.0 * 1024.0); // Convert to GB
-            }
+            const bool include_gtt = !is_dgpu || (config_ && config_->enable_dgpu_gtt());
+            total_memory += include_gtt ? (vram_used + gtt_used) : vram_used;
         }
 
-        return highest_card_memory > 0 ? highest_card_memory : -1.0;
+        return total_memory > 0
+            ? total_memory / (1024.0 * 1024.0 * 1024.0)
+            : -1.0;
     } catch (...) {
         return -1.0;
     }

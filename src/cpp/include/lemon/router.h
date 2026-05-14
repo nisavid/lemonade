@@ -140,7 +140,8 @@ private:
     bool should_enforce_gpu_memory_capacity(const ModelInfo& model_info,
                                             const RecipeOptions& options) const;
     void enforce_gpu_memory_capacity(const ModelInfo& model_info,
-                                     const RecipeOptions& options);
+                                     const RecipeOptions& options,
+                                     const WrappedServer* replacement_server = nullptr);
 
     // Generic inference wrapper that handles locking and busy state
     template<typename Func>
