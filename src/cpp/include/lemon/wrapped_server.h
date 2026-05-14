@@ -5,6 +5,7 @@
 #include <functional>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 #include <nlohmann/json.hpp>
 #include <httplib.h>
 #include "utils/process_manager.h"
@@ -125,8 +126,8 @@ public:
     DeviceType get_device_type() const { return device_type_; }
     RecipeOptions get_recipe_options() const { return recipe_options_; }
     int get_process_id() const { return process_handle_.pid; }
-    double get_gpu_memory_occupancy_gb() const { return gpu_memory_occupancy_gb_; }
-    void set_gpu_memory_occupancy_gb(double value) { gpu_memory_occupancy_gb_ = value; }
+    double get_gpu_memory_occupancy_gb() const { return gpu_memory_occupancy_gb_.load(); }
+    void set_gpu_memory_occupancy_gb(double value) { gpu_memory_occupancy_gb_.store(value); }
 
     // Load a model and start the server
     virtual void load(const std::string& model_name,
@@ -210,7 +211,7 @@ protected:
     DeviceType device_type_ = DEVICE_NONE;
     std::chrono::steady_clock::time_point last_access_time_;
     RecipeOptions recipe_options_;
-    double gpu_memory_occupancy_gb_ = 0.0;
+    std::atomic<double> gpu_memory_occupancy_gb_{0.0};
 
     // Busy state tracking (for safe eviction)
     mutable std::mutex busy_mutex_;

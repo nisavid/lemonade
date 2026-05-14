@@ -566,7 +566,9 @@ void Router::load_model(const std::string& model_name,
                     gpu_occupancy_gb = measured_delta;
                 }
             }
-            new_server->set_gpu_memory_occupancy_gb(gpu_occupancy_gb);
+            if (new_server->get_device_type() & DEVICE_GPU) {
+                new_server->set_gpu_memory_occupancy_gb(gpu_occupancy_gb);
+            }
             loaded_servers_.push_back(std::move(new_server));
 
             is_loading_ = false;
@@ -621,7 +623,9 @@ void Router::load_model(const std::string& model_name,
                         retry_gpu_occupancy_gb = measured_delta;
                     }
                 }
-                retry_server->set_gpu_memory_occupancy_gb(retry_gpu_occupancy_gb);
+                if (retry_server->get_device_type() & DEVICE_GPU) {
+                    retry_server->set_gpu_memory_occupancy_gb(retry_gpu_occupancy_gb);
+                }
                 loaded_servers_.push_back(std::move(retry_server));
                 is_loading_ = false;
                 load_cv_.notify_all();

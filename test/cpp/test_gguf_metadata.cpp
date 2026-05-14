@@ -1,12 +1,15 @@
 #include "lemon/gguf_metadata.h"
 
-#include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 
 using lemon::read_gguf_metadata;
+
+namespace fs = std::filesystem;
 
 template <typename T>
 static void write_le(std::ofstream& out, T value) {
@@ -31,7 +34,35 @@ static void write_u32_kv(std::ofstream& out, const std::string& key, uint32_t va
 }
 
 int main() {
-    const std::string path = "/tmp/lemonade-test-metadata.gguf";
+    int failures = 0;
+    auto expect_true = [&failures](bool condition, const char* name) {
+        std::printf("[%s] %s\n", condition ? "PASS" : "FAIL", name);
+        if (!condition) ++failures;
+    };
+    auto expect_eq_i64 = [&failures](int64_t actual, int64_t expected, const char* name) {
+        bool ok = actual == expected;
+        std::printf("[%s] %s  (got=%lld, want=%lld)\n",
+                    ok ? "PASS" : "FAIL",
+                    name,
+                    static_cast<long long>(actual),
+                    static_cast<long long>(expected));
+        if (!ok) ++failures;
+    };
+    auto expect_eq_string = [&failures](const std::string& actual,
+                                        const std::string& expected,
+                                        const char* name) {
+        bool ok = actual == expected;
+        std::printf("[%s] %s  (got=%s, want=%s)\n",
+                    ok ? "PASS" : "FAIL",
+                    name,
+                    actual.c_str(),
+                    expected.c_str());
+        if (!ok) ++failures;
+    };
+
+    auto unique_suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path path = fs::temp_directory_path() /
+        ("lemonade-test-metadata-" + std::to_string(unique_suffix) + ".gguf");
     {
         std::ofstream out(path, std::ios::binary);
         out.write("GGUF", 4);
@@ -50,18 +81,23 @@ int main() {
         write_u32_kv(out, "qwen3.attention.sliding_window", 32768);
     }
 
-    auto metadata = read_gguf_metadata(path);
-    assert(metadata.has_value());
-    assert(metadata->architecture == "qwen3");
-    assert(metadata->context_length == 262144);
-    assert(metadata->block_count == 80);
-    assert(metadata->embedding_length == 8192);
-    assert(metadata->head_count == 64);
-    assert(metadata->head_count_kv == 8);
-    assert(metadata->key_length == 128);
-    assert(metadata->value_length == 128);
-    assert(metadata->sliding_window == 32768);
+    auto metadata = read_gguf_metadata(path.string());
+    expect_true(metadata.has_value(), "metadata parsed");
+    if (metadata) {
+        expect_eq_string(metadata->architecture, "qwen3", "architecture");
+        expect_eq_i64(metadata->context_length, 262144, "context_length");
+        expect_eq_i64(metadata->block_count, 80, "block_count");
+        expect_eq_i64(metadata->embedding_length, 8192, "embedding_length");
+        expect_eq_i64(metadata->head_count, 64, "head_count");
+        expect_eq_i64(metadata->head_count_kv, 8, "head_count_kv");
+        expect_eq_i64(metadata->key_length, 128, "key_length");
+        expect_eq_i64(metadata->value_length, 128, "value_length");
+        expect_eq_i64(metadata->sliding_window, 32768, "sliding_window");
+    }
 
-    std::printf("GGUF metadata parsing passed\n");
-    return 0;
+    std::error_code ec;
+    fs::remove(path, ec);
+
+    std::printf("\nGGUF metadata parsing %s\n", failures == 0 ? "passed" : "failed");
+    return failures == 0 ? 0 : 1;
 }
