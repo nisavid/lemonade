@@ -3488,6 +3488,7 @@ double Server::get_vram_usage() {
             return -1.0;
         }
 
+        bool found_memory_info = false;
         uint64_t total_memory = 0;
 
         for (const auto& entry : fs::directory_iterator(drm_path)) {
@@ -3503,10 +3504,12 @@ double Server::get_vram_usage() {
 
             // Read VRAM used
             uint64_t vram_used = 0;
+            bool found_card_memory_info = false;
             std::ifstream vram_file(device_path + "/mem_info_vram_used");
             if (vram_file.is_open()) {
                 vram_file >> vram_used;
                 vram_file.close();
+                found_card_memory_info = true;
             }
 
             // Read GTT used
@@ -3515,19 +3518,21 @@ double Server::get_vram_usage() {
             if (gtt_file.is_open()) {
                 gtt_file >> gtt_used;
                 gtt_file.close();
+                found_card_memory_info = true;
             }
 
             // Skip if no memory info found
-            if (vram_used == 0 && gtt_used == 0) {
+            if (!found_card_memory_info) {
                 continue;
             }
 
             // Calculate memory for this card
+            found_memory_info = true;
             const bool include_gtt = !is_dgpu || (config_ && config_->enable_dgpu_gtt());
             total_memory += include_gtt ? (vram_used + gtt_used) : vram_used;
         }
 
-        return total_memory > 0
+        return found_memory_info
             ? total_memory / (1024.0 * 1024.0 * 1024.0)
             : -1.0;
     } catch (...) {
