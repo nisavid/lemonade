@@ -329,18 +329,23 @@ double Router::estimate_gpu_memory_occupancy_gb(const ModelInfo& model_info,
             auto metadata = read_gguf_metadata(path);
             if (metadata && metadata->block_count > 0) {
                 int64_t ctx_size = options.get_option("ctx_size").get<int64_t>();
+                if (ctx_size <= 0) {
+                    ctx_size = model_info.max_context_window > 0 ? model_info.max_context_window : 4096;
+                }
                 if (model_info.type == ModelType::EMBEDDING && ctx_size < 8192) {
                     ctx_size = 8192;
                 }
+                const int64_t block_count = std::max<int64_t>(0, metadata->block_count);
+                const int64_t embedding_length = std::max<int64_t>(0, metadata->embedding_length);
                 const int64_t head_count = metadata->head_count > 0 ? metadata->head_count : 1;
                 const int64_t kv_heads = metadata->head_count_kv > 0 ? metadata->head_count_kv : head_count;
                 const int64_t key_length = metadata->key_length > 0
                     ? metadata->key_length
-                    : (metadata->embedding_length > 0 ? metadata->embedding_length / head_count : 128);
+                    : (embedding_length > 0 ? embedding_length / head_count : 128);
                 const int64_t value_length = metadata->value_length > 0 ? metadata->value_length : key_length;
                 const double kv_bytes =
                     static_cast<double>(ctx_size) *
-                    static_cast<double>(metadata->block_count) *
+                    static_cast<double>(block_count) *
                     static_cast<double>(kv_heads) *
                     static_cast<double>(key_length + value_length) *
                     2.0;
