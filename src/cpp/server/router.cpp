@@ -8,15 +8,30 @@
 #include "lemon/backends/vllm_server.h"
 #include "lemon/server_capabilities.h"
 #include "lemon/error_types.h"
+#include "lemon/gguf_metadata.h"
 #include "lemon/recipe_options.h"
+#include "lemon/system_info.h"
 #include <iostream>
 #include <algorithm>
+#include <cmath>
+#include <filesystem>
+#include <sstream>
+#include <system_error>
+#include <utility>
 #include <lemon/utils/aixlog.hpp>
+
+namespace fs = std::filesystem;
 
 namespace lemon {
 
-Router::Router(RuntimeConfig* config, ModelManager* model_manager, BackendManager* backend_manager)
-    : config_(config), model_manager_(model_manager), backend_manager_(backend_manager) {
+Router::Router(RuntimeConfig* config,
+               ModelManager* model_manager,
+               BackendManager* backend_manager,
+               std::function<double()> gpu_memory_sampler)
+    : config_(config),
+      model_manager_(model_manager),
+      backend_manager_(backend_manager),
+      gpu_memory_sampler_(std::move(gpu_memory_sampler)) {
 
     int max = config_->max_loaded_models();
     if (max == -1) {
@@ -216,6 +231,174 @@ std::unique_ptr<WrappedServer> Router::create_backend_server(const ModelInfo& mo
     return new_server;
 }
 
+static bool starts_with(const std::string& value, const std::string& prefix) {
+    return value.rfind(prefix, 0) == 0;
+}
+
+bool Router::should_enforce_gpu_memory_capacity(const ModelInfo& model_info,
+                                                const RecipeOptions& options) const {
+    if (model_info.recipe == "llamacpp") {
+        std::string backend = options.get_option("llamacpp_backend");
+        return backend != "cpu";
+    }
+    if (model_info.recipe == "sd-cpp") {
+        std::string backend = options.get_option("sd-cpp_backend");
+        return backend == "vulkan" || starts_with(backend, "rocm");
+    }
+    if (model_info.recipe == "whispercpp") {
+        std::string backend = options.get_option("whispercpp_backend");
+        return backend == "vulkan";
+    }
+    return (model_info.device & DEVICE_GPU) != 0;
+}
+
+double Router::sample_total_gpu_occupancy_gb() const {
+    if (!gpu_memory_sampler_) return -1.0;
+    try {
+        return gpu_memory_sampler_();
+    } catch (const std::exception& e) {
+        LOG(WARNING, "Router") << "Failed to sample GPU memory occupancy: " << e.what() << std::endl;
+        return -1.0;
+    }
+}
+
+double Router::get_lemonade_gpu_occupancy_gb() const {
+    double total = 0.0;
+    for (const auto& server : loaded_servers_) {
+        if (server->get_device_type() & DEVICE_GPU) {
+            total += std::max(0.0, server->get_gpu_memory_occupancy_gb());
+        }
+    }
+    return total;
+}
+
+static double gpu_capacity_from_device_json(const json& device, bool include_virtual_memory) {
+    double vram_gb = device.value("vram_gb", 0.0);
+    double virtual_mem_gb = device.value("virtual_mem_gb", 0.0);
+    if (include_virtual_memory) {
+        return vram_gb + virtual_mem_gb;
+    }
+    return vram_gb > 0.0 ? vram_gb : virtual_mem_gb;
+}
+
+double Router::get_total_gpu_capacity_gb() const {
+    json system_info = SystemInfoCache::get_system_info_with_cache();
+    if (!system_info.contains("devices") || !system_info["devices"].is_object()) {
+        return 0.0;
+    }
+
+    const json& devices = system_info["devices"];
+    double largest_capacity_gb = 0.0;
+
+    auto accumulate_gpu_capacity = [&](const std::string& key, bool include_virtual_memory) {
+        if (!devices.contains(key)) return;
+        json dev_list = devices[key].is_array() ? devices[key] : json::array({devices[key]});
+        for (const auto& device : dev_list) {
+            if (!device.is_object() || !device.value("available", false)) continue;
+            largest_capacity_gb = std::max(largest_capacity_gb,
+                                           gpu_capacity_from_device_json(device, include_virtual_memory));
+        }
+    };
+
+    accumulate_gpu_capacity("amd_gpu", config_->enable_dgpu_gtt());
+    accumulate_gpu_capacity("nvidia_gpu", config_->enable_dgpu_gtt());
+    accumulate_gpu_capacity("metal", true);
+
+    return largest_capacity_gb;
+}
+
+double Router::estimate_gpu_memory_occupancy_gb(const ModelInfo& model_info,
+                                                const RecipeOptions& options) const {
+    const double model_size_gb = std::max(0.0, model_info.size);
+    if (model_size_gb <= 0.0) {
+        return 1.0;
+    }
+
+    if (model_info.recipe == "llamacpp") {
+        const std::string path = model_info.resolved_path();
+        std::error_code ec;
+        if (!path.empty() && fs::exists(fs::u8path(path), ec)) {
+            auto metadata = read_gguf_metadata(path);
+            if (metadata && metadata->block_count > 0) {
+                int64_t ctx_size = options.get_option("ctx_size").get<int64_t>();
+                if (model_info.type == ModelType::EMBEDDING && ctx_size < 8192) {
+                    ctx_size = 8192;
+                }
+                const int64_t head_count = metadata->head_count > 0 ? metadata->head_count : 1;
+                const int64_t kv_heads = metadata->head_count_kv > 0 ? metadata->head_count_kv : head_count;
+                const int64_t key_length = metadata->key_length > 0
+                    ? metadata->key_length
+                    : (metadata->embedding_length > 0 ? metadata->embedding_length / head_count : 128);
+                const int64_t value_length = metadata->value_length > 0 ? metadata->value_length : key_length;
+                const double kv_bytes =
+                    static_cast<double>(ctx_size) *
+                    static_cast<double>(metadata->block_count) *
+                    static_cast<double>(kv_heads) *
+                    static_cast<double>(key_length + value_length) *
+                    2.0;
+                const double kv_gb = kv_bytes / (1024.0 * 1024.0 * 1024.0);
+                return model_size_gb * 1.05 + kv_gb + 1.0;
+            }
+        }
+    }
+
+    return model_size_gb * 1.20 + 1.0;
+}
+
+void Router::enforce_gpu_memory_capacity(const ModelInfo& model_info,
+                                         const RecipeOptions& options) {
+    if (!should_enforce_gpu_memory_capacity(model_info, options)) return;
+
+    const double total_capacity_gb = get_total_gpu_capacity_gb();
+    if (total_capacity_gb <= 0.0) {
+        LOG(DEBUG, "Router") << "Skipping GPU memory capacity check: total GPU capacity unavailable" << std::endl;
+        return;
+    }
+
+    const double total_gpu_occupancy_gb = sample_total_gpu_occupancy_gb();
+    const double lemonade_occupancy_gb = get_lemonade_gpu_occupancy_gb();
+    const double free_capacity_gb = total_gpu_occupancy_gb >= 0.0
+        ? std::max(0.0, total_capacity_gb - total_gpu_occupancy_gb)
+        : std::max(0.0, total_capacity_gb - lemonade_occupancy_gb);
+
+    GpuMemoryAdmissionInputs inputs;
+    inputs.configured_capacity_gb = config_->max_gpu_memory_occupancy_gb();
+    inputs.total_capacity_gb = total_capacity_gb;
+    inputs.free_capacity_gb = free_capacity_gb;
+    inputs.lemonade_occupancy_gb = lemonade_occupancy_gb;
+    inputs.candidate_occupancy_gb = estimate_gpu_memory_occupancy_gb(model_info, options);
+    for (const auto& server : loaded_servers_) {
+        if (server->get_device_type() & DEVICE_GPU) {
+            inputs.residents.push_back({
+                server->get_model_name(),
+                server->get_gpu_memory_occupancy_gb()
+            });
+        }
+    }
+
+    GpuMemoryAdmissionPlan plan = plan_gpu_memory_admission(inputs);
+    if (!plan.can_fit) {
+        throw std::runtime_error(plan.rejection_reason);
+    }
+
+    for (const auto& model_to_evict : plan.models_to_evict) {
+        WrappedServer* server = find_server_by_model_name(model_to_evict);
+        if (server) {
+            LOG(INFO, "Router") << "GPU memory budget requires evicting "
+                                << model_to_evict
+                                << " (" << server->get_gpu_memory_occupancy_gb() << " GB)"
+                                << std::endl;
+            evict_server(server);
+        }
+    }
+
+    if (!plan.models_to_evict.empty()) {
+        LOG(INFO, "Router") << "GPU memory budget projected occupancy after eviction: "
+                            << plan.projected_occupancy_gb << " GB / "
+                            << plan.effective_capacity_gb << " GB" << std::endl;
+    }
+}
+
 void Router::load_model(const std::string& model_name,
                        const ModelInfo& model_info,
                        RecipeOptions options,
@@ -249,14 +432,16 @@ void Router::load_model(const std::string& model_name,
             << ", device: " << device_type_to_string(model_info.device) << ")" << std::endl;
 
     try {
+        WrappedServer* reload_existing = nullptr;
+
         // Check if model is already loaded
         WrappedServer* existing = find_server_by_model_name(canonical_model_name);
         if (existing) {
             if (allow_reload_on_option_change &&
                 existing->get_recipe_options().to_json() != effective_options.to_json()) {
                 LOG(INFO, "Router") << "Options changed, reloading model: " << canonical_model_name << std::endl;
-                evict_server(existing);
-                // Fall through to create and load with new options
+                reload_existing = existing;
+                // Fall through to admission checks before unloading the existing instance.
             } else {
                 LOG(INFO, "Router") << "Model already loaded, updating access time" << std::endl;
                 existing->update_access_time();
@@ -312,6 +497,15 @@ void Router::load_model(const std::string& model_name,
             }
         }
 
+        enforce_gpu_memory_capacity(model_info, effective_options);
+
+        if (reload_existing) {
+            WrappedServer* server_to_reload = find_server_by_model_name(canonical_model_name);
+            if (server_to_reload) {
+                evict_server(server_to_reload);
+            }
+        }
+
         // LRU EVICTION CHECK (from spec: Least Recently Used Cache)
         // Skip eviction if unlimited (-1)
         int current_count = count_servers_by_type(model_type);
@@ -333,6 +527,9 @@ void Router::load_model(const std::string& model_name,
         new_server->update_access_time();
 
         // CRITICAL: Release lock before slow backend startup
+        const double predicted_gpu_occupancy_gb =
+            estimate_gpu_memory_occupancy_gb(model_info, effective_options);
+        const double gpu_occupancy_before_load = sample_total_gpu_occupancy_gb();
         lock.unlock();
 
         // Load the backend (this can take 30-60 seconds)
@@ -360,6 +557,16 @@ void Router::load_model(const std::string& model_name,
             new_server->update_access_time();
 
             // Add to loaded servers
+            double gpu_occupancy_gb = predicted_gpu_occupancy_gb;
+            const double gpu_occupancy_after_load = sample_total_gpu_occupancy_gb();
+            if (gpu_occupancy_before_load >= 0.0 &&
+                gpu_occupancy_after_load >= gpu_occupancy_before_load) {
+                double measured_delta = gpu_occupancy_after_load - gpu_occupancy_before_load;
+                if (measured_delta > 0.0) {
+                    gpu_occupancy_gb = measured_delta;
+                }
+            }
+            new_server->set_gpu_memory_occupancy_gb(gpu_occupancy_gb);
             loaded_servers_.push_back(std::move(new_server));
 
             is_loading_ = false;
@@ -395,6 +602,7 @@ void Router::load_model(const std::string& model_name,
             std::unique_ptr<WrappedServer> retry_server = create_backend_server(model_info);
             retry_server->set_model_metadata(canonical_model_name, model_info.checkpoint(), model_type, device_type, effective_options);
             retry_server->update_access_time();
+            const double retry_gpu_occupancy_before_load = sample_total_gpu_occupancy_gb();
 
             lock.unlock();
 
@@ -404,6 +612,16 @@ void Router::load_model(const std::string& model_name,
 
                 lock.lock();
 
+                double retry_gpu_occupancy_gb = predicted_gpu_occupancy_gb;
+                const double retry_gpu_occupancy_after_load = sample_total_gpu_occupancy_gb();
+                if (retry_gpu_occupancy_before_load >= 0.0 &&
+                    retry_gpu_occupancy_after_load >= retry_gpu_occupancy_before_load) {
+                    double measured_delta = retry_gpu_occupancy_after_load - retry_gpu_occupancy_before_load;
+                    if (measured_delta > 0.0) {
+                        retry_gpu_occupancy_gb = measured_delta;
+                    }
+                }
+                retry_server->set_gpu_memory_occupancy_gb(retry_gpu_occupancy_gb);
                 loaded_servers_.push_back(std::move(retry_server));
                 is_loading_ = false;
                 load_cv_.notify_all();
@@ -479,6 +697,7 @@ json Router::get_all_loaded_models() const {
         model_info["device"] = device_type_to_string(server->get_device_type());
         model_info["backend_url"] = server->get_address();  // For debugging port issues
         model_info["pid"] = server->get_process_id();
+        model_info["gpu_memory_occupancy_gb"] = server->get_gpu_memory_occupancy_gb();
         RecipeOptions recipe_options =  server->get_recipe_options();
         model_info["recipe"] = recipe_options.get_recipe();
         model_info["recipe_options"] = recipe_options.to_json();

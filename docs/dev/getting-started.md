@@ -566,6 +566,7 @@ A pure HTTP server that:
 - Separate LRU caches for LLM, embedding, reranking, and audio model types
 - NPU exclusivity: only one model can use NPU at a time
 - Configurable limits via `--max-loaded-models N` (default: 1)
+- Configurable GPU memory budget via `max_gpu_memory_occupancy_gb` (default: auto-detected capacity)
 - Automatic eviction of least-recently-used models when limits reached
 - Thread-safe model loading with serialization to prevent races
 - Protection against evicting models actively serving inference requests
@@ -645,6 +646,7 @@ Accepts a JSON object with one or more keys to update atomically. Returns `{"sta
 | Key | Type |
 |-----|------|
 | `max_loaded_models` | int (-1 or positive) |
+| `max_gpu_memory_occupancy_gb` | number (-1 or positive) |
 | `ctx_size` | int (positive) |
 | `llamacpp_backend` | string |
 | `llamacpp_args` | string |

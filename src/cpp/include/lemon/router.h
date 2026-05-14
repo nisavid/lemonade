@@ -4,9 +4,11 @@
 #include <memory>
 #include <mutex>
 #include <condition_variable>
+#include <functional>
 #include <vector>
 #include <nlohmann/json.hpp>
 #include <httplib.h>
+#include "gpu_memory_planner.h"
 #include "wrapped_server.h"
 #include "model_manager.h"
 #include "backend_manager.h"
@@ -24,7 +26,8 @@ class Router {
 public:
     Router(RuntimeConfig* config,
            ModelManager* model_manager,
-           BackendManager* backend_manager);
+           BackendManager* backend_manager,
+           std::function<double()> gpu_memory_sampler = nullptr);
 
     ~Router();
 
@@ -108,6 +111,7 @@ private:
     RuntimeConfig* config_;
     ModelManager* model_manager_;  // Non-owning pointer to ModelManager
     BackendManager* backend_manager_;  // Non-owning pointer to BackendManager
+    std::function<double()> gpu_memory_sampler_;
 
     // Concurrency control for load operations
     mutable std::mutex load_mutex_;              // Protects loading state and loaded_servers_
@@ -128,6 +132,15 @@ private:
     void evict_all_servers();
     std::unique_ptr<WrappedServer> create_backend_server(const ModelInfo& model_info);
     std::string resolve_model_name(const std::string& model_name) const;
+    double estimate_gpu_memory_occupancy_gb(const ModelInfo& model_info,
+                                            const RecipeOptions& options) const;
+    double get_total_gpu_capacity_gb() const;
+    double sample_total_gpu_occupancy_gb() const;
+    double get_lemonade_gpu_occupancy_gb() const;
+    bool should_enforce_gpu_memory_capacity(const ModelInfo& model_info,
+                                            const RecipeOptions& options) const;
+    void enforce_gpu_memory_capacity(const ModelInfo& model_info,
+                                     const RecipeOptions& options);
 
     // Generic inference wrapper that handles locking and busy state
     template<typename Func>

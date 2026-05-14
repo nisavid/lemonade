@@ -9,7 +9,9 @@
 #include <vector>
 
 using lemon::ModelType;
+using lemon::DEVICE_GPU;
 using lemon::get_model_type_from_labels;
+using lemon::get_device_type_from_recipe;
 using lemon::model_type_to_string;
 
 struct Case {
@@ -64,5 +66,12 @@ int main() {
     }
 
     std::printf("\n%d/%zu cases passed\n", static_cast<int>(cases.size() - failures), cases.size());
+    if (get_device_type_from_recipe("vllm") != DEVICE_GPU) {
+        std::printf("[FAIL] vllm device type should be GPU\n");
+        ++failures;
+    } else {
+        std::printf("[PASS] vllm device type is GPU\n");
+    }
+
     return failures == 0 ? 0 : 1;
 }

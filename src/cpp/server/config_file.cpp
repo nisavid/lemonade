@@ -159,6 +159,7 @@ static const EnvMapping env_mappings[] = {
     {"LEMONADE_LOG_LEVEL",               "log_level",                nullptr},
     {"LEMONADE_GLOBAL_TIMEOUT",          "global_timeout",           nullptr},
     {"LEMONADE_MAX_LOADED_MODELS",       "max_loaded_models",        nullptr},
+    {"LEMONADE_MAX_GPU_MEMORY_OCCUPANCY_GB", "max_gpu_memory_occupancy_gb", nullptr},
     {"LEMONADE_NO_BROADCAST",            "no_broadcast",             nullptr},
     {"LEMONADE_EXTRA_MODELS_DIR",        "extra_models_dir",         nullptr},
     {"LEMONADE_CTX_SIZE",                "ctx_size",                 nullptr},

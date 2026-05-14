@@ -155,6 +155,7 @@ Accepts a JSON object with one or more keys to update atomically. Returns `{"sta
 | Key | Type |
 |-----|------|
 | `max_loaded_models` | int (-1 or positive) |
+| `max_gpu_memory_occupancy_gb` | number (-1 or positive) |
 | `ctx_size` | int (positive) |
 | `llamacpp_backend` | string |
 | `llamacpp_args` | string |

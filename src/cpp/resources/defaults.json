@@ -6,6 +6,7 @@
   "log_level": "info",
   "global_timeout": 300,
   "max_loaded_models": 1,
+  "max_gpu_memory_occupancy_gb": -1.0,
   "no_broadcast": false,
   "extra_models_dir": "",
   "models_dir": "auto",

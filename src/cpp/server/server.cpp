@@ -139,7 +139,8 @@ Server::Server(std::shared_ptr<RuntimeConfig> config, const std::string& cache_d
 
     router_ = std::make_unique<Router>(config_.get(),
                                        model_manager_.get(),
-                                       backend_manager_.get());
+                                       backend_manager_.get(),
+                                       [this]() { return get_vram_usage(); });
 
     LOG(DEBUG, "Server") << "Debug logging enabled - subprocess output will be visible" << std::endl;
 

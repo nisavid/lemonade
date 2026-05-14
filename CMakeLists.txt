@@ -558,6 +558,8 @@ include_directories(
 set(SOURCES_CORE
     src/cpp/server/server.cpp
     src/cpp/server/router.cpp
+    src/cpp/server/gpu_memory_planner.cpp
+    src/cpp/server/gguf_metadata.cpp
     src/cpp/server/cli_parser.cpp
     src/cpp/server/config_file.cpp
     src/cpp/server/model_manager.cpp

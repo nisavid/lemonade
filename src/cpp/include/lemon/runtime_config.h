@@ -29,6 +29,7 @@ public:
     bool no_broadcast() const;
     long global_timeout() const;
     int max_loaded_models() const;
+    double max_gpu_memory_occupancy_gb() const;
     std::string models_dir() const;
     int ctx_size() const;
 

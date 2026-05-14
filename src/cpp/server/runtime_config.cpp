@@ -162,6 +162,11 @@ int RuntimeConfig::max_loaded_models() const {
     return config_["max_loaded_models"].get<int>();
 }
 
+double RuntimeConfig::max_gpu_memory_occupancy_gb() const {
+    std::shared_lock lock(mutex_);
+    return config_["max_gpu_memory_occupancy_gb"].get<double>();
+}
+
 std::string RuntimeConfig::models_dir() const {
     std::shared_lock lock(mutex_);
     return config_["models_dir"].get<std::string>();
@@ -349,6 +354,15 @@ void RuntimeConfig::validate(const std::string& key, const json& value) const {
         if (m < -1 || m == 0) {
             throw std::invalid_argument(
                 "'max_loaded_models' must be -1 (unlimited) or a positive integer");
+        }
+    } else if (key == "max_gpu_memory_occupancy_gb") {
+        if (!value.is_number()) {
+            throw std::invalid_argument("'max_gpu_memory_occupancy_gb' must be a number");
+        }
+        double gb = value.get<double>();
+        if (gb == 0.0 || (gb < 0.0 && gb != -1.0)) {
+            throw std::invalid_argument(
+                "'max_gpu_memory_occupancy_gb' must be -1 (auto) or a positive number");
         }
     } else if (key == "ctx_size") {
         if (!value.is_number_integer()) {
