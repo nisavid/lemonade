@@ -10,6 +10,10 @@
 #include <memory>
 #include <atomic>
 #include <chrono>
+#include <map>
+#include <mutex>
+#include <set>
+#include <vector>
 #include <httplib.h>
 #include "runtime_config.h"
 #include "router.h"
@@ -83,6 +87,9 @@ private:
     void handle_responses(const httplib::Request& req, httplib::Response& res);
     void handle_pull(const httplib::Request& req, httplib::Response& res);
     void handle_pull_variants(const httplib::Request& req, httplib::Response& res);
+    void handle_pins(const httplib::Request& req, httplib::Response& res);
+    void handle_pin_model(const httplib::Request& req, httplib::Response& res);
+    void handle_unpin_model(const httplib::Request& req, httplib::Response& res);
     void handle_load(const httplib::Request& req, httplib::Response& res);
     void handle_unload(const httplib::Request& req, httplib::Response& res);
     void handle_delete(const httplib::Request& req, httplib::Response& res);
@@ -137,6 +144,17 @@ private:
 
     // Warm model list cache in the background after startup dependencies are initialized
     void start_model_cache_warmup();
+    void start_pinned_model_loading();
+    void load_pinned_model(const std::string& model_name);
+    void set_pin_load_error(const std::string& model_name, const std::string& error);
+    std::string get_pin_load_error(const std::string& model_name);
+    void clear_pin_load_error(const std::string& model_name);
+    void mark_model_loading(const std::string& model_name);
+    void clear_model_loading(const std::string& model_name);
+    bool is_model_loading(const std::string& model_name);
+    void persist_config_snapshot();
+    void save_pinned_models(const std::vector<std::string>& pinned_models);
+    bool remove_model_pin(const std::string& model_name);
 
     // Helper function to generate detailed model error responses (not found, not supported, load failure)
     nlohmann::json create_model_error(const std::string& requested_model, const std::string& exception_msg);
@@ -153,6 +171,7 @@ private:
     std::thread http_v4_thread_;
     std::thread http_v6_thread_;
     std::thread model_cache_warmup_thread_;
+    std::thread pinned_model_loading_thread_;
 
 
     std::unique_ptr<httplib::Server> http_server_;
@@ -170,6 +189,10 @@ private:
     std::string api_key_;
     std::string admin_api_key_;
     NetworkBeacon udp_beacon_;
+    std::mutex pin_errors_mutex_;
+    std::map<std::string, std::string> pin_load_errors_;
+    std::mutex loading_models_mutex_;
+    std::set<std::string> loading_models_;
 
     // CPU usage tracking
 #if defined(__linux__) || defined(_WIN32)

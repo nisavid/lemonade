@@ -12,6 +12,7 @@
 #include "lemon/runtime_config.h"
 #include "lemon/system_info.h"
 #include "lemon/version.h"
+#include <cctype>
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -53,6 +54,33 @@ namespace fs = std::filesystem;
 namespace lemon {
 
 namespace {
+
+int hex_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+std::string url_decode_path_segment(const std::string& value) {
+    std::string result;
+    result.reserve(value.size());
+
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == '%' && i + 2 < value.size()) {
+            int high = hex_value(value[i + 1]);
+            int low = hex_value(value[i + 2]);
+            if (high >= 0 && low >= 0) {
+                result.push_back(static_cast<char>((high << 4) | low));
+                i += 2;
+                continue;
+            }
+        }
+        result.push_back(value[i]);
+    }
+
+    return result;
+}
 
 bool should_disable_thinking(const json& request_json) {
     // enable_thinking takes precedence over thinking when both are present.
@@ -164,6 +192,7 @@ Server::Server(std::shared_ptr<RuntimeConfig> config, const std::string& cache_d
         config_->websocket_port());
 
     start_model_cache_warmup();
+    start_pinned_model_loading();
 }
 
 void Server::start_model_cache_warmup() {
@@ -182,6 +211,140 @@ void Server::start_model_cache_warmup() {
             LOG(WARNING, "Server") << "Model list cache warmup failed with unknown error" << std::endl;
         }
     });
+}
+
+void Server::start_pinned_model_loading() {
+    if (pinned_model_loading_thread_.joinable()) {
+        return;
+    }
+
+    auto pinned_models = config_->pinned_models();
+    if (pinned_models.empty()) {
+        return;
+    }
+
+    pinned_model_loading_thread_ = std::thread([this, pinned_models]() {
+        for (const auto& model_name : pinned_models) {
+            if (should_shutdown()) {
+                return;
+            }
+
+            try {
+                load_pinned_model(model_name);
+            } catch (const std::exception& e) {
+                set_pin_load_error(model_name, e.what());
+                LOG(WARNING, "Server") << "Failed to load pinned model '"
+                                       << model_name << "': " << e.what() << std::endl;
+            } catch (...) {
+                set_pin_load_error(model_name, "Unknown error");
+                LOG(WARNING, "Server") << "Failed to load pinned model '"
+                                       << model_name << "' with unknown error" << std::endl;
+            }
+        }
+    });
+}
+
+void Server::load_pinned_model(const std::string& model_name) {
+    if (!model_manager_->model_exists(model_name)) {
+        throw std::runtime_error("Pinned model is not available: " + model_name);
+    }
+
+    auto info = model_manager_->get_model_info(model_name);
+    const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+
+    if (info.recipe == "collection") {
+        throw std::runtime_error("Pinned model cannot be a collection: " + model_name);
+    }
+
+    if (!info.downloaded) {
+        throw std::runtime_error("Pinned model is not downloaded: " + model_name);
+    }
+
+    RecipeOptions options(info.recipe, json::object());
+    router_->load_model(canonical_model_name, info, options, true,
+                        /*allow_reload_on_option_change=*/false,
+                        /*pin_model=*/true);
+    clear_pin_load_error(canonical_model_name);
+}
+
+void Server::set_pin_load_error(const std::string& model_name, const std::string& error) {
+    std::lock_guard<std::mutex> lock(pin_errors_mutex_);
+    const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+    pin_load_errors_[canonical_model_name] = error;
+}
+
+std::string Server::get_pin_load_error(const std::string& model_name) {
+    std::lock_guard<std::mutex> lock(pin_errors_mutex_);
+    const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+    auto it = pin_load_errors_.find(canonical_model_name);
+    return it != pin_load_errors_.end() ? it->second : "";
+}
+
+void Server::clear_pin_load_error(const std::string& model_name) {
+    std::lock_guard<std::mutex> lock(pin_errors_mutex_);
+    const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+    pin_load_errors_.erase(canonical_model_name);
+}
+
+void Server::mark_model_loading(const std::string& model_name) {
+    const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+    std::lock_guard<std::mutex> lock(loading_models_mutex_);
+    loading_models_.insert(canonical_model_name);
+}
+
+void Server::clear_model_loading(const std::string& model_name) {
+    const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+    std::lock_guard<std::mutex> lock(loading_models_mutex_);
+    loading_models_.erase(canonical_model_name);
+}
+
+bool Server::is_model_loading(const std::string& model_name) {
+    const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+    std::lock_guard<std::mutex> lock(loading_models_mutex_);
+    return loading_models_.find(canonical_model_name) != loading_models_.end();
+}
+
+void Server::persist_config_snapshot() {
+    if (cache_dir_.empty()) {
+        return;
+    }
+
+    try {
+        ConfigFile::save(cache_dir_, config_->snapshot());
+    } catch (const std::exception& e) {
+        LOG(WARNING, "Server") << "Failed to persist config.json: " << e.what() << std::endl;
+    }
+}
+
+void Server::save_pinned_models(const std::vector<std::string>& pinned_models) {
+    json pins = json::array();
+    for (const auto& model_name : pinned_models) {
+        pins.push_back(model_name);
+    }
+
+    config_->set({{"pinned_models", pins}}, [this](const json& applied) {
+        apply_config_side_effects(applied);
+    });
+    persist_config_snapshot();
+}
+
+bool Server::remove_model_pin(const std::string& model_name) {
+    const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+    auto pinned_models = config_->pinned_models();
+    auto original_size = pinned_models.size();
+
+    pinned_models.erase(
+        std::remove(pinned_models.begin(), pinned_models.end(), canonical_model_name),
+        pinned_models.end());
+
+    if (pinned_models.size() == original_size) {
+        return false;
+    }
+
+    save_pinned_models(pinned_models);
+    router_->set_model_pinned(canonical_model_name, false);
+    clear_pin_load_error(canonical_model_name);
+    return true;
 }
 
 void Server::setup_http_servers() {
@@ -425,6 +588,36 @@ void Server::setup_routes(httplib::Server &web_server) {
 
     register_post("unload", [this](const httplib::Request& req, httplib::Response& res) {
         handle_unload(req, res);
+    });
+
+    register_get("pins", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_pins(req, res);
+    });
+
+    web_server.Post("/api/v0/pins", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_pin_model(req, res);
+    });
+    web_server.Post("/api/v1/pins", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_pin_model(req, res);
+    });
+    web_server.Post("/v0/pins", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_pin_model(req, res);
+    });
+    web_server.Post("/v1/pins", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_pin_model(req, res);
+    });
+
+    web_server.Delete(R"(/api/v0/pins/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_unpin_model(req, res);
+    });
+    web_server.Delete(R"(/api/v1/pins/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_unpin_model(req, res);
+    });
+    web_server.Delete(R"(/v0/pins/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_unpin_model(req, res);
+    });
+    web_server.Delete(R"(/v1/pins/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_unpin_model(req, res);
     });
 
     register_post("delete", [this](const httplib::Request& req, httplib::Response& res) {
@@ -1101,12 +1294,15 @@ void Server::stop() {
         http_server_v6_->stop();
         http_server_->stop();
         running_ = false;
-        shutdown_requested_ = false;  // Reset for potential future use
 
         // Stop WebSocket server
         if (websocket_server_) {
             LOG(INFO, "Server") << "Stopping WebSocket server..." << std::endl;
             websocket_server_->stop();
+        }
+
+        if (pinned_model_loading_thread_.joinable()) {
+            pinned_model_loading_thread_.join();
         }
 
         // Explicitly clean up router (unload models, stop backend servers)
@@ -1124,6 +1320,12 @@ void Server::stop() {
     if (model_cache_warmup_thread_.joinable()) {
         model_cache_warmup_thread_.join();
     }
+
+    if (pinned_model_loading_thread_.joinable()) {
+        pinned_model_loading_thread_.join();
+    }
+
+    shutdown_requested_ = false;  // Reset for potential future use
 }
 
 // Generates an actionable error message for model loading failures.
@@ -2893,12 +3095,147 @@ void Server::handle_pull_variants(const httplib::Request& req, httplib::Response
     }
 }
 
+void Server::handle_pins(const httplib::Request& req, httplib::Response& res) {
+    (void)req;
+
+    try {
+        json response = {{"data", json::array()}};
+
+        for (const auto& model_name : config_->pinned_models()) {
+            const std::string public_model_name = model_manager_->get_public_model_name(model_name);
+            const std::string load_error = get_pin_load_error(model_name);
+            response["data"].push_back({
+                {"model_name", public_model_name},
+                {"loaded", router_->is_model_loaded(model_name)},
+                {"load_error", load_error.empty() ? json(nullptr) : json(load_error)}
+            });
+        }
+
+        res.set_content(response.dump(), "application/json");
+    } catch (const std::exception& e) {
+        LOG(ERROR, "Server") << "ERROR in handle_pins: " << e.what() << std::endl;
+        res.status = 500;
+        nlohmann::json error = {{"error", e.what()}};
+        res.set_content(error.dump(), "application/json");
+    }
+}
+
+void Server::handle_pin_model(const httplib::Request& req, httplib::Response& res) {
+    try {
+        auto request_json = nlohmann::json::parse(req.body);
+        std::string model_name;
+        if (request_json.contains("model_name") && request_json["model_name"].is_string()) {
+            model_name = request_json["model_name"].get<std::string>();
+        } else if (request_json.contains("model") && request_json["model"].is_string()) {
+            model_name = request_json["model"].get<std::string>();
+        } else {
+            res.status = 400;
+            nlohmann::json error = {{"error", "Missing required string field 'model_name'"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+
+        if (!model_manager_->model_exists(model_name)) {
+            res.status = 404;
+            auto error_response = create_model_error(model_name, "Model not found");
+            res.set_content(error_response.dump(), "application/json");
+            return;
+        }
+
+        auto info = model_manager_->get_model_info(model_name);
+        if (info.recipe == "collection") {
+            res.status = 400;
+            nlohmann::json error = {{"error", "Collections cannot be pinned. Pin loaded component models instead."}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+
+        if (!router_->is_model_loaded(model_name) && !is_model_loading(model_name)) {
+            res.status = 400;
+            nlohmann::json error = {{"error", "Only currently loaded or loading models can be pinned"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+
+        const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+        auto pinned_models = config_->pinned_models();
+        if (std::find(pinned_models.begin(), pinned_models.end(), canonical_model_name)
+            == pinned_models.end()) {
+            pinned_models.push_back(canonical_model_name);
+            save_pinned_models(pinned_models);
+        }
+
+        router_->set_model_pinned(canonical_model_name, true);
+        clear_pin_load_error(canonical_model_name);
+
+        nlohmann::json response = {
+            {"status", "success"},
+            {"model_name", model_manager_->get_public_model_name(canonical_model_name)}
+        };
+        res.set_content(response.dump(), "application/json");
+    } catch (const nlohmann::json::parse_error&) {
+        res.status = 400;
+        nlohmann::json error = {{"error", "Invalid JSON in request body"}};
+        res.set_content(error.dump(), "application/json");
+    } catch (const std::exception& e) {
+        LOG(ERROR, "Server") << "ERROR in handle_pin_model: " << e.what() << std::endl;
+        res.status = 500;
+        nlohmann::json error = {{"error", e.what()}};
+        res.set_content(error.dump(), "application/json");
+    }
+}
+
+void Server::handle_unpin_model(const httplib::Request& req, httplib::Response& res) {
+    try {
+        std::string model_name = req.matches.size() > 1
+            ? url_decode_path_segment(req.matches[1].str())
+            : "";
+
+        if (model_name.empty()) {
+            res.status = 400;
+            nlohmann::json error = {{"error", "Missing model name"}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+
+        const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+        remove_model_pin(canonical_model_name);
+
+        nlohmann::json response = {
+            {"status", "success"},
+            {"model_name", model_manager_->get_public_model_name(canonical_model_name)}
+        };
+        res.set_content(response.dump(), "application/json");
+    } catch (const std::exception& e) {
+        LOG(ERROR, "Server") << "ERROR in handle_unpin_model: " << e.what() << std::endl;
+        res.status = 500;
+        nlohmann::json error = {{"error", e.what()}};
+        res.set_content(error.dump(), "application/json");
+    }
+}
+
 void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
     auto thread_id = std::this_thread::get_id();
     LOG(DEBUG, "Server") << "===== LOAD ENDPOINT ENTERED (Thread: " << thread_id << ") =====" << std::endl;
 
     // Declare model_name outside try block so it's available in catch block
     std::string model_name;
+    std::string loading_model_name;
+    auto finish_loading = [&]() {
+        if (!loading_model_name.empty()) {
+            clear_model_loading(loading_model_name);
+            loading_model_name.clear();
+        }
+    };
+    auto apply_config_pin_if_needed = [this](const std::string& loaded_model_name) {
+        const std::string canonical_model_name = model_manager_->resolve_model_name(loaded_model_name);
+        auto pinned_models = config_->pinned_models();
+        if (std::find(pinned_models.begin(), pinned_models.end(), canonical_model_name)
+            != pinned_models.end()) {
+            router_->set_model_pinned(canonical_model_name, true);
+            clear_pin_load_error(canonical_model_name);
+        }
+    };
 
     try {
         auto request_json = nlohmann::json::parse(req.body);
@@ -2929,6 +3266,11 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
             model_manager_->save_model_options(info);
         }
 
+        if (info.recipe != "collection") {
+            loading_model_name = model_manager_->resolve_model_name(model_name);
+            mark_model_loading(loading_model_name);
+        }
+
         // Download model if needed (first-time use)
         if (!info.downloaded) {
             LOG(INFO, "Server") << "Model not downloaded, downloading..." << std::endl;
@@ -2949,15 +3291,28 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
                     continue;
                 }
                 auto comp_info = model_manager_->get_model_info(component);
+                mark_model_loading(component);
                 if (!comp_info.downloaded) {
-                    LOG(INFO, "Server") << "Downloading component: " << component << std::endl;
-                    model_manager_->download_registered_model(comp_info);
-                    comp_info = model_manager_->get_model_info(component);
+                    try {
+                        LOG(INFO, "Server") << "Downloading component: " << component << std::endl;
+                        model_manager_->download_registered_model(comp_info);
+                        comp_info = model_manager_->get_model_info(component);
+                    } catch (...) {
+                        clear_model_loading(component);
+                        throw;
+                    }
                 }
                 LOG(INFO, "Server") << "Loading component: " << component << std::endl;
                 RecipeOptions comp_options = RecipeOptions(comp_info.recipe, request_json);
-                router_->load_model(component, comp_info, comp_options, true,
-                                    /*allow_reload_on_option_change=*/true);
+                try {
+                    router_->load_model(component, comp_info, comp_options, true,
+                                        /*allow_reload_on_option_change=*/true);
+                    apply_config_pin_if_needed(component);
+                    clear_model_loading(component);
+                } catch (...) {
+                    clear_model_loading(component);
+                    throw;
+                }
             }
 
             nlohmann::json response = {
@@ -2972,6 +3327,8 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
             // differ)
             router_->load_model(model_name, info, options, true,
                                 /*allow_reload_on_option_change=*/true);
+            apply_config_pin_if_needed(model_name);
+            finish_loading();
 
             // Return success response
             nlohmann::json response = {
@@ -2984,6 +3341,15 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
         }
 
     } catch (const std::exception& e) {
+        finish_loading();
+        if (!model_name.empty()) {
+            const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+            auto pinned_models = config_->pinned_models();
+            if (std::find(pinned_models.begin(), pinned_models.end(), canonical_model_name)
+                != pinned_models.end()) {
+                set_pin_load_error(canonical_model_name, e.what());
+            }
+        }
         LOG(ERROR, "Server") << "Failed to load model: " << e.what() << std::endl;
 
         // Use consistent error format
@@ -3069,6 +3435,9 @@ void Server::handle_delete(const httplib::Request& req, httplib::Response& res) 
         std::string model_name = request_json.contains("model") ?
             request_json["model"].get<std::string>() :
             request_json["model_name"].get<std::string>();
+        std::string pin_model_name = model_manager_->model_exists(model_name)
+            ? model_manager_->resolve_model_name(model_name)
+            : model_name;
 
         LOG(INFO, "Server") << "Deleting model: " << model_name << std::endl;
 
@@ -3088,6 +3457,7 @@ void Server::handle_delete(const httplib::Request& req, httplib::Response& res) 
         for (int attempt = 0; attempt <= max_retries; ++attempt) {
             try {
                 model_manager_->delete_model(model_name);
+                remove_model_pin(pin_model_name);
 
                 // Success - send response and return
                 nlohmann::json response = {

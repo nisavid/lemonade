@@ -17,6 +17,7 @@ This file captures implementation landmarks that are useful before changing Lemo
 - Core API endpoints are registered under `/api/v0/`, `/api/v1/`, `/v0/`, and `/v1/`.
 - Ollama-compatible routes live under `/api/` without the Lemonade/OpenAI version prefix.
 - Internal endpoints live under `/internal/`: `shutdown`, `set`, `config`, and `cleanup-cache`. They are loopback-restricted admin/local lifecycle, configuration, and cache-management APIs, not OpenAI-compatible routes.
+- Model pin management belongs on narrow Lemonade API routes under the normal version prefixes, not on generic `/internal/set` config editing. The first route shape is `GET /pins`, `POST /pins`, and `DELETE /pins/{model_name}` under `/api/v0/`, `/api/v1/`, `/v0/`, and `/v1/`. `GET /pins` returns configured pins with loaded status and optional load error.
 
 ## Model Lifecycle
 
@@ -32,6 +33,17 @@ This file captures implementation landmarks that are useful before changing Lemo
 - Model type controls the LRU bucket: LLM, embedding, reranking, audio, image, or TTS.
 - `max_loaded_models` applies per model type, not globally.
 - `max_gpu_memory_occupancy_gb` applies across loaded GPU models. Router dry-runs largest-to-smallest GPU evictions and leaves existing models loaded when the requested model cannot fit.
+- Model pins are excluded from automatic eviction policies and from eviction-managed capacity counts. Their resident GPU usage still reduces physical memory available to unpinned loads.
+- Model pin loading is best-effort at `lemond` startup; failed pin loads should be logged and surfaced to clients without preventing the server from starting.
+- Pinning an already-loaded model is a live metadata/config transition; it should persist the server config and protect the current `WrappedServer` without unloading or reloading it.
+- `POST /pins` accepts loaded or loading non-collection models; it is idempotent for models that are already pinned.
+- `DELETE /pins/{model_name}` persists config and clears protection on the current `WrappedServer` if it is loaded, without unloading it.
+- Model pin configuration stores canonical model names only; recipe options remain owned by the existing recipe-options path.
+- Explicit unload affects current residency only; unpinning is the action that removes a model from pin configuration.
+- Deleting a model removes that model name from pin configuration.
+- Collection ids are not pinned; users pin the concrete loaded component models instead.
+- NPU exclusivity still applies between model pins; startup pin loading may resolve pin-to-pin NPU conflicts in configured order instead of preserving all pins resident.
+- `pinned_models` preserves insertion order and `lemond` loads pins in that order; drag-to-reorder is optional UI polish, not required for the first implementation.
 - Busy `WrappedServer` instances are protected from eviction until their active request ends.
 - Non-file-not-found load failures trigger an evict-all-and-retry path.
 - Exclusive NPU recipes evict other NPU users; FLM has recipe-specific coexistence rules.
@@ -42,6 +54,8 @@ This file captures implementation landmarks that are useful before changing Lemo
 - The Tauri desktop app uses `src/app/src-tauri/` and installs `window.api` through `tauriShim.ts`.
 - The browser web app in `src/web-app/` reuses the shared renderer with a separate package/dependency tree.
 - Do not consolidate `src/app/package.json` and `src/web-app/package.json`; the split supports Debian native packaging with system Node modules.
+- Model pin controls belong at the leading edge of active-model list rows, not in the trailing unload/action button cluster.
+- The active-model UI should surface configured pinned models even when they are not currently loaded, so users can see failed/manual-unloaded pins and unpin them.
 
 ## OmniRouter
 

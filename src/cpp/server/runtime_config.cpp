@@ -162,6 +162,20 @@ int RuntimeConfig::max_loaded_models() const {
     return config_["max_loaded_models"].get<int>();
 }
 
+std::vector<std::string> RuntimeConfig::pinned_models() const {
+    std::shared_lock lock(mutex_);
+    std::vector<std::string> result;
+    if (!config_.contains("pinned_models") || !config_["pinned_models"].is_array()) {
+        return result;
+    }
+    for (const auto& value : config_["pinned_models"]) {
+        if (value.is_string()) {
+            result.push_back(value.get<std::string>());
+        }
+    }
+    return result;
+}
+
 double RuntimeConfig::max_gpu_memory_occupancy_gb() const {
     std::shared_lock lock(mutex_);
     return config_["max_gpu_memory_occupancy_gb"].get<double>();
@@ -354,6 +368,15 @@ void RuntimeConfig::validate(const std::string& key, const json& value) const {
         if (m < -1 || m == 0) {
             throw std::invalid_argument(
                 "'max_loaded_models' must be -1 (unlimited) or a positive integer");
+        }
+    } else if (key == "pinned_models") {
+        if (!value.is_array()) {
+            throw std::invalid_argument("'pinned_models' must be an array");
+        }
+        for (const auto& item : value) {
+            if (!item.is_string() || item.get<std::string>().empty()) {
+                throw std::invalid_argument("'pinned_models' must contain non-empty strings");
+            }
         }
     } else if (key == "max_gpu_memory_occupancy_gb") {
         if (!value.is_number()) {
