@@ -1858,6 +1858,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
                         onClick={() => isPinned ? handleUnpinModel(modelName) : handlePinModel(modelName)}
                         disabled={pinDisabled}
                         title={pinTitle}
+                        aria-label={pinTitle}
                         aria-pressed={isPinned}
                       >
                         <PinIcon />

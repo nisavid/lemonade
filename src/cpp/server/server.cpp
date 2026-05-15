@@ -228,6 +228,9 @@ void Server::start_pinned_model_loading() {
             if (should_shutdown()) {
                 return;
             }
+            if (!is_config_model_pinned(model_name)) {
+                continue;
+            }
 
             try {
                 load_pinned_model(model_name);
@@ -264,6 +267,10 @@ void Server::load_pinned_model(const std::string& model_name) {
     router_->load_model(canonical_model_name, info, options, true,
                         /*allow_reload_on_option_change=*/false,
                         /*pin_model=*/true);
+    if (!is_config_model_pinned(canonical_model_name)) {
+        router_->set_model_pinned(canonical_model_name, false);
+        return;
+    }
     clear_pin_load_error(canonical_model_name);
 }
 
@@ -330,6 +337,7 @@ void Server::save_pinned_models(const std::vector<std::string>& pinned_models) {
 
 bool Server::remove_model_pin(const std::string& model_name) {
     const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+    std::lock_guard<std::mutex> lock(pinned_models_mutex_);
     auto pinned_models = config_->pinned_models();
     auto original_size = pinned_models.size();
 
@@ -345,6 +353,14 @@ bool Server::remove_model_pin(const std::string& model_name) {
     router_->set_model_pinned(canonical_model_name, false);
     clear_pin_load_error(canonical_model_name);
     return true;
+}
+
+bool Server::is_config_model_pinned(const std::string& model_name) {
+    const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+    std::lock_guard<std::mutex> lock(pinned_models_mutex_);
+    auto pinned_models = config_->pinned_models();
+    return std::find(pinned_models.begin(), pinned_models.end(), canonical_model_name)
+        != pinned_models.end();
 }
 
 void Server::setup_http_servers() {
@@ -1288,6 +1304,8 @@ bool Server::is_running() const {
 }
 
 void Server::stop() {
+    shutdown_requested_ = true;
+
     if (running_) {
         LOG(INFO, "Server") << "Stopping HTTP server..." << std::endl;
         udp_beacon_.stopBroadcasting();
@@ -3158,14 +3176,16 @@ void Server::handle_pin_model(const httplib::Request& req, httplib::Response& re
         }
 
         const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
-        auto pinned_models = config_->pinned_models();
-        if (std::find(pinned_models.begin(), pinned_models.end(), canonical_model_name)
-            == pinned_models.end()) {
-            pinned_models.push_back(canonical_model_name);
-            save_pinned_models(pinned_models);
+        {
+            std::lock_guard<std::mutex> lock(pinned_models_mutex_);
+            auto pinned_models = config_->pinned_models();
+            if (std::find(pinned_models.begin(), pinned_models.end(), canonical_model_name)
+                == pinned_models.end()) {
+                pinned_models.push_back(canonical_model_name);
+                save_pinned_models(pinned_models);
+            }
+            router_->set_model_pinned(canonical_model_name, true);
         }
-
-        router_->set_model_pinned(canonical_model_name, true);
         clear_pin_load_error(canonical_model_name);
 
         nlohmann::json response = {
@@ -3297,7 +3317,16 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
                         LOG(INFO, "Server") << "Downloading component: " << component << std::endl;
                         model_manager_->download_registered_model(comp_info);
                         comp_info = model_manager_->get_model_info(component);
+                    } catch (const std::exception& e) {
+                        if (is_config_model_pinned(component)) {
+                            set_pin_load_error(component, e.what());
+                        }
+                        clear_model_loading(component);
+                        throw;
                     } catch (...) {
+                        if (is_config_model_pinned(component)) {
+                            set_pin_load_error(component, "Unknown error");
+                        }
                         clear_model_loading(component);
                         throw;
                     }
@@ -3309,7 +3338,16 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
                                         /*allow_reload_on_option_change=*/true);
                     apply_config_pin_if_needed(component);
                     clear_model_loading(component);
+                } catch (const std::exception& e) {
+                    if (is_config_model_pinned(component)) {
+                        set_pin_load_error(component, e.what());
+                    }
+                    clear_model_loading(component);
+                    throw;
                 } catch (...) {
+                    if (is_config_model_pinned(component)) {
+                        set_pin_load_error(component, "Unknown error");
+                    }
                     clear_model_loading(component);
                     throw;
                 }

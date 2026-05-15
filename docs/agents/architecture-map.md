@@ -42,7 +42,7 @@ This file captures implementation landmarks that are useful before changing Lemo
 - Explicit unload affects current residency only; unpinning is the action that removes a model from pin configuration.
 - Deleting a model removes that model name from pin configuration.
 - Collection ids are not pinned; users pin the concrete loaded component models instead.
-- NPU exclusivity still applies between model pins; startup pin loading may resolve pin-to-pin NPU conflicts in configured order instead of preserving all pins resident.
+- NPU exclusivity still applies between model pins; startup pin loading processes pins in configured order, so a later conflicting pinned NPU model can evict an earlier one instead of preserving all pins resident.
 - `pinned_models` preserves insertion order and `lemond` loads pins in that order; drag-to-reorder is optional UI polish, not required for the first implementation.
 - Busy `WrappedServer` instances are protected from eviction until their active request ends.
 - Non-file-not-found load failures trigger an evict-all-and-retry path.

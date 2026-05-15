@@ -155,6 +155,7 @@ private:
     void persist_config_snapshot();
     void save_pinned_models(const std::vector<std::string>& pinned_models);
     bool remove_model_pin(const std::string& model_name);
+    bool is_config_model_pinned(const std::string& model_name);
 
     // Helper function to generate detailed model error responses (not found, not supported, load failure)
     nlohmann::json create_model_error(const std::string& requested_model, const std::string& exception_msg);
@@ -191,6 +192,7 @@ private:
     NetworkBeacon udp_beacon_;
     std::mutex pin_errors_mutex_;
     std::map<std::string, std::string> pin_load_errors_;
+    std::mutex pinned_models_mutex_;
     std::mutex loading_models_mutex_;
     std::set<std::string> loading_models_;
 
