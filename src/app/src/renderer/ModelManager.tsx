@@ -1219,7 +1219,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
 
     setPinningModels(prev => new Set(prev).add(modelName));
     try {
-      const retryUntil = loadingModels.has(modelName) ? Date.now() + 120_000 : Date.now();
+      const retryUntil = Date.now() + (loadingModels.has(modelName) ? 120_000 : 5_000);
       while (true) {
         const response = await serverFetch('/pins', {
           method: 'POST',

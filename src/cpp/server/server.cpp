@@ -610,16 +610,7 @@ void Server::setup_routes(httplib::Server &web_server) {
         handle_pins(req, res);
     });
 
-    web_server.Post("/api/v0/pins", [this](const httplib::Request& req, httplib::Response& res) {
-        handle_pin_model(req, res);
-    });
-    web_server.Post("/api/v1/pins", [this](const httplib::Request& req, httplib::Response& res) {
-        handle_pin_model(req, res);
-    });
-    web_server.Post("/v0/pins", [this](const httplib::Request& req, httplib::Response& res) {
-        handle_pin_model(req, res);
-    });
-    web_server.Post("/v1/pins", [this](const httplib::Request& req, httplib::Response& res) {
+    register_post("pins", [this](const httplib::Request& req, httplib::Response& res) {
         handle_pin_model(req, res);
     });
 
