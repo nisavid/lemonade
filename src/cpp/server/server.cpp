@@ -3161,7 +3161,11 @@ void Server::handle_pin_model(const httplib::Request& req, httplib::Response& re
 
         if (!router_->is_model_loaded(model_name) && !is_model_loading(model_name)) {
             res.status = 400;
-            nlohmann::json error = {{"error", "Only currently loaded or loading models can be pinned"}};
+            nlohmann::json error = {{"error", {
+                {"message", "Only currently loaded or loading models can be pinned"},
+                {"type", "invalid_request_error"},
+                {"code", "model_not_loaded_or_loading"}
+            }}};
             res.set_content(error.dump(), "application/json");
             return;
         }

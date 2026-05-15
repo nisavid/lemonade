@@ -304,17 +304,28 @@ interface PinInfo {
   load_error: string | null;
 }
 
-async function getServerErrorMessage(response: Response, fallback: string): Promise<string> {
+interface ServerErrorDetails {
+  message: string;
+  code?: string;
+}
+
+async function getServerErrorDetails(response: Response, fallback: string): Promise<ServerErrorDetails> {
   const text = await response.text().catch(() => '');
-  if (!text) return fallback;
+  if (!text) return { message: fallback };
   try {
     const parsed = JSON.parse(text);
-    if (typeof parsed?.error === 'string') return parsed.error;
-    if (typeof parsed?.error?.message === 'string') return parsed.error.message;
+    if (typeof parsed?.error === 'string') return { message: parsed.error, code: parsed.code };
+    if (typeof parsed?.error?.message === 'string') {
+      return { message: parsed.error.message, code: parsed.error.code ?? parsed.code };
+    }
   } catch {
     // Fall through to the raw response text.
   }
-  return text;
+  return { message: text };
+}
+
+async function getServerErrorMessage(response: Response, fallback: string): Promise<string> {
+  return (await getServerErrorDetails(response, fallback)).message;
 }
 
 const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -427,12 +438,16 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
 
   useEffect(() => {
     fetchCurrentLoadedModel();
-    fetchPinnedModels();
+    if (pinsAvailable) {
+      fetchPinnedModels();
+    }
 
     // Poll for model status every 5 seconds to detect loaded models
     const interval = setInterval(() => {
       fetchCurrentLoadedModel();
-      fetchPinnedModels();
+      if (pinsAvailable) {
+        fetchPinnedModels();
+      }
     }, 5000);
 
     // === Integration API for other parts of the app ===
@@ -472,7 +487,9 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
         });
         // Refresh the loaded model status
         fetchCurrentLoadedModel();
-        fetchPinnedModels();
+        if (pinsAvailable) {
+          fetchPinnedModels();
+        }
       }
     };
 
@@ -485,7 +502,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
       window.removeEventListener('modelLoadEnd' as any, handleModelLoadEnd);
       delete (window as any).setModelLoading;
     };
-  }, [fetchCurrentLoadedModel, fetchPinnedModels]);
+  }, [fetchCurrentLoadedModel, fetchPinnedModels, pinsAvailable]);
 
   useEffect(() => {
     setShowFilterPanel(false);
@@ -1231,13 +1248,13 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
           break;
         }
 
-        const message = await getServerErrorMessage(response, `Failed to pin model: ${response.statusText}`);
+        const errorDetails = await getServerErrorDetails(response, `Failed to pin model: ${response.statusText}`);
         const canRetryLoadingRace =
           response.status === 400 &&
-          message.includes('loaded or loading') &&
+          errorDetails.code === 'model_not_loaded_or_loading' &&
           Date.now() < retryUntil;
         if (!canRetryLoadingRace) {
-          throw new Error(message);
+          throw new Error(errorDetails.message);
         }
 
         await delay(500);
