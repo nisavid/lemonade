@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Boxes, Brain, ChevronRight, Cpu, Eye, Flame, Layers, ListOrdered, Settings, SlidersHorizontal, Sparkles, SquareCode, Store, User, Wrench, XIcon } from './components/Icons';
+import { Boxes, Brain, ChevronRight, Cpu, EjectIcon, Eye, Flame, Layers, ListOrdered, PinIcon, Settings, SlidersHorizontal, Sparkles, SquareCode, Store, User, Wrench, XIcon } from './components/Icons';
 import { ModelInfo } from './utils/modelData';
 import { ToastContainer, useToast } from './Toast';
 import { useConfirmDialog } from './ConfirmDialog';
@@ -17,7 +17,6 @@ import BackendManager from './BackendManager';
 import ConnectedBackendRow from './components/ConnectedBackendRow';
 import MarketplacePanel, { MarketplaceCategory } from './MarketplacePanel';
 import { RECIPE_DISPLAY_NAMES } from './utils/recipeNames';
-import { EjectIcon } from './components/Icons';
 import { getCollectionComponents, isCollectionFullyDownloaded, isCollectionModel, isModelEffectivelyDownloaded, isModelEffectivelyLoaded } from './utils/collectionModels';
 
 interface ModelFamily {
@@ -299,6 +298,38 @@ interface ModelJSON {
   image_defaults?: []
 }
 
+interface PinInfo {
+  model_name: string;
+  loaded: boolean;
+  load_error: string | null;
+}
+
+interface ServerErrorDetails {
+  message: string;
+  code?: string;
+}
+
+async function getServerErrorDetails(response: Response, fallback: string): Promise<ServerErrorDetails> {
+  const text = await response.text().catch(() => '');
+  if (!text) return { message: fallback };
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed?.error === 'string') return { message: parsed.error, code: parsed.code };
+    if (typeof parsed?.error?.message === 'string') {
+      return { message: parsed.error.message, code: parsed.error.code ?? parsed.code };
+    }
+  } catch {
+    // Fall through to the raw response text.
+  }
+  return { message: text };
+}
+
+async function getServerErrorMessage(response: Response, fallback: string): Promise<string> {
+  return (await getServerErrorDetails(response, fallback)).message;
+}
+
+const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
 export type LeftPanelView = 'models' | 'backends' | 'marketplace' | 'settings';
 
 
@@ -312,9 +343,14 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
   const [organizationMode, setOrganizationMode] = useState<'recipe' | 'category'>('recipe');
   const [showDownloadedOnly, setShowDownloadedOnly] = useState(false);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
-const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [loadedModels, setLoadedModels] = useState<Set<string>>(new Set());
   const [loadingModels, setLoadingModels] = useState<Set<string>>(new Set());
+  const [pinnedModels, setPinnedModels] = useState<Set<string>>(new Set());
+  const [pinnedModelOrder, setPinnedModelOrder] = useState<string[]>([]);
+  const [pinLoadErrors, setPinLoadErrors] = useState<Record<string, string | null>>({});
+  const [pinsAvailable, setPinsAvailable] = useState(true);
+  const [pinningModels, setPinningModels] = useState<Set<string>>(new Set());
   const [hoveredModel, setHoveredModel] = useState<string | null>(null);
   const [optionsModel, setOptionsModel] = useState<string | null>(null);
   const [showModelOptionsModal, setShowModelOptionsModal] = useState(false);
@@ -363,6 +399,37 @@ const [searchQuery, setSearchQuery] = useState('');
     }
   }, []);
 
+  const fetchPinnedModels = useCallback(async () => {
+    try {
+      const response = await serverFetch('/pins');
+      if (!response.ok) {
+        if (response.status === 404) {
+          setPinsAvailable(false);
+          setPinnedModels(new Set());
+          setPinnedModelOrder([]);
+          setPinLoadErrors({});
+          return;
+        }
+        throw new Error(await getServerErrorMessage(response, `Failed to fetch pins: ${response.statusText}`));
+      }
+
+      setPinsAvailable(true);
+      const data = await response.json();
+      const pins: PinInfo[] = Array.isArray(data?.data) ? data.data : [];
+      const pinNames = pins
+        .map((pin) => pin.model_name)
+        .filter((modelName): modelName is string => typeof modelName === 'string' && modelName.length > 0);
+
+      setPinnedModels(new Set(pinNames));
+      setPinnedModelOrder(pinNames);
+      setPinLoadErrors(Object.fromEntries(
+        pins.map((pin) => [pin.model_name, pin.load_error ?? null])
+      ));
+    } catch (error) {
+      console.error('Failed to fetch pinned models:', error);
+    }
+  }, []);
+
   // Load system info on mount so recipe categories (e.g., FLM) can appear
   // even when the backend isn't installed yet
   useEffect(() => {
@@ -371,10 +438,16 @@ const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     fetchCurrentLoadedModel();
+    if (pinsAvailable) {
+      fetchPinnedModels();
+    }
 
     // Poll for model status every 5 seconds to detect loaded models
     const interval = setInterval(() => {
       fetchCurrentLoadedModel();
+      if (pinsAvailable) {
+        fetchPinnedModels();
+      }
     }, 5000);
 
     // === Integration API for other parts of the app ===
@@ -414,6 +487,9 @@ const [searchQuery, setSearchQuery] = useState('');
         });
         // Refresh the loaded model status
         fetchCurrentLoadedModel();
+        if (pinsAvailable) {
+          fetchPinnedModels();
+        }
       }
     };
 
@@ -426,7 +502,7 @@ const [searchQuery, setSearchQuery] = useState('');
       window.removeEventListener('modelLoadEnd' as any, handleModelLoadEnd);
       delete (window as any).setModelLoading;
     };
-  }, [fetchCurrentLoadedModel]);
+  }, [fetchCurrentLoadedModel, fetchPinnedModels, pinsAvailable]);
 
   useEffect(() => {
     setShowFilterPanel(false);
@@ -644,24 +720,55 @@ const [searchQuery, setSearchQuery] = useState('');
   // get an `isLoading` flag so the UI can render a pending indicator.
   // Skip collection entries themselves — only show component models.
   const loadedModelEntries = (() => {
-    const entries: Array<{ modelName: string; isLoading: boolean }> = [];
+    const entries: Array<{
+      modelName: string;
+      isLoading: boolean;
+      isLoaded: boolean;
+      isPinned: boolean;
+      loadError: string | null;
+    }> = [];
     const seen = new Set<string>();
     for (const modelName of loadedModels) {
       if (isCollectionModel(modelsData[modelName])) continue;
       if (seen.has(modelName)) continue;
       seen.add(modelName);
-      entries.push({ modelName, isLoading: false });
+      entries.push({
+        modelName,
+        isLoading: false,
+        isLoaded: true,
+        isPinned: pinnedModels.has(modelName),
+        loadError: pinLoadErrors[modelName] ?? null,
+      });
     }
     for (const modelName of loadingModels) {
       if (isCollectionModel(modelsData[modelName])) continue;
       if (seen.has(modelName)) continue;
       seen.add(modelName);
-      entries.push({ modelName, isLoading: true });
+      entries.push({
+        modelName,
+        isLoading: true,
+        isLoaded: false,
+        isPinned: pinnedModels.has(modelName),
+        loadError: pinLoadErrors[modelName] ?? null,
+      });
     }
-    return entries.sort((a, b) =>
+    const activeEntries = entries.sort((a, b) =>
       getModelDisplayName(a.modelName).localeCompare(getModelDisplayName(b.modelName)) ||
       a.modelName.localeCompare(b.modelName)
     );
+    for (const modelName of pinnedModelOrder) {
+      if (seen.has(modelName)) continue;
+      if (isCollectionModel(modelsData[modelName])) continue;
+      seen.add(modelName);
+      activeEntries.push({
+        modelName,
+        isLoading: false,
+        isLoaded: false,
+        isPinned: true,
+        loadError: pinLoadErrors[modelName] ?? null,
+      });
+    }
+    return activeEntries;
   })();
 
 
@@ -1031,6 +1138,7 @@ const [searchQuery, setSearchQuery] = useState('');
         }
 
         await fetchCurrentLoadedModel();
+        await fetchPinnedModels();
         window.dispatchEvent(new CustomEvent('modelLoadEnd', { detail: { modelId: modelName } }));
         window.dispatchEvent(new CustomEvent('modelsUpdated'));
         return;
@@ -1048,6 +1156,7 @@ const [searchQuery, setSearchQuery] = useState('');
       });
 
       await fetchCurrentLoadedModel();
+      await fetchPinnedModels();
       window.dispatchEvent(new CustomEvent('modelLoadEnd', { detail: { modelId: modelName } }));
       window.dispatchEvent(new CustomEvent('modelsUpdated'));
     } catch (error) {
@@ -1092,6 +1201,7 @@ const [searchQuery, setSearchQuery] = useState('');
           }
         }
         await fetchCurrentLoadedModel();
+        await fetchPinnedModels();
         window.dispatchEvent(new CustomEvent('modelUnload'));
         return;
       }
@@ -1108,12 +1218,91 @@ const [searchQuery, setSearchQuery] = useState('');
 
       // Refresh current loaded model status
       await fetchCurrentLoadedModel();
+      await fetchPinnedModels();
 
       // Dispatch event to notify other components (e.g., ChatWindow) that model was unloaded
       window.dispatchEvent(new CustomEvent('modelUnload'));
     } catch (error) {
       console.error('Error unloading model:', error);
       showError(`Failed to unload model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const handlePinModel = async (modelName: string) => {
+    if (!pinsAvailable) {
+      showWarning('Pins require a newer Lemonade server.');
+      return;
+    }
+
+    setPinningModels(prev => new Set(prev).add(modelName));
+    try {
+      const retryUntil = Date.now() + (loadingModels.has(modelName) ? 120_000 : 5_000);
+      while (true) {
+        const response = await serverFetch('/pins', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model_name: modelName })
+        });
+
+        if (response.ok) {
+          break;
+        }
+
+        const errorDetails = await getServerErrorDetails(response, `Failed to pin model: ${response.statusText}`);
+        const canRetryLoadingRace =
+          response.status === 400 &&
+          errorDetails.code === 'model_not_loaded_or_loading' &&
+          Date.now() < retryUntil;
+        if (!canRetryLoadingRace) {
+          throw new Error(errorDetails.message);
+        }
+
+        await delay(500);
+      }
+
+      await fetchPinnedModels();
+      await fetchCurrentLoadedModel();
+      showSuccess(`Pinned "${modelName}".`);
+    } catch (error) {
+      console.error('Error pinning model:', error);
+      showError(`Failed to pin model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setPinningModels(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(modelName);
+        return newSet;
+      });
+    }
+  };
+
+  const handleUnpinModel = async (modelName: string) => {
+    if (!pinsAvailable) {
+      showWarning('Pins require a newer Lemonade server.');
+      return;
+    }
+
+    setPinningModels(prev => new Set(prev).add(modelName));
+    try {
+      const response = await serverFetch(`/pins/${encodeURIComponent(modelName)}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        throw new Error(await getServerErrorMessage(response, `Failed to unpin model: ${response.statusText}`));
+      }
+
+      await fetchPinnedModels();
+      await fetchCurrentLoadedModel();
+      showSuccess(`Unpinned "${modelName}".`);
+    } catch (error) {
+      console.error('Error unpinning model:', error);
+      showError(`Failed to unpin model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setPinningModels(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(modelName);
+        return newSet;
+      });
     }
   };
 
@@ -1153,6 +1342,7 @@ const [searchQuery, setSearchQuery] = useState('');
         showSuccess(`Model "${modelName}" deleted successfully.`);
       }
       await fetchCurrentLoadedModel();
+      await fetchPinnedModels();
     } catch (error) {
       console.error('Error deleting model:', error);
       showError(`Failed to delete model: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -1663,27 +1853,48 @@ const [searchQuery, setSearchQuery] = useState('');
               <div className="loaded-model-header">
                 <div className="loaded-model-label">ACTIVE MODELS</div>
                 <div className="loaded-model-count-pill">
-                  {loadedModelEntries.filter(e => !e.isLoading).length} loaded
+                  {loadedModelEntries.filter(e => e.isLoaded).length} loaded
                 </div>
               </div>
               {loadedModelEntries.length === 0 && <div className="loaded-model-empty">No models loaded</div>}
               <div className="loaded-model-list">
-                {loadedModelEntries.map(({ modelName, isLoading }) => (
-                  <div key={modelName} className="loaded-model-info">
-                    <div className="loaded-model-details">
-                      <span
-                        className={`loaded-model-indicator${isLoading ? ' loading' : ''}`}
-                        title={isLoading ? 'Loading' : 'Loaded'}
-                      />
-                      <span className="loaded-model-name" title={modelName}>{getModelDisplayName(modelName)}</span>
-                    </div>
-                    {!isLoading && (
-                      <button className="model-action-btn unload-btn active-model-eject-button" onClick={() => handleUnloadModel(modelName)} title="Eject model">
-                        <EjectIcon />
+                {loadedModelEntries.map(({ modelName, isLoading, isLoaded, isPinned, loadError }) => {
+                  const isPinning = pinningModels.has(modelName);
+                  const pinDisabled = !pinsAvailable || isPinning || (!isPinned && !isLoaded && !isLoading);
+                  const canPinActiveModel = pinsAvailable && !isPinned && (isLoaded || isLoading);
+                  const pinTitle = !pinsAvailable
+                    ? 'Pins require a newer Lemonade server'
+                    : (isPinned ? 'Unpin model' : 'Pin model');
+                  const indicatorTitle = isLoading ? 'Loading' : (isLoaded ? 'Loaded' : (loadError || 'Pinned'));
+                  const indicatorClassName = `loaded-model-indicator${isLoading ? ' loading' : ''}${!isLoaded && !isLoading ? ' not-loaded' : ''}${loadError ? ' error' : ''}`;
+
+                  return (
+                    <div key={modelName} className={`loaded-model-info${isPinned ? ' pinned' : ''}${!isLoaded && !isLoading ? ' pinned-not-loaded' : ''}`}>
+                      <button
+                        className={`model-action-btn pin-btn${isPinned ? ' pinned' : ''}${canPinActiveModel ? ' pin-available' : ''}${isPinning ? ' pending' : ''}`}
+                        onClick={() => isPinned ? handleUnpinModel(modelName) : handlePinModel(modelName)}
+                        disabled={pinDisabled}
+                        title={pinTitle}
+                        aria-label={pinTitle}
+                        aria-pressed={isPinned}
+                      >
+                        <PinIcon />
                       </button>
-                    )}
-                  </div>
-                ))}
+                      <div className="loaded-model-details">
+                        <span
+                          className={indicatorClassName}
+                          title={indicatorTitle}
+                        />
+                        <span className="loaded-model-name" title={modelName}>{getModelDisplayName(modelName)}</span>
+                      </div>
+                      {isLoaded && !isLoading && (
+                        <button className="model-action-btn unload-btn active-model-eject-button" onClick={() => handleUnloadModel(modelName)} title="Eject model">
+                          <EjectIcon />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

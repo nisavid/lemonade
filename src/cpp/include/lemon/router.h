@@ -40,7 +40,8 @@ public:
                     const ModelInfo& model_info,
                     RecipeOptions options,
                     bool do_not_upgrade = true,
-                    bool allow_reload_on_option_change = false);
+                    bool allow_reload_on_option_change = false,
+                    bool pin_model = false);
 
     // Unload model(s)
     void unload_model(const std::string& model_name = "");  // Empty = unload all
@@ -63,6 +64,9 @@ public:
 
     // Get the recipe options for a loaded model (empty if not loaded)
     RecipeOptions get_model_recipe_options(const std::string& model_name) const;
+
+    // Mark an already-loaded model as pinned or unpinned.
+    void set_model_pinned(const std::string& model_name, bool pinned);
 
     // Get the model type for a loaded model (returns LLM if not found)
     ModelType get_model_type(const std::string& model_name = "") const;
@@ -123,13 +127,14 @@ private:
     WrappedServer* get_most_recent_server() const;
     int count_servers_by_type(ModelType type) const;
     WrappedServer* find_lru_server_by_type(ModelType type) const;
+    bool is_config_pinned(const std::string& canonical_model_name) const;
     bool has_npu_server() const;
     WrappedServer* find_npu_server() const;
     WrappedServer* find_npu_server_by_recipe(const std::string& recipe) const;
     WrappedServer* find_flm_server_by_type(ModelType type) const;
-    void evict_all_npu_servers();
+    void evict_all_npu_servers(bool include_pinned = false);
     void evict_server(WrappedServer* server);
-    void evict_all_servers();
+    void evict_all_servers(bool include_pinned = false);
     std::unique_ptr<WrappedServer> create_backend_server(const ModelInfo& model_info);
     std::string resolve_model_name(const std::string& model_name) const;
     double estimate_gpu_memory_occupancy_gb(const ModelInfo& model_info,
