@@ -23,3 +23,14 @@ Create a GitHub issue in `nisavid/lemonade`.
 ## When a skill says "fetch the relevant ticket"
 
 Run `gh issue view <number> --repo nisavid/lemonade --comments`.
+
+## Pull request review automation
+
+When a review bot excludes bot-authored pull requests, first test whether the
+exclusion is tied to the pull request author or only to the bot-authored commits:
+push the agent-authored correction to the existing pull request branch, refresh
+the review state, and check whether the bot reviews the updated diff. If the
+pull request remains excluded after agent-authored changes land, create a
+replacement fork-local branch and pull request with the same intended dependency
+update, then close the excluded bot-authored pull request after the replacement
+merges.
