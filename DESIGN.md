@@ -83,11 +83,13 @@ tokenScope:
 # Design System Specification
 
 ## 1. Overview: "The Crystalline Zest"
+
 This design system is a sensory exploration of refreshment. It moves beyond standard functional UI to evoke the visceral feeling of a chilled glass of lemonade—crisp, translucent, and vibrant. The "Creative North Star" for this system is **Crystalline Zest**.
 
 Unlike rigid, corporate grids, this system leverages **heavy glassmorphism** and a **tonal gradient architecture** to create depth. It rejects the "flat web" in favor of an editorial layout that feels like looking through ice and liquid. We use intentional asymmetry and a strict 4-column content structure to provide a high-end, curated feel that prioritizes readability against a luminous, shifting background.
 
 ### Product Surface Reconciliation
+
 Crystalline Zest remains the authoritative design expression across Lemonade. Product surfaces translate it into calm, exact, stateful UI: model lists, logs, chat, status bars, filters, and resource telemetry should feel refreshing and glass-lit without sacrificing density, scanability, or operational clarity.
 
 For the default product register captured in `PRODUCT.md`, use the upstream sensory language as the source of character and the product principles as the source of restraint. The app should feel like the same lemonade glass under different working conditions: bright and open in light mode, warm and focused in Midnight mode, and always precise enough for local runtime work.
@@ -95,14 +97,17 @@ For the default product register captured in `PRODUCT.md`, use the upstream sens
 ---
 
 ## 2. Colors: Tonal Architecture
+
 The palette is a celebration of citrus. We strictly avoid dark "muddy" yellows or browns to maintain the "chilled" aesthetic.
 
 ### The Background Gradient
+
 The primary canvas is not a flat color. It is a vertical gradient:
 - **Top (Ice):** `--surface-container-lowest` (#FFFFFF)
 - **Bottom (Settled Juice):** Transitioning toward #FFF9C4 (pale lemon).
 
 ### Key Tokens
+
 - **Primary (Vibrant Citrus):** `--primary-yellow` (#FCD846). The signature accent for buttons, highlights, and energy.
 - **On Primary:** `--on-primary` (#000000). Black text and icons on yellow surfaces for maximum contrast.
 - **On Primary Muted:** `--on-primary-muted` (#3a3000). For text on light-yellow tinted surfaces (e.g. chat bubbles).
@@ -112,6 +117,7 @@ The primary canvas is not a flat color. It is a vertical gradient:
 - **Semantic Status:** `--status-connected`, `--status-warning`, `--status-info`, and `--status-error` are operational state tokens. They may sit near Lemon Leaf and citrus hues, but they are not decorative accents; pair them with labels, icons, or placement when they affect user action.
 
 ### Text Hierarchy
+
 From darkest to lightest:
 - `--text-on-light` (#000000) — Maximum contrast on light backgrounds.
 - `--text-primary` (#2D2F2F) — Body text and headings.
@@ -121,26 +127,31 @@ From darkest to lightest:
 - `--text-light` (#999) — Disabled or decorative text.
 
 ### Core Rules
+
 - **The "No-Line" Rule:** On brand and editorial surfaces, 1px solid borders are prohibited for sectioning. Use surface-container shifts to define boundaries.
 - **Product Pane Exception:** Dense operational surfaces may use subtle borders, splitters, and resizable dividers when they clarify panes, logs, model lists, chat regions, or status bars. These lines should feel like quiet glass edges, not heavy boxes.
 - **Surface Nesting:** Hierarchy is achieved by layering. A `--surface-container-low` card should sit atop a `--surface` background.
 - **Glassmorphism Rule:** Floating navigation and headers on brand surfaces must use `--surface` with 60-80% opacity and `--glass-blur` (24px) backdrop-blur. Product panes may use more opaque tonal layers when blur would reduce legibility.
 
 ### Product Theme Reconciliation
+
 Light and Midnight are equal product modes. Light carries the public-site brightness into a warm desktop utility surface. Midnight carries the same citrus accent into a focused local runtime console. Do not treat one as decorative and the other as secondary.
 
 Yellow is the identity and action accent. Status, model capability icons, telemetry, logs, errors, and disabled states need their own readable semantic treatment and must not depend on yellow or color alone.
 
 ---
 
-### 2b. Midnight Palette (Dark Mode)
+### 2.1. Midnight Palette (Dark Mode)
+
 The Midnight variant transposes Crystalline Zest into a **warm-dark** register. We avoid cold blue-blacks and pure `#000`; the canvas instead reads as a darkened citrus liqueur — deep, slightly warm, with the same yellow accent punching through.
 
 ### The Background Gradient (Dark)
+
 - **Top (Night Ice):** `--surface-container-lowest` (#0E0E0B)
 - **Bottom (Steeped Juice):** Transitioning toward `#1F1A0E` (warm dark amber).
 
 ### Surface Scale (Dark)
+
 Mirrors the light scale but inverted in luminance with a faint yellow undertone. These values override the base tokens inside `[data-md-color-scheme="zest-dark"]`:
 - `--surface-container-lowest` (#0E0E0B) — deepest layer.
 - `--surface` (#1A1813)
@@ -150,6 +161,7 @@ Mirrors the light scale but inverted in luminance with a faint yellow undertone.
 - `--outline-variant`: rgba(255, 255, 255, 0.10)
 
 ### Glass Tokens (Dark)
+
 **Pure backdrop-blur over dark loses contrast.** Dark glass uses a tinted-dark fill (so the surface is visible even without a busy backdrop) and a faint **yellow-tinted border** to retain Crystalline Zest's signature:
 - `--glass-bg`: rgba(45, 41, 33, 0.55)
 - `--glass-bg-dense`: rgba(45, 41, 33, 0.85)
@@ -158,6 +170,7 @@ Mirrors the light scale but inverted in luminance with a faint yellow undertone.
 - `--glass-blur`: 24px (unchanged; layered over the tinted fill it still adds depth without losing readability)
 
 ### Text Hierarchy (Dark)
+
 Inverted scale, warm-leaning whites (avoid cool cyan-whites):
 - `--text-on-light` (#FFFFFF)
 - `--text-primary` (#F2EFE5) — body text and headings.
@@ -169,6 +182,7 @@ Inverted scale, warm-leaning whites (avoid cool cyan-whites):
 Body text should maintain at least 4.5:1 contrast against the gradient. Aim for 7:1 on critical controls, dense logs, status indicators, and other text users depend on for operational decisions.
 
 ### Shadows (Dark)
+
 Light-mode shadows are tuned to the on-surface color (`rgba(45, 47, 47, ...)`) and disappear on dark. Dark shadows use **plain black at higher alpha** plus the existing yellow-glow tokens for primary buttons:
 - `--shadow-light`: 0 4px 16px rgba(0, 0, 0, 0.35)
 - `--shadow-medium`: 0 8px 32px rgba(0, 0, 0, 0.45)
@@ -177,6 +191,7 @@ Light-mode shadows are tuned to the on-surface color (`rgba(45, 47, 47, ...)`) a
 - `--shadow-yellow` and `--shadow-yellow-hover` — **unchanged**. The yellow glow is part of the brand and reads beautifully on dark.
 
 ### Accent Invariants
+
 These are deliberately unchanged across light and dark — they are the "citrus" of the brand and pop equally well on both surfaces:
 - `--primary-yellow` (#FCD846)
 - `--primary-yellow-dark` (#FAF972) — used for hover/highlights
@@ -184,6 +199,7 @@ These are deliberately unchanged across light and dark — they are the "citrus"
 - `--on-primary` (#000) — black text on yellow buttons stays black even in Midnight mode
 
 ### `.ice-card` — Midnight Recipe
+
 ```css
 [data-md-color-scheme="zest-dark"] .ice-card {
   background: var(--glass-bg);                  /* tinted dark, not white-on-dark */
@@ -195,6 +211,7 @@ These are deliberately unchanged across light and dark — they are the "citrus"
 The yellow-tinted border is the dark-mode analogue of the light-mode "felt, not seen" ghost border — it gives ice cards a warm halo on dark surfaces without being literal.
 
 ### Do's and Don'ts (Dark)
+
 - **Do** keep `--on-primary` as `#000` on yellow surfaces in dark mode — the contrast ratio against `#FCD846` is unchanged.
 - **Do** prefer tinted-dark fills over white-at-low-alpha for glass surfaces. White glass on dark backdrops looks washed out and washes out the text on top.
 - **Do** prefer warm off-black content surfaces. Platform chrome or legacy shell edges may be darker when they improve perceived depth, but content panes should keep the warm Midnight register.
@@ -204,6 +221,7 @@ The yellow-tinted border is the dark-mode analogue of the light-mode "felt, not 
 ---
 
 ## 3. Typography: Editorial Authority
+
 We pair the geometric precision of **Plus Jakarta Sans** for impact with the high-legibility of **Manrope** for narrative, and **Consolas/Monaco** for code.
 
 - **Display & Headlines (`--font-display`):** Plus Jakarta Sans. Used for headings, buttons, and high-impact UI. Tight tracking, heavy weight (700-800).
@@ -214,11 +232,13 @@ We pair the geometric precision of **Plus Jakarta Sans** for impact with the hig
 ---
 
 ## 4. Elevation: Tonal Layering
+
 We do not use structural lines. We use physics.
 
 In product surfaces, that physics is restrained. The app can express depth through stable pane hierarchy, subtle tonal steps, quiet dividers, and focused elevation instead of placing every operational region inside a large glass card. Dense UI should feel like polished glass equipment, not a stack of decorative panels.
 
 ### The Layering Principle
+
 Depth is achieved by "stacking" tones:
 - *Level 0:* Background Gradient.
 - *Level 1:* `--glass-bg` rgba(255,255,255,0.4) — The "Glass" layer (ice cards, panels).
@@ -226,6 +246,7 @@ Depth is achieved by "stacking" tones:
 - *Level 3:* `--surface-container-lowest` (#FFFFFF) — Solid "Ice" for maximum pop.
 
 ### Shadows
+
 All shadows use the `on-surface` color (45, 47, 47), never pure black:
 - `--shadow-light`: 0 4px 16px at 4% opacity. Resting cards.
 - `--shadow-medium`: 0 8px 32px at 6% opacity. Hover states.
@@ -235,11 +256,13 @@ All shadows use the `on-surface` color (45, 47, 47), never pure black:
 - `--shadow-yellow-hover`: 0 16px 56px rgba(252,216,70,0.38). Primary button hover.
 
 ### Ghost Borders
+
 For essential accessibility on white-on-white elements, use `--outline-variant` (rgba(45,47,47,0.15)). It should be felt, not seen.
 
 For product panes, ghost borders and dividers are allowed when they preserve orientation across model managers, logs, chat regions, and status bars. Keep them low-contrast and aligned with the surface scale; avoid turning panes into boxed cards.
 
 ### Roundedness
+
 - `--radius-card` (3rem): Ice cards, demo panels, value cards.
 - `--radius-xl` (1.5rem): Console panels, API sample blocks.
 - `--radius` (1rem): Buttons, interactive elements, inner containers.
@@ -250,6 +273,7 @@ For product panes, ghost borders and dividers are allowed when they preserve ori
 ## 5. Components
 
 ### The Ice Card (`.ice-card`)
+
 The foundational glassmorphic component. All card-like containers inherit from this:
 ```css
 background: var(--glass-bg);           /* rgba(255,255,255,0.4) */
@@ -261,23 +285,27 @@ box-shadow: var(--shadow-ambient);
 Used by: value cards, tech spec cards, demo panel, dev button, release card, console cards.
 
 ### Buttons
+
 - **Primary (Yellow):** `--primary-yellow` background, `--on-primary` (#000) text, `--shadow-yellow` glow. Pill-shaped (`--radius-btn`).
 - **Secondary (Glass):** Inherits `.ice-card` base. `--text-primary` text. Hover lifts to `--glass-bg-hover`.
 - **Section CTA:** Same as primary, with `min-width: 320px` and `open_in_new` icon for external links.
 - **Download Link:** Same as primary, used in the Getting Started section.
 
 ### Console Card (`.gs-console`)
+
 Ice card with monospace content for terminal commands:
 - Inherits `.ice-card` for the glassmorphic shell.
 - `pre` uses `white-space: pre; overflow-x: auto` for horizontal scroll on long commands.
 - Copy button positioned absolutely, top-right. Turns yellow on hover/copied.
 
 ### Platform Selector
+
 Row of platform icon buttons:
 - Default: `opacity: 0.75`, transparent background.
 - Active: `opacity: 1`, `--glass-bg-hover` background, `--shadow-medium`, slight scale-up.
 
 ### Product Surface Layer
+
 The app uses familiar desktop-tool components as product expressions of Crystalline Zest:
 
 - **Side rail:** Compact, icon-led, and stable. The active rail item may use citrus accent or a tonal highlight, but the rail should not compete with the model and chat work areas.
@@ -288,6 +316,7 @@ The app uses familiar desktop-tool components as product expressions of Crystall
 - **Filters and metadata icons:** Small controls need tooltips or clear labels when meaning is not obvious. Capability color should be consistent across light and Midnight modes.
 
 ### Page Spacing Scale
+
 The homepage uses a perfect-fourth (1.333) ratio spacing scale:
 ```
 --page-space-base: 2rem
@@ -304,6 +333,7 @@ Section top padding: `--page-space-xxl`. Heading margins: `--page-space-sm`. Int
 ## 6. Do's and Don'ts
 
 ### Do:
+
 - **Do** use large amounts of white space (vertical "breathing room") to simulate clarity.
 - **Do** treat 4.5:1 as the contrast floor for readable text. Aim for 7:1 on critical controls, dense logs, status indicators, and text on glassmorphic panels over the yellow gradient.
 - **Do** use the `--tertiary` green only as a "flavor" accent—like a mint leaf in a drink.
@@ -315,6 +345,7 @@ Section top padding: `--page-space-xxl`. Heading margins: `--page-space-sm`. Int
 - **Do** pair color state with text, icons, labels, shape, or position when the state affects user action.
 
 ### Don't:
+
 - **Don't** use any dark browns or muddy yellows (#695B00) as button text. Use `--on-primary` (#000) instead.
 - **Don't** use 100% opaque, hard-edged cards. Everything should feel like it has a degree of light transmission.
 - **Don't** use traditional "Drop Shadows" with pure black. Use the ambient shadow tokens defined in Section 4.

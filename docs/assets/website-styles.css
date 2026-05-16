@@ -97,7 +97,7 @@
   --radius-card: 3rem;
 }
 
-/* === Crystalline Zest — Midnight (Dark Mode tokens, DESIGN.md §2b) ===
+/* === Crystalline Zest — Midnight (Dark Mode tokens, DESIGN.md §2.1) ===
    Activated when the document carries data-md-color-scheme="zest-dark". */
 [data-md-color-scheme="zest-dark"] {
   /* Surface scale (warm-dark, never pure black) */
@@ -110,7 +110,7 @@
 
   --outline-variant: rgba(255, 255, 255, 0.10);
 
-  /* Glass tokens — tinted dark fill + yellow-tinted border (DESIGN.md §2b) */
+  /* Glass tokens — tinted dark fill + yellow-tinted border (DESIGN.md §2.1) */
   --glass-bg: rgba(45, 41, 33, 0.55);
   --glass-bg-dense: rgba(45, 41, 33, 0.85);
   --glass-bg-hover: rgba(60, 54, 42, 0.75);
