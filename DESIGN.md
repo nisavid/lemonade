@@ -73,11 +73,12 @@ tokenScope:
   purpose: "product-app register"
   canonicalCssSource: "DESIGN.md body and docs/assets/website-styles.css"
   note: "Frontmatter token names are role aliases for product surfaces; CSS --* tokens remain canonical for website implementation."
-  cssTokenMap:
-    light-bg-primary: "--surface-container-lowest"
+  exactCssTokenMap:
     light-text-muted: "--text-muted"
     midnight-designed-lowest: "--surface-container-lowest"
     midnight-glass-bg: "--glass-bg"
+  cssTokenNotes:
+    light-bg-primary: "Product-app warm off-white surface alias; no exact website CSS variable has the same value."
 ---
 
 # Design System Specification
