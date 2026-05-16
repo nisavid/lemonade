@@ -1,13 +1,85 @@
+---
+name: Lemonade
+description: Refreshing local AI runtime with citrus-bright brand surfaces and focused product modes.
+colors:
+  primary-yellow: "#FCD846"
+  primary-yellow-hover: "#F0C040"
+  accent-gold: "#5C4B00"
+  lemon-leaf: "#3C6531"
+  light-bg-primary: "#FDFBF6"
+  light-bg-secondary: "#F5F2EC"
+  light-panel: "#EFEBE1"
+  light-border: "#E2DDD1"
+  light-text-primary: "#000000"
+  light-text-muted: "#91897D"
+  midnight-designed-lowest: "#0E0E0B"
+  midnight-shell-edge: "#0A0A0A"
+  midnight-bg-secondary: "#1A1A1A"
+  midnight-bg-tertiary: "#111111"
+  midnight-border: "#333333"
+  midnight-text-primary: "#FFFFFF"
+  midnight-text-muted: "#888888"
+  status-connected: "#4CAF50"
+  status-warning: "#FFB74D"
+  status-info: "#2196F3"
+  status-error: "#F44336"
+typography:
+  display:
+    fontFamily: "Plus Jakarta Sans, Manrope, system-ui, sans-serif"
+    fontWeight: 800
+    letterSpacing: "normal"
+  body:
+    fontFamily: "Manrope, system-ui, sans-serif"
+    fontWeight: 400
+    letterSpacing: "normal"
+  mono:
+    fontFamily: "Consolas, Monaco, Courier New, monospace"
+rounded:
+  base: "1rem"
+  xl: "1.5rem"
+  card: "3rem"
+  pill: "9999px"
+spacing:
+  base: "2rem"
+  sm: "2rem"
+  md: "2.66rem"
+  lg: "3.55rem"
+  xl: "4.73rem"
+  xxl: "6.31rem"
+components:
+  button-primary:
+    backgroundColor: "{colors.primary-yellow}"
+    textColor: "{colors.light-text-primary}"
+    rounded: "{rounded.pill}"
+  card-ice:
+    backgroundColor: "{colors.light-bg-primary}"
+    textColor: "{colors.light-text-primary}"
+    rounded: "{rounded.card}"
+  app-pane-light:
+    backgroundColor: "{colors.light-bg-primary}"
+    textColor: "{colors.light-text-primary}"
+    rounded: "{rounded.base}"
+  app-pane-midnight:
+    backgroundColor: "{colors.midnight-designed-lowest}"
+    textColor: "{colors.midnight-text-primary}"
+    rounded: "{rounded.base}"
+---
+
 # Design System Specification
 
-## 1. Overview & Creative North Star: "The Crystalline Zest"
+## 1. Overview: "The Crystalline Zest"
 This design system is a sensory exploration of refreshment. It moves beyond standard functional UI to evoke the visceral feeling of a chilled glass of lemonade—crisp, translucent, and vibrant. The "Creative North Star" for this system is **Crystalline Zest**.
 
 Unlike rigid, corporate grids, this system leverages **heavy glassmorphism** and a **tonal gradient architecture** to create depth. It rejects the "flat web" in favor of an editorial layout that feels like looking through ice and liquid. We use intentional asymmetry and a strict 4-column content structure to provide a high-end, curated feel that prioritizes readability against a luminous, shifting background.
 
+### Product Surface Reconciliation
+Crystalline Zest remains the authoritative design expression across Lemonade. Product surfaces translate it into calm, exact, stateful UI: model lists, logs, chat, status bars, filters, and resource telemetry should feel refreshing and glass-lit without sacrificing density, scanability, or operational clarity.
+
+For the default product register captured in `PRODUCT.md`, use the upstream sensory language as the source of character and the product principles as the source of restraint. The app should feel like the same lemonade glass under different working conditions: bright and open in light mode, warm and focused in Midnight mode, and always precise enough for local runtime work.
+
 ---
 
-## 2. Colors & Tonal Architecture
+## 2. Colors: Tonal Architecture
 The palette is a celebration of citrus. We strictly avoid dark "muddy" yellows or browns to maintain the "chilled" aesthetic.
 
 ### The Background Gradient
@@ -33,13 +105,19 @@ From darkest to lightest:
 - `--text-light` (#999) — Disabled or decorative text.
 
 ### Core Rules
-- **The "No-Line" Rule:** 1px solid borders are strictly prohibited for sectioning. Use surface-container shifts to define boundaries.
+- **The "No-Line" Rule:** On brand and editorial surfaces, 1px solid borders are prohibited for sectioning. Use surface-container shifts to define boundaries.
+- **Product Pane Exception:** Dense operational surfaces may use subtle borders, splitters, and resizable dividers when they clarify panes, logs, model lists, chat regions, or status bars. These lines should feel like quiet glass edges, not heavy boxes.
 - **Surface Nesting:** Hierarchy is achieved by layering. A `--surface-container-low` card should sit atop a `--surface` background.
-- **Glassmorphism Rule:** Floating navigation and headers must use `--surface` with 60-80% opacity and `--glass-blur` (24px) backdrop-blur.
+- **Glassmorphism Rule:** Floating navigation and headers on brand surfaces must use `--surface` with 60-80% opacity and `--glass-blur` (24px) backdrop-blur. Product panes may use more opaque tonal layers when blur would reduce legibility.
+
+### Product Theme Reconciliation
+Light and Midnight are equal product modes. Light carries the public-site brightness into a warm desktop utility surface. Midnight carries the same citrus accent into a focused local runtime console. Do not treat one as decorative and the other as secondary.
+
+Yellow is the identity and action accent. Status, model capability icons, telemetry, logs, errors, and disabled states need their own readable semantic treatment and must not depend on yellow or color alone.
 
 ---
 
-## 2b. Midnight Palette (Dark Mode)
+### Midnight Palette (Dark Mode)
 The Midnight variant transposes Crystalline Zest into a **warm-dark** register. We avoid cold blue-blacks and pure `#000`; the canvas instead reads as a darkened citrus liqueur — deep, slightly warm, with the same yellow accent punching through.
 
 ### The Background Gradient (Dark)
@@ -103,7 +181,8 @@ The yellow-tinted border is the dark-mode analogue of the light-mode "felt, not 
 ### Do's and Don'ts (Dark)
 - **Do** keep `--on-primary` as `#000` on yellow surfaces in dark mode — the contrast ratio against `#FCD846` is unchanged.
 - **Do** prefer tinted-dark fills over white-at-low-alpha for glass surfaces. White glass on dark backdrops looks washed out and washes out the text on top.
-- **Don't** use pure `#000` as a background. The lowest surface (`--surface-container-lowest`) is `#0E0E0B` — slightly warm, slightly off-black, to keep the citrus character.
+- **Do** prefer warm off-black content surfaces. Platform chrome or legacy shell edges may be darker when they improve perceived depth, but content panes should keep the warm Midnight register.
+- **Don't** use pure `#000` as the default content background. The lowest designed surface (`--surface-container-lowest`) is `#0E0E0B` — slightly warm, slightly off-black, to keep the citrus character.
 - **Don't** invert `--tertiary` (lemon leaf green). It already has enough luminance to read on dark; lightening it would push toward an unrelated mint hue.
 
 ---
@@ -118,8 +197,10 @@ We pair the geometric precision of **Plus Jakarta Sans** for impact with the hig
 
 ---
 
-## 4. Elevation & Depth: Tonal Layering
+## 4. Elevation: Tonal Layering
 We do not use structural lines. We use physics.
+
+In product surfaces, that physics is restrained. The app can express depth through stable pane hierarchy, subtle tonal steps, quiet dividers, and focused elevation instead of placing every operational region inside a large glass card. Dense UI should feel like polished glass equipment, not a stack of decorative panels.
 
 ### The Layering Principle
 Depth is achieved by "stacking" tones:
@@ -139,6 +220,8 @@ All shadows use the `on-surface` color (45, 47, 47), never pure black:
 
 ### Ghost Borders
 For essential accessibility on white-on-white elements, use `--outline-variant` (rgba(45,47,47,0.15)). It should be felt, not seen.
+
+For product panes, ghost borders and dividers are allowed when they preserve orientation across model managers, logs, chat regions, and status bars. Keep them low-contrast and aligned with the surface scale; avoid turning panes into boxed cards.
 
 ### Roundedness
 - `--radius-card` (3rem): Ice cards, demo panels, value cards.
@@ -178,6 +261,16 @@ Row of platform icon buttons:
 - Default: `opacity: 0.75`, transparent background.
 - Active: `opacity: 1`, `--glass-bg-hover` background, `--shadow-medium`, slight scale-up.
 
+### Product Surface Layer
+The app uses familiar desktop-tool components as product expressions of Crystalline Zest:
+
+- **Side rail:** Compact, icon-led, and stable. The active rail item may use citrus accent or a tonal highlight, but the rail should not compete with the model and chat work areas.
+- **Model manager:** Searchable, dense, and scan-friendly. Active models, suggested models, backend groups, sizes, and capability icons should be readable at a glance. Use citrus and semantic colors to mark state, not to decorate every row.
+- **Logs and telemetry:** Monospace, high-contrast, and quiet. Logs are operational text; preserve line alignment, clear wrapping, and level filtering before applying atmospheric styling.
+- **Chat composer:** Elevated enough to be easy to find, restrained enough not to dominate an empty chat. The send action can carry the strongest local accent in the chat surface.
+- **Status bar:** Persistent, compact, and literal. Connection, token, TPS, TTFT, RAM, CPU, GPU, and VRAM state should remain visible without relying on color alone.
+- **Filters and metadata icons:** Small controls need tooltips or clear labels when meaning is not obvious. Capability color should be consistent across light and Midnight modes.
+
 ### Page Spacing Scale
 The homepage uses a perfect-fourth (1.333) ratio spacing scale:
 ```
@@ -201,6 +294,9 @@ Section top padding: `--page-space-xxl`. Heading margins: `--page-space-sm`. Int
 - **Do** use `--on-primary` (#000) for text on yellow buttons. It must be high contrast.
 - **Do** use the `.ice-card` base class for all glassmorphic containers rather than duplicating properties.
 - **Do** reference CSS variables for colors, shadows, and fonts. Avoid hardcoding values that have tokens.
+- **Do** treat light and Midnight as equal product modes. Each mode should support real work, dense state, and readable telemetry.
+- **Do** translate Crystalline Zest into product restraint for panes, logs, status bars, and model lists.
+- **Do** pair color state with text, icons, labels, shape, or position when the state affects user action.
 
 ### Don't:
 - **Don't** use any dark browns or muddy yellows (#695B00) as button text. Use `--on-primary` (#000) instead.
@@ -208,3 +304,6 @@ Section top padding: `--page-space-xxl`. Heading margins: `--page-space-sm`. Int
 - **Don't** use traditional "Drop Shadows" with pure black. Use the ambient shadow tokens defined in Section 4.
 - **Don't** use dividers to separate list items; use tonal shifts or vertical gaps.
 - **Don't** use section label "chips" on every section. Reserve them for sections that need categorical context.
+- **Don't** replace upstream design language with fork-local metaphors. Refine and reconcile Crystalline Zest rather than renaming the system.
+- **Don't** make the app feel like a broad AI workspace or decorative chat toy. It is a local runtime product surface first.
+- **Don't** apply heavy glassmorphism to dense operational regions when it harms legibility, contrast, or scan speed.
