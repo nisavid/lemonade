@@ -8,7 +8,7 @@ product
 
 Lemonade serves local AI users, developers, app embedders, AMD AI PC owners, and contributors.
 
-Local AI users want private multimodal AI on their own machines without needing to understand model formats, backend engines, or hardware-specific setup up front. Developers want familiar local APIs for existing tools and experiments. App builders and embedders want Lemonade to become an invisible runtime inside their own experiences. AMD AI PC and Radeon users want their hardware to do useful local AI work. Contributors extend model, engine, platform, and hardware coverage.
+Local AI users want private multimodal AI on their own machines without needing to understand model formats, backend engines, or hardware-specific setup details up front. Developers want familiar local APIs for existing tools and experiments. App builders and embedders want Lemonade to become an invisible runtime inside their own experiences. AMD AI PC and Radeon users want their hardware to do useful local AI work. Contributors extend model, engine, platform, and hardware coverage.
 
 ## Product Purpose
 
