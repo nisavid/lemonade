@@ -11,12 +11,13 @@ colors:
   light-panel: "#EFEBE1"
   light-border: "#E2DDD1"
   light-text-primary: "#000000"
-  light-text-muted: "#91897D"
+  light-text-muted: "#6b6b6b"
   midnight-designed-lowest: "#0E0E0B"
   midnight-shell-edge: "#0A0A0A"
   midnight-bg-secondary: "#1A1A1A"
   midnight-bg-tertiary: "#111111"
   midnight-border: "#333333"
+  midnight-glass-bg: "rgba(45, 41, 33, 0.55)"
   midnight-text-primary: "#FFFFFF"
   midnight-text-muted: "#888888"
   status-connected: "#4CAF50"
@@ -57,7 +58,7 @@ components:
     textColor: "{colors.light-text-primary}"
     rounded: "{rounded.card}"
   card-ice-midnight:
-    backgroundColor: "{colors.midnight-bg-secondary}"
+    backgroundColor: "{colors.midnight-glass-bg}"
     textColor: "{colors.midnight-text-primary}"
     rounded: "{rounded.card}"
   app-pane-light:
@@ -68,6 +69,15 @@ components:
     backgroundColor: "{colors.midnight-designed-lowest}"
     textColor: "{colors.midnight-text-primary}"
     rounded: "{rounded.base}"
+tokenScope:
+  purpose: "product-app register"
+  canonicalCssSource: "DESIGN.md body and docs/assets/website-styles.css"
+  note: "Frontmatter token names are role aliases for product surfaces; CSS --* tokens remain canonical for website implementation."
+  cssTokenMap:
+    light-bg-primary: "--surface-container-lowest"
+    light-text-muted: "--text-muted"
+    midnight-designed-lowest: "--surface-container-lowest"
+    midnight-glass-bg: "--glass-bg"
 ---
 
 # Design System Specification
@@ -123,7 +133,7 @@ Yellow is the identity and action accent. Status, model capability icons, teleme
 
 ---
 
-### Midnight Palette (Dark Mode)
+### 2b. Midnight Palette (Dark Mode)
 The Midnight variant transposes Crystalline Zest into a **warm-dark** register. We avoid cold blue-blacks and pure `#000`; the canvas instead reads as a darkened citrus liqueur — deep, slightly warm, with the same yellow accent punching through.
 
 ### The Background Gradient (Dark)
