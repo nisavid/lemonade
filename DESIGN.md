@@ -34,13 +34,14 @@ typography:
     letterSpacing: "normal"
   mono:
     fontFamily: "Consolas, Monaco, Courier New, monospace"
+    fontWeight: 400
+    letterSpacing: "normal"
 rounded:
   base: "1rem"
   xl: "1.5rem"
   card: "3rem"
   pill: "9999px"
 spacing:
-  base: "2rem"
   sm: "2rem"
   md: "2.66rem"
   lg: "3.55rem"
@@ -54,6 +55,10 @@ components:
   card-ice:
     backgroundColor: "{colors.light-bg-primary}"
     textColor: "{colors.light-text-primary}"
+    rounded: "{rounded.card}"
+  card-ice-midnight:
+    backgroundColor: "{colors.midnight-bg-secondary}"
+    textColor: "{colors.midnight-text-primary}"
     rounded: "{rounded.card}"
   app-pane-light:
     backgroundColor: "{colors.light-bg-primary}"
@@ -94,6 +99,7 @@ The primary canvas is not a flat color. It is a vertical gradient:
 - **Accent Gold:** `--accent-gold` (#5C4B00). Used for icon tints and value-link text on white surfaces.
 - **Natural Accent (Lemon Leaf):** `--tertiary` (#3C6531). Used sparingly for success states.
 - **Neutral Surface:** `--surface` (#F6F6F6) provides the "chilled glass" base.
+- **Semantic Status:** `--status-connected`, `--status-warning`, `--status-info`, and `--status-error` are operational state tokens. They may sit near Lemon Leaf and citrus hues, but they are not decorative accents; pair them with labels, icons, or placement when they affect user action.
 
 ### Text Hierarchy
 From darkest to lightest:
@@ -150,7 +156,7 @@ Inverted scale, warm-leaning whites (avoid cool cyan-whites):
 - `--text-muted` (#837F75)
 - `--text-light` (#5C594F)
 
-Body text should maintain at least 4.5:1 contrast against the gradient.
+Body text should maintain at least 4.5:1 contrast against the gradient. Aim for 7:1 on critical controls, dense logs, status indicators, and other text users depend on for operational decisions.
 
 ### Shadows (Dark)
 Light-mode shadows are tuned to the on-surface color (`rgba(45, 47, 47, ...)`) and disappear on dark. Dark shadows use **plain black at higher alpha** plus the existing yellow-glow tokens for primary buttons:
@@ -289,7 +295,7 @@ Section top padding: `--page-space-xxl`. Heading margins: `--page-space-sm`. Int
 
 ### Do:
 - **Do** use large amounts of white space (vertical "breathing room") to simulate clarity.
-- **Do** ensure text contrast ratios exceed 7:1, especially on glassmorphic panels over the yellow gradient.
+- **Do** treat 4.5:1 as the contrast floor for readable text. Aim for 7:1 on critical controls, dense logs, status indicators, and text on glassmorphic panels over the yellow gradient.
 - **Do** use the `--tertiary` green only as a "flavor" accent—like a mint leaf in a drink.
 - **Do** use `--on-primary` (#000) for text on yellow buttons. It must be high contrast.
 - **Do** use the `.ice-card` base class for all glassmorphic containers rather than duplicating properties.
