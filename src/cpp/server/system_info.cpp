@@ -1132,9 +1132,16 @@ json SystemInfo::build_recipes_info(const json& devices) {
         recipes[def.recipe]["backends"][def.backend] = backend;
 
         auto configured_default = configured_default_backends.find(def.recipe);
-        if (configured_default != configured_default_backends.end()) {
-            if (def.backend == configured_default->second) {
+        if (configured_default != configured_default_backends.end() &&
+            def.backend == configured_default->second) {
+            if (supported) {
                 recipes[def.recipe]["default_backend"] = def.backend;
+            } else {
+                LOG(WARNING, "Server")
+                    << "Configured backend '" << def.backend
+                    << "' for recipe '" << def.recipe
+                    << "' is not supported on this host; falling back to RECIPE_DEFS preference order."
+                    << std::endl;
             }
             continue;
         }

@@ -108,10 +108,11 @@ static bool is_launch_provider_misuse(int argc, char* argv[]) {
 
         if (token == "--provider" || token == "-p" ||
             token.rfind("--provider=", 0) == 0 || token.rfind("-p=", 0) == 0) {
-            return launch_agent != "codex";
+            return launch_agent.empty() ||
+                   (is_supported_agent_name(launch_agent) && launch_agent != "codex");
         }
 
-        if (!token.empty() && token[0] != '-' && launch_agent.empty() && is_supported_agent_name(token)) {
+        if (!token.empty() && token[0] != '-' && launch_agent.empty()) {
             launch_agent = token;
         }
     }

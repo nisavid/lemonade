@@ -981,7 +981,7 @@
             }
             if (labels.includes('embedding') || labels.includes('embeddings')) return 'embedding';
             if (labels.includes('reranking')) return 'reranking';
-            if (labels.includes('transcription')) return 'transcription';
+            if (labels.includes('transcription') || labels.includes('realtime-transcription')) return 'transcription';
             if (labels.includes('image')) return 'image';
             if (labels.includes('tts')) return 'tts';
             return 'llm';

@@ -50,9 +50,14 @@ static bool migrate_deprecated_rocm_preview_channel(json& config) {
     if (config.contains("rocm") && config["rocm"].is_string() &&
         config["rocm"].get<std::string>() == "preview") {
         config.erase("rocm");
-        config["rocm_channel"] = "stable";
-        LOG(INFO) << "Migrated deprecated rocm=preview to rocm_channel=stable"
-                  << std::endl;
+        if (!config.contains("rocm_channel") || !config["rocm_channel"].is_string()) {
+            config["rocm_channel"] = "stable";
+            LOG(INFO) << "Migrated deprecated rocm=preview to rocm_channel=stable"
+                      << std::endl;
+        } else {
+            LOG(INFO) << "Removed deprecated rocm=preview and kept explicit rocm_channel="
+                      << config["rocm_channel"].get<std::string>() << std::endl;
+        }
         migrated = true;
     }
 

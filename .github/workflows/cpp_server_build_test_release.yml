@@ -1267,8 +1267,6 @@ jobs:
     name: Test .dmg - macOS inference (${{ matrix.test_name }})
     runs-on: macos-latest
     needs: build-lemonade-macos-dmg
-    # Skip inference tests on tag pushes (releases) — signed path runs tests inline in build job
-    if: ${{ !startsWith(github.ref, 'refs/tags/') && inputs.enable_signing != true }}
     env:
       LEMONADE_CI_MODE: "True"
       PYTHONIOENCODING: utf-8
@@ -1282,9 +1280,11 @@ jobs:
           - test_name: llamacpp-metal
             script: server_llm.py
             args: "--wrapped-server llamacpp --backend metal"
+            sd_model: ""
           - test_name: whisper-metal
             script: server_whisper.py
             args: "--wrapped-server whispercpp --backend metal"
+            sd_model: ""
           # Temporarily disabled — sd-cpp metal test is being skipped
           # - test_name: sd-cpp-metal
           #   script: server_sd.py
@@ -1293,6 +1293,7 @@ jobs:
           - test_name: kokoro-metal
             script: server_tts.py
             args: ""
+            sd_model: ""
     steps:
       - uses: actions/checkout@v5
 
@@ -1397,6 +1398,16 @@ jobs:
         run: |
           set -e
           SERVER_BIN="./build/lemonade-server"
+          .venv/bin/python test/${{ matrix.script }} ${{ matrix.args }} --server-binary "$SERVER_BIN"
+
+      - name: Test signed .pkg ${{ matrix.test_name }}
+        if: needs.build-lemonade-macos-dmg.outputs.has_signing == 'true'
+        env:
+          HF_HOME: ${{ env.HF_HOME }}
+          LEMONADE_TEST_SD_MODEL: ${{ matrix.sd_model }}
+        run: |
+          set -e
+          SERVER_BIN="${{ steps.install-pkg.outputs.bin-path }}/lemonade-server"
           .venv/bin/python test/${{ matrix.script }} ${{ matrix.args }} --server-binary "$SERVER_BIN"
 
       - name: Capture and upload server logs
@@ -1826,6 +1837,7 @@ jobs:
       - build-lemonade-embeddable-windows
       - build-lemonade-embeddable-macos
       - test-cli-endpoints
+      - test-dmg-inference
       - test-rpm-package
       - test-embeddable-posix
       - test-embeddable-windows

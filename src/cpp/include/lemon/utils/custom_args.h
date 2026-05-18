@@ -67,8 +67,12 @@ inline std::vector<std::string> parse_custom_args(const std::string& custom_args
     bool in_quotes = false;
     char quote_char = '\0';
 
-    for (char c : custom_args_str) {
-        if (!in_quotes && (c == '"' || c == '\'')) {
+    for (size_t i = 0; i < custom_args_str.size(); ++i) {
+        char c = custom_args_str[i];
+        if (in_quotes && c == '\\' && i + 1 < custom_args_str.size() &&
+            (custom_args_str[i + 1] == quote_char || custom_args_str[i + 1] == '\\')) {
+            current_arg += custom_args_str[++i];
+        } else if (!in_quotes && (c == '"' || c == '\'')) {
             in_quotes = true;
             quote_char = c;
         } else if (in_quotes && c == quote_char) {
@@ -136,6 +140,22 @@ inline std::string validate_custom_args(const std::string& custom_args_str, cons
     return "";
 }
 
+inline std::string quote_custom_arg_value(const std::string& value) {
+    if (value.find_first_of(" \t\"\\'") == std::string::npos) {
+        return value;
+    }
+
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (char c : value) {
+        if (c == '\\' || c == '"') {
+            escaped.push_back('\\');
+        }
+        escaped.push_back(c);
+    }
+    return "\"" + escaped + "\"";
+}
+
 inline std::string map_to_args_string(const std::map<std::string, std::vector<std::string>>& m) {
     std::string result;
     bool first = true;
@@ -144,7 +164,7 @@ inline std::string map_to_args_string(const std::map<std::string, std::vector<st
         first = false;
         result += flag;
         for (const auto& v : values) {
-            result += " " + v;
+            result += " " + quote_custom_arg_value(v);
         }
     }
     return result;

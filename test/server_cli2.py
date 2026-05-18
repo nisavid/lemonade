@@ -1175,12 +1175,18 @@ sys.exit(0)
             deadline = time.time() + TIMEOUT_MODEL_OPERATION
             loaded_model = None
             while time.time() < deadline:
-                response = requests.get(
-                    f"http://127.0.0.1:{PORT}/api/v1/health",
-                    timeout=TIMEOUT_DEFAULT,
-                )
-                self.assertEqual(response.status_code, 200)
-                health_data = response.json()
+                try:
+                    response = requests.get(
+                        f"http://127.0.0.1:{PORT}/api/v1/health",
+                        timeout=TIMEOUT_DEFAULT,
+                    )
+                    if response.status_code != 200:
+                        time.sleep(1)
+                        continue
+                    health_data = response.json()
+                except (requests.RequestException, ValueError):
+                    time.sleep(1)
+                    continue
                 loaded_model = next(
                     (
                         model

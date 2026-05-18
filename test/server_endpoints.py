@@ -100,6 +100,19 @@ class EndpointTests(ServerTestBase):
         self.assertIsInstance(model_info["pid"], int)
         self.assertGreater(model_info["pid"], 0)
 
+    def _delete_registered_model(self, model_name):
+        """Delete a registered model and fail on unexpected cleanup results."""
+        response = requests.post(
+            f"{self.base_url}/delete",
+            json={"model_name": model_name},
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertIn(
+            response.status_code,
+            [200, 422],
+            f"Unexpected cleanup response for {model_name}: {response.status_code} {response.text}",
+        )
+
     def test_000_endpoints_registered(self):
         """Verify all expected endpoints are registered on both v0 and v1."""
         valid_endpoints = [
@@ -1278,14 +1291,7 @@ class EndpointTests(ServerTestBase):
                 f"[OK] Pull preserved merged image_defaults + recipe_options for {model_name}"
             )
         finally:
-            try:
-                requests.post(
-                    f"{self.base_url}/delete",
-                    json={"model_name": model_name},
-                    timeout=TIMEOUT_DEFAULT,
-                )
-            except Exception:
-                pass
+            self._delete_registered_model(model_name)
 
     def test_021c_naming_spec_pull_rejects_reserved_prefixes(self):
         """Naming spec: /pull rejects canonical source prefixes in registrations."""
@@ -1417,14 +1423,7 @@ class EndpointTests(ServerTestBase):
 
             print(f"[OK] user.{ENDPOINT_TEST_MODEL} shadows built-in cleanly")
         finally:
-            try:
-                requests.post(
-                    f"{self.base_url}/delete",
-                    json={"model_name": user_canonical},
-                    timeout=TIMEOUT_DEFAULT,
-                )
-            except Exception:
-                pass
+            self._delete_registered_model(user_canonical)
 
     def test_021f_naming_spec_unique_registered(self):
         """Naming spec: a unique user.<name> with no built-in collision emits as bare."""
@@ -1471,14 +1470,7 @@ class EndpointTests(ServerTestBase):
 
             print(f"[OK] unique user.{bare} emits as bare id with no collision")
         finally:
-            try:
-                requests.post(
-                    f"{self.base_url}/delete",
-                    json={"model_name": canonical},
-                    timeout=TIMEOUT_DEFAULT,
-                )
-            except Exception:
-                pass
+            self._delete_registered_model(canonical)
 
     def _set_extra_models_dir(self, value):
         """Swap extra_models_dir via /internal/set; returns the prior value."""
@@ -1583,14 +1575,7 @@ class EndpointTests(ServerTestBase):
                 f"[OK] three-way collision: bare/{bare}, extra.{bare}, builtin.{bare}"
             )
         finally:
-            try:
-                requests.post(
-                    f"{self.base_url}/delete",
-                    json={"model_name": user_canonical},
-                    timeout=TIMEOUT_DEFAULT,
-                )
-            except Exception:
-                pass
+            self._delete_registered_model(user_canonical)
             self._set_extra_models_dir(prior_dir)
             shutil.rmtree(extra_dir, ignore_errors=True)
 

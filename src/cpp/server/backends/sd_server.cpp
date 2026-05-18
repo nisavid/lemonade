@@ -90,10 +90,10 @@ InstallParams SDServer::get_install_params(const std::string& backend, const std
     }
 
     if (resolved_backend == "metal") {
-#if defined(__APPLE__)
+#if defined(__APPLE__) && (defined(__arm64__) || defined(__aarch64__))
         params.filename = "sd-" + short_version + "-bin-Darwin-arm64-metal.zip";
 #else
-        throw std::runtime_error("Metal sd.cpp backend is currently supported only on macOS");
+        throw std::runtime_error("Metal sd.cpp backend is currently supported only on Apple Silicon macOS");
 #endif
     } else if (is_rocm_backend(resolved_backend)) {
         std::string target_arch = SystemInfo::get_rocm_arch();

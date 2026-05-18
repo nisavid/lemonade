@@ -594,20 +594,25 @@ ModelManager::ModelManager(const std::string& extra_models_dir)
     }
     {
         int migrated = 0;
+        bool normalized = false;
         json migrated_options = json::object();
         for (auto it = recipe_options_.begin(); it != recipe_options_.end(); ++it) {
             const std::string& key = it.key();
             if (parse_canonical_id(key)) {
                 migrated_options[key] = it.value();
             } else if (server_models_.contains(key)) {
-                migrated_options[canonical_id(ModelSource::Builtin, key)] = it.value();
-                ++migrated;
+                normalized = true;
+                const std::string canonical = canonical_id(ModelSource::Builtin, key);
+                if (!migrated_options.contains(canonical) && !recipe_options_.contains(canonical)) {
+                    migrated_options[canonical] = it.value();
+                    ++migrated;
+                }
             } else {
                 // Preserve unknown bare keys (likely stale built-ins) — avoids silent data loss.
                 migrated_options[key] = it.value();
             }
         }
-        if (migrated > 0) {
+        if (normalized) {
             recipe_options_ = std::move(migrated_options);
             try {
                 fs::path dir = fs::path(get_recipe_options_file()).parent_path();
@@ -1101,9 +1106,21 @@ void ModelManager::save_model_options(const ModelInfo& info) {
     LOG(INFO, "ModelManager") << "Saving options for model: " << info.model_name << std::endl;
     // Persist under canonical ID (built-ins are keyed bare in cache but
     // recipe_options.json stores them as builtin.<name>).
-    recipe_options_[cache_key_to_canonical_id(info.model_name)] = info.recipe_options.to_json();
-    update_model_options_in_cache(info);
-    save_user_json(get_recipe_options_file(), recipe_options_);
+    json options_snapshot;
+    {
+        std::lock_guard<std::mutex> lock(models_cache_mutex_);
+        recipe_options_[cache_key_to_canonical_id(info.model_name)] = info.recipe_options.to_json();
+        if (cache_valid_) {
+            auto it = models_cache_.find(info.model_name);
+            if (it != models_cache_.end()) {
+                it->second.recipe_options = info.recipe_options;
+            } else {
+                LOG(WARNING, "ModelManager") << "'" << info.model_name << "' not found in cache" << std::endl;
+            }
+        }
+        options_snapshot = recipe_options_;
+    }
+    save_user_json(get_recipe_options_file(), options_snapshot);
 }
 
 std::map<std::string, ModelInfo> ModelManager::get_supported_models() {

@@ -52,7 +52,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ isVisible, width }) => {
     // models (e.g. Gemma 4 on FLM) — which carry both "vision" / "tool-calling"
     // AND modality labels like "transcription" — route to the LLM
     // panel rather than the Transcription/Image panel.
-    const chatIndicators = ['vision', 'reasoning', 'tool-calling', 'tools'];
+    const chatIndicators = ['vision', 'reasoning', 'tool-calling', 'tools', 'chat-transcription'];
     if (info.labels?.some(l => chatIndicators.includes(l))) return 'llm';
     if (info.labels?.includes('embeddings') || (info as any)?.embedding) return 'embedding';
     if (info.labels?.includes('reranking') || (info as any)?.reranking) return 'reranking';

@@ -86,9 +86,6 @@ To switch between channels, update your `config.json`:
 
 Or use the Lemonade CLI:
 ```bash
-# Switch to stable channel
-lemonade config set rocm_channel=stable
-
 # Switch to stable channel (default)
 lemonade config set rocm_channel=stable
 
