@@ -503,7 +503,7 @@ void Router::load_model(const std::string& model_name,
         int max_models = config_->max_loaded_models();
 
         // NPU EXCLUSIVITY CHECK (recipe-aware rules)
-        // FLM can run up to 3 concurrent NPU processes (1 LLM + 1 audio + 1 embedding)
+        // FLM can run up to 3 concurrent NPU processes (1 LLM + 1 transcription + 1 embedding)
         // RyzenAI and WhisperCpp lock the entire NPU exclusively
         if (device_type & DEVICE_NPU) {
             if (model_info.recipe == "ryzenai-llm" || model_info.recipe == "whispercpp") {
@@ -529,7 +529,7 @@ void Router::load_model(const std::string& model_name,
                         evict_server(exclusive_server);
                     }
                 }
-                // 2. Evict FLM of the SAME model type (max 1 per type: 1 LLM, 1 audio, 1 embed)
+                // 2. Evict FLM of the SAME model type (max 1 per type: 1 LLM, 1 transcription, 1 embed)
                 WrappedServer* same_type_flm = find_flm_server_by_type(model_type);
                 if (same_type_flm) {
                     if (same_type_flm->is_pinned() && !model_should_be_pinned) {
@@ -783,7 +783,7 @@ json Router::get_max_model_limits() const {
         {"llm", max},
         {"embedding", max},
         {"reranking", max},
-        {"audio", max},
+        {"transcription", max},
         {"image", max},
         {"tts", max}
     };
@@ -1033,13 +1033,13 @@ json Router::responses(const json& request) {
 
 json Router::audio_transcriptions(const json& request) {
     return execute_inference(request, [&](WrappedServer* server) {
-        auto audio_server = dynamic_cast<IAudioServer*>(server);
-        if (!audio_server) {
+        auto transcription_server = dynamic_cast<ITranscriptionServer*>(server);
+        if (!transcription_server) {
             return ErrorResponse::from_exception(
                 UnsupportedOperationException("Audio transcription", device_type_to_string(server->get_device_type()))
             );
         }
-        return audio_server->audio_transcriptions(request);
+        return transcription_server->audio_transcriptions(request);
     });
 }
 

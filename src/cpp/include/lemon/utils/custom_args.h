@@ -1,11 +1,61 @@
 #pragma once
 
+#include <cctype>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
 
 namespace lemon {
 namespace utils {
+
+inline bool is_negative_numeric_value(const std::string& token) {
+    if (token.size() < 2 || token[0] != '-' || token[1] == '-') {
+        return false;
+    }
+
+    size_t pos = 1;
+    bool saw_digit = false;
+
+    while (pos < token.size() && std::isdigit(static_cast<unsigned char>(token[pos]))) {
+        saw_digit = true;
+        ++pos;
+    }
+
+    if (pos < token.size() && token[pos] == '.') {
+        ++pos;
+        while (pos < token.size() && std::isdigit(static_cast<unsigned char>(token[pos]))) {
+            saw_digit = true;
+            ++pos;
+        }
+    }
+
+    if (!saw_digit) {
+        return false;
+    }
+
+    if (pos < token.size() && (token[pos] == 'e' || token[pos] == 'E')) {
+        ++pos;
+        if (pos < token.size() && (token[pos] == '+' || token[pos] == '-')) {
+            ++pos;
+        }
+
+        bool saw_exponent_digit = false;
+        while (pos < token.size() && std::isdigit(static_cast<unsigned char>(token[pos]))) {
+            saw_exponent_digit = true;
+            ++pos;
+        }
+        if (!saw_exponent_digit) {
+            return false;
+        }
+    }
+
+    return pos == token.size();
+}
+
+inline bool is_custom_arg_flag(const std::string& token) {
+    return !token.empty() && token[0] == '-' && !is_negative_numeric_value(token);
+}
 
 inline std::vector<std::string> parse_custom_args(const std::string& custom_args_str) {
     std::vector<std::string> result;
@@ -17,8 +67,12 @@ inline std::vector<std::string> parse_custom_args(const std::string& custom_args
     bool in_quotes = false;
     char quote_char = '\0';
 
-    for (char c : custom_args_str) {
-        if (!in_quotes && (c == '"' || c == '\'')) {
+    for (size_t i = 0; i < custom_args_str.size(); ++i) {
+        char c = custom_args_str[i];
+        if (in_quotes && c == '\\' && i + 1 < custom_args_str.size() &&
+            (custom_args_str[i + 1] == quote_char || custom_args_str[i + 1] == '\\')) {
+            current_arg += custom_args_str[++i];
+        } else if (!in_quotes && (c == '"' || c == '\'')) {
             in_quotes = true;
             quote_char = c;
         } else if (in_quotes && c == quote_char) {
@@ -41,8 +95,25 @@ inline std::vector<std::string> parse_custom_args(const std::string& custom_args
     return result;
 }
 
-inline std::string validate_custom_args(const std::string& custom_args_str,
-                                        const std::set<std::string>& reserved_flags) {
+inline std::map<std::string, std::vector<std::string>> build_custom_args_map(const std::vector<std::string>& tokens) {
+    std::map<std::string, std::vector<std::string>> result;
+    std::string last_flag;  // Track the most recently seen flag independently of map ordering
+
+    for (const auto& token : tokens) {
+        if (is_custom_arg_flag(token)) {
+            // This is a flag; start a new entry
+            result[token] = {};
+            last_flag = token;
+        } else if (!last_flag.empty()) {
+            // Append to the most recently seen flag
+            result[last_flag].push_back(token);
+        }
+    }
+
+    return result;
+}
+
+inline std::string validate_custom_args(const std::string& custom_args_str, const std::set<std::string>& reserved_flags) {
     std::vector<std::string> custom_args = parse_custom_args(custom_args_str);
 
     for (const auto& arg : custom_args) {
@@ -52,7 +123,7 @@ inline std::string validate_custom_args(const std::string& custom_args_str,
             flag = flag.substr(0, eq_pos);
         }
 
-        if (!flag.empty() && flag[0] == '-' && reserved_flags.find(flag) != reserved_flags.end()) {
+        if (is_custom_arg_flag(flag) && reserved_flags.find(flag) != reserved_flags.end()) {
             std::string reserved_list;
             for (const auto& reserved_flag : reserved_flags) {
                 if (!reserved_list.empty()) {
@@ -67,6 +138,70 @@ inline std::string validate_custom_args(const std::string& custom_args_str,
     }
 
     return "";
+}
+
+inline std::string quote_custom_arg_value(const std::string& value) {
+    if (value.find_first_of(" \t\"\\'") == std::string::npos) {
+        return value;
+    }
+
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (char c : value) {
+        if (c == '\\' || c == '"') {
+            escaped.push_back('\\');
+        }
+        escaped.push_back(c);
+    }
+    return "\"" + escaped + "\"";
+}
+
+inline std::string map_to_args_string(const std::map<std::string, std::vector<std::string>>& m) {
+    std::string result;
+    bool first = true;
+    for (const auto& [flag, values] : m) {
+        if (!first) result += " ";
+        first = false;
+        result += flag;
+        for (const auto& v : values) {
+            result += " " + quote_custom_arg_value(v);
+        }
+    }
+    return result;
+}
+
+// Given a flag like "--flag" or "--no-flag", return the negation key.
+// "--no-<name>" ↔ "--<name>". Returns empty string if no negation exists.
+inline std::string negate_flag(const std::string& flag) {
+    if (flag.size() >= 5 && flag.compare(0, 5, "--no-") == 0) {
+        return "--" + flag.substr(5);
+    }
+    if (flag.size() >= 3 && flag.compare(0, 2, "--") == 0) {
+        return "--no-" + flag.substr(2);
+    }
+    return "";
+}
+
+inline std::map<std::string, std::vector<std::string>> merge_args_maps(
+    const std::map<std::string, std::vector<std::string>>& target,
+    const std::map<std::string, std::vector<std::string>>& incoming) {
+    std::map<std::string, std::vector<std::string>> merged = target;
+
+    // Remove binary-flag negations from incoming that conflict with target.
+    // Only flags without arguments are considered binary flags.
+    for (const auto& [flag, values] : incoming) {
+        if (values.empty()) {
+            std::string neg = negate_flag(flag);
+            if (!neg.empty() && merged.count(neg)) {
+                // Target has the opposite binary flag — skip this incoming flag
+                continue;
+            }
+        }
+        if (!merged.count(flag)) {
+            merged[flag] = values;
+        }
+    }
+    return merged;
 }
 
 } // namespace utils
