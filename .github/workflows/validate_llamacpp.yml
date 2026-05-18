@@ -13,8 +13,8 @@ on:
     - cron: "0 16 * * 0"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 env:
   LEMONADE_CI_MODE: "True"
@@ -271,8 +271,12 @@ jobs:
     needs: [get-latest-releases, validate]
     runs-on: ubuntu-latest
     if: >-
+      github.repository == 'lemonade-sdk/lemonade' &&
       (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
       needs.validate.result == 'success'
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v5
 

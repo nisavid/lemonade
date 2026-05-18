@@ -16,7 +16,7 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
   actions: read  # Required for SignPath to read workflow/job details
 
 env:
@@ -190,7 +190,9 @@ jobs:
     runs-on: windows-latest
     needs: build-lemonade-server-installer
     # Sign on tag pushes (releases) or when manually enabled via workflow_dispatch
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.enable_signing == true
+    if: >-
+      github.repository == 'lemonade-sdk/lemonade' &&
+      (startsWith(github.ref, 'refs/tags/v') || inputs.enable_signing == true)
     steps:
       - name: Sign MSI Installers with SignPath
         id: sign-msi
@@ -1841,7 +1843,9 @@ jobs:
       - test-rpm-package
       - test-embeddable-posix
       - test-embeddable-windows
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ github.repository == 'lemonade-sdk/lemonade' && startsWith(github.ref, 'refs/tags/v') }}
+    permissions:
+      contents: write
     env:
       LEMONADE_VERSION: ${{ needs.build-lemonade-rpm.outputs.version }}
     steps:

@@ -16,7 +16,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   REGISTRY: ghcr.io
@@ -24,7 +23,11 @@ env:
 
 jobs:
   build-and-push:
+    if: ${{ github.repository == 'lemonade-sdk/lemonade' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout repository
