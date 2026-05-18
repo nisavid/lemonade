@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cctype>
 #include <map>
 #include <set>
 #include <string>
@@ -7,6 +8,54 @@
 
 namespace lemon {
 namespace utils {
+
+inline bool is_negative_numeric_value(const std::string& token) {
+    if (token.size() < 2 || token[0] != '-' || token[1] == '-') {
+        return false;
+    }
+
+    size_t pos = 1;
+    bool saw_digit = false;
+
+    while (pos < token.size() && std::isdigit(static_cast<unsigned char>(token[pos]))) {
+        saw_digit = true;
+        ++pos;
+    }
+
+    if (pos < token.size() && token[pos] == '.') {
+        ++pos;
+        while (pos < token.size() && std::isdigit(static_cast<unsigned char>(token[pos]))) {
+            saw_digit = true;
+            ++pos;
+        }
+    }
+
+    if (!saw_digit) {
+        return false;
+    }
+
+    if (pos < token.size() && (token[pos] == 'e' || token[pos] == 'E')) {
+        ++pos;
+        if (pos < token.size() && (token[pos] == '+' || token[pos] == '-')) {
+            ++pos;
+        }
+
+        bool saw_exponent_digit = false;
+        while (pos < token.size() && std::isdigit(static_cast<unsigned char>(token[pos]))) {
+            saw_exponent_digit = true;
+            ++pos;
+        }
+        if (!saw_exponent_digit) {
+            return false;
+        }
+    }
+
+    return pos == token.size();
+}
+
+inline bool is_custom_arg_flag(const std::string& token) {
+    return !token.empty() && token[0] == '-' && !is_negative_numeric_value(token);
+}
 
 inline std::vector<std::string> parse_custom_args(const std::string& custom_args_str) {
     std::vector<std::string> result;
@@ -47,7 +96,7 @@ inline std::map<std::string, std::vector<std::string>> build_custom_args_map(con
     std::string last_flag;  // Track the most recently seen flag independently of map ordering
 
     for (const auto& token : tokens) {
-        if (!token.empty() && token[0] == '-') {
+        if (is_custom_arg_flag(token)) {
             // This is a flag; start a new entry
             result[token] = {};
             last_flag = token;
@@ -70,7 +119,7 @@ inline std::string validate_custom_args(const std::string& custom_args_str, cons
             flag = flag.substr(0, eq_pos);
         }
 
-        if (!flag.empty() && flag[0] == '-' && reserved_flags.find(flag) != reserved_flags.end()) {
+        if (is_custom_arg_flag(flag) && reserved_flags.find(flag) != reserved_flags.end()) {
             std::string reserved_list;
             for (const auto& reserved_flag : reserved_flags) {
                 if (!reserved_list.empty()) {

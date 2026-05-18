@@ -81,7 +81,11 @@ InstallParams WhisperServer::get_install_params(const std::string& backend, cons
 #endif
     } else if (backend == "metal") {
         params.repo = "lemonade-sdk/whisper.cpp-builds";
+#if defined(__APPLE__)
         params.filename = "whisper-" + version + "-darwin-metal-arm64.tar.gz";
+#else
+        throw std::runtime_error("Metal whisper.cpp backend is currently supported only on macOS");
+#endif
     } else {
         throw std::runtime_error("[WhisperServer] Unknown whisper backend: " + backend);
     }

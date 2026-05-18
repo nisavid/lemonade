@@ -1288,13 +1288,13 @@ class EndpointTests(ServerTestBase):
                 pass
 
     def test_021c_naming_spec_pull_rejects_reserved_prefixes(self):
-        """Naming spec: /pull rejects extra.* / builtin.* model names, including
-        as the bare-name part of a user.* alias (e.g. user.builtin.Foo)."""
+        """Naming spec: /pull rejects canonical source prefixes in registrations."""
         for reserved in [
             f"extra.Rejected-{uuid.uuid4().hex[:6]}",
             f"builtin.Rejected-{uuid.uuid4().hex[:6]}",
-            # user.<reserved>.<bare> must also be rejected — otherwise it would
-            # hijack the builtin.<bare> / extra.<bare> alias slot.
+            # user.<source>.<bare> must also be rejected, otherwise it can
+            # hijack a canonical alias slot.
+            f"user.user.Hijack-{uuid.uuid4().hex[:6]}",
             f"user.builtin.Hijack-{uuid.uuid4().hex[:6]}",
             f"user.extra.Hijack-{uuid.uuid4().hex[:6]}",
         ]:
@@ -1316,7 +1316,7 @@ class EndpointTests(ServerTestBase):
             )
             self.assertIn("reserved", response.text.lower())
         print(
-            "[OK] /pull rejects extra.*/builtin.* and user.extra.*/user.builtin.* names"
+            "[OK] /pull rejects canonical source prefixes in registration names"
         )
 
     def test_021d_naming_spec_builtin_canonical_alias(self):
@@ -1666,6 +1666,36 @@ class EndpointTests(ServerTestBase):
             )
 
             print(f"[OK] root GGUF emits stem: {bare}")
+        finally:
+            self._set_extra_models_dir(prior_dir)
+            shutil.rmtree(extra_dir, ignore_errors=True)
+
+    def test_021j_extra_models_skip_reserved_source_prefix_stems(self):
+        """Extra model discovery skips names that would form nested canonical IDs."""
+        extra_dir = tempfile.mkdtemp(prefix="lemon_extra_reserved_")
+        reserved_root = f"builtin.ReservedRoot-{uuid.uuid4().hex[:6]}"
+        reserved_dir = f"user.ReservedDir-{uuid.uuid4().hex[:6]}"
+        self._write_root_stub_gguf(extra_dir, f"{reserved_root}.gguf")
+        self._write_stub_gguf(extra_dir, reserved_dir)
+
+        prior_dir = self._set_extra_models_dir(extra_dir)
+        try:
+            models_response = requests.get(
+                f"{self.base_url}/models?show_all=true", timeout=TIMEOUT_DEFAULT
+            )
+            self.assertEqual(models_response.status_code, 200)
+            ids = {m["id"] for m in models_response.json()["data"]}
+
+            for reserved in [reserved_root, reserved_dir]:
+                self.assertNotIn(reserved, ids)
+                self.assertNotIn(f"extra.{reserved}", ids)
+                response = requests.get(
+                    f"{self.base_url}/models/{reserved}",
+                    timeout=TIMEOUT_DEFAULT,
+                )
+                self.assertEqual(response.status_code, 404)
+
+            print("[OK] extra_models_dir skips nested canonical source prefixes")
         finally:
             self._set_extra_models_dir(prior_dir)
             shutil.rmtree(extra_dir, ignore_errors=True)

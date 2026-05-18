@@ -690,6 +690,15 @@ std::map<std::string, ModelInfo> ModelManager::discover_extra_models() const {
         info.device = get_device_type_from_recipe(EXTRA_MODEL_RECIPE);
         return info;
     };
+    auto make_extra_model_name = [](const std::string& bare_name) -> std::string {
+        if (parse_canonical_id(bare_name)) {
+            LOG(WARNING, "ModelManager")
+                << "Skipping extra model with reserved canonical prefix: "
+                << bare_name << std::endl;
+            return "";
+        }
+        return std::string(EXTRA_MODEL_PREFIX) + bare_name;
+    };
 
     // Track which directories we've processed (for multimodal/multi-shard detection)
     std::map<std::string, std::vector<fs::path>> dirs_with_gguf;  // directory -> list of gguf files
@@ -727,7 +736,8 @@ std::map<std::string, ModelInfo> ModelManager::discover_extra_models() const {
         // Skip mmproj files - they're part of multimodal models
         if (contains_ignore_case(filename, "mmproj")) continue;
 
-        std::string model_name = std::string(EXTRA_MODEL_PREFIX) + gguf_path.stem().string();
+        std::string model_name = make_extra_model_name(gguf_path.stem().string());
+        if (model_name.empty()) continue;
         ModelInfo info = init_extra_model_info(model_name);
         info.checkpoints["main"] = gguf_path.string();
         info.resolved_paths["main"] = gguf_path.string();
@@ -781,7 +791,8 @@ std::map<std::string, ModelInfo> ModelManager::discover_extra_models() const {
             continue;
         }
 
-        std::string model_name = std::string(EXTRA_MODEL_PREFIX) + dir_name;
+        std::string model_name = make_extra_model_name(dir_name);
+        if (model_name.empty()) continue;
         ModelInfo info = init_extra_model_info(model_name);
         info.checkpoints["main"] = dir_path;
         info.resolved_paths["main"] = main_model_path.string();

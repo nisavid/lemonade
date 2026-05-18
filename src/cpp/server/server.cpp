@@ -2994,6 +2994,7 @@ void Server::handle_pull(const httplib::Request& req, httplib::Response& res) {
         std::string recipe = request_json.value("recipe", "");
         bool do_not_upgrade = request_json.value("do_not_upgrade", false);
         bool stream = request_json.value("stream", false);
+        bool local_import = request_json.value("local_import", false);
 
         LOG(INFO, "Server") << "Pulling model: " << model_name << std::endl;
         if (!checkpoint.empty()) {
@@ -3003,22 +3004,19 @@ void Server::handle_pull(const httplib::Request& req, httplib::Response& res) {
             LOG(INFO, "Server") << "   recipe: " << recipe << std::endl;
         }
 
-        // Reject reserved prefixes — extra.* / builtin.* cannot be created via
-        // /pull, and user.extra.* / user.builtin.* are also rejected because
-        // their bare-name part ("extra.X" / "builtin.X") would otherwise hijack
-        // the corresponding canonical alias slot. Then enforce the existing rule
-        // that explicit checkpoint/recipe requires the user.* prefix.
-        if (lemon::is_reserved_registration_name(model_name)) {
-            res.status = 400;
-            nlohmann::json error = {{"error",
-                "Model names with 'extra.' / 'builtin.' prefixes are reserved, "
-                "including as bare-name parts of a 'user.' alias. "
-                "Use 'user.<name>' for registration where <name> does not begin "
-                "with 'extra.' or 'builtin.'. Received: " + model_name}};
-            res.set_content(error.dump(), "application/json");
-            return;
-        }
-        if (!checkpoint.empty() || !recipe.empty()) {
+        if (!checkpoint.empty() || !recipe.empty() || local_import) {
+            // Reserved canonical prefixes cannot be used for new registrations.
+            // Downloads of existing models still accept canonical IDs.
+            if (lemon::is_reserved_registration_name(model_name)) {
+                res.status = 400;
+                nlohmann::json error = {{"error",
+                    "Model names with 'user.', 'extra.', or 'builtin.' as the "
+                    "bare-name prefix are reserved. Use 'user.<name>' for "
+                    "registration where <name> does not begin with a canonical "
+                    "source prefix. Received: " + model_name}};
+                res.set_content(error.dump(), "application/json");
+                return;
+            }
             if (model_name.substr(0, 5) != "user.") {
                 res.status = 400;
                 nlohmann::json error = {{"error",
@@ -3030,7 +3028,6 @@ void Server::handle_pull(const httplib::Request& req, httplib::Response& res) {
         }
 
         // Local import mode: CLI has already copied files to HF cache, just resolve and register
-        bool local_import = request_json.value("local_import", false);
         if (local_import) {
             std::string hf_cache = model_manager_->get_hf_cache_dir();
             std::string model_name_clean = model_name.substr(5); // Remove "user." prefix

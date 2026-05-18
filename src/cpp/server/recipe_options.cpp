@@ -172,7 +172,8 @@ RecipeOptions RecipeOptions::inherit(const RecipeOptions& options) const {
     bool merge_args = options_.contains("merge_args") ? options_["merge_args"].get<bool>() : options.get_option("merge_args").get<bool>();
 
     for (auto it = options.options_.begin(); it != options.options_.end(); ++it) {
-        if (merge_args && it.key().size() >= 5 && it.key().substr(it.key().size() - 5) == "_args") {
+        if (merge_args && it.key() != "merge_args" && it.key().size() >= 5 &&
+            it.key().substr(it.key().size() - 5) == "_args") {
             // Special handling for _args options: parse, merge maps, re-stringify
             std::string target_str = "";
             if (merged.contains(it.key()) && merged[it.key()].is_string()) {

@@ -441,7 +441,7 @@ void RuntimeConfig::validate(const std::string& key, const json& value) const {
         }
         std::string channel = value.get<std::string>();
         if (channel != "stable" && channel != "nightly") {
-            throw std::invalid_argument("'rocm_channel' must be either 'stable', or 'nightly'");
+            throw std::invalid_argument("'rocm_channel' must be either 'stable' or 'nightly'");
         }
     } else if (is_backend_name(key)) {
         if (!value.is_object()) {

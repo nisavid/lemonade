@@ -170,10 +170,10 @@ bool validate_and_transform_model_json(nlohmann::json& model_data) {
 
     std::string model_name = model_data["model_name"].get<std::string>();
     if (lemon::is_reserved_registration_name(model_name)) {
-        std::cerr << "Error: Model names with 'extra.' / 'builtin.' prefixes are reserved, "
-                  << "including as bare-name parts of a 'user.' alias. "
+        std::cerr << "Error: Model names with 'user.', 'extra.', or 'builtin.' "
+                  << "as the bare-name prefix are reserved. "
                   << "Use 'user.<name>' for import where <name> does not begin "
-                  << "with 'extra.' or 'builtin.'." << std::endl;
+                  << "with a canonical source prefix." << std::endl;
         return false;
     }
     if (!lemon::parse_canonical_id(model_name)) {

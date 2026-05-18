@@ -985,7 +985,7 @@ Labels describe what a model can do. A model may carry multiple labels.
 | `embeddings` | `/embeddings` | Produces text embedding vectors. |
 | `reranking` | `/reranking` | Scores and reranks a list of passages given a query. |
 | `image` | `/images/generations` | Text-to-image generation model. |
-| `edit` | Image editing model; supports the `/images/edits` endpoint. |
+| `edit` | `/images/edits` | Image editing model. |
 | `tts` | `/audio/speech` | Text-to-speech synthesis model. |
 
 **Input-modality labels** — the model is deployed as an LLM but accepts additional input types in `/chat/completions`:
