@@ -734,7 +734,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
       a.modelName.localeCompare(b.modelName);
     const getBucket = (entry: ActiveModelEntry): number => {
       if (entry.isLoading) return 0;
-      if (entry.isPinned && entry.loadError) return 1;
+      if (entry.isPinned && entry.loadError && !entry.isLoaded) return 1;
       if (entry.isLoaded && entry.isPinned) return 2;
       if (entry.isLoaded) return 3;
       return 4;
@@ -757,9 +757,10 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
       if (isCollectionModel(modelsData[modelName])) continue;
       if (seen.has(modelName)) continue;
       seen.add(modelName);
+      const isCurrentlyLoading = loadingModels.has(modelName);
       entries.push({
         modelName,
-        isLoading: false,
+        isLoading: isCurrentlyLoading,
         isLoaded: true,
         isPinned: pinnedModels.has(modelName),
         loadError: pinLoadErrors[modelName] ?? null,
