@@ -741,7 +741,7 @@ std::map<std::string, ModelInfo> ModelManager::discover_extra_models() const {
         // Skip mmproj files - they're part of multimodal models
         if (contains_ignore_case(filename, "mmproj")) continue;
 
-        std::string model_name = make_extra_model_name(gguf_path.stem().string());
+        std::string model_name = make_extra_model_name(filename);
         if (model_name.empty()) continue;
         ModelInfo info = init_extra_model_info(model_name);
         info.checkpoints["main"] = gguf_path.string();

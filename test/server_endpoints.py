@@ -1626,11 +1626,12 @@ class EndpointTests(ServerTestBase):
             self._set_extra_models_dir(prior_dir)
             shutil.rmtree(extra_dir, ignore_errors=True)
 
-    def test_021i_extra_root_gguf_emits_stem_name(self):
-        """Root-level extra_models_dir GGUF files emit the filename stem."""
+    def test_021i_extra_root_gguf_emits_filename(self):
+        """Root-level extra_models_dir GGUF files emit the full filename."""
         bare = "Qwen3.5-4B-UD-Q4_K_XL"
+        filename = f"{bare}.gguf"
         extra_dir = tempfile.mkdtemp(prefix="lemon_extra_root_")
-        self._write_root_stub_gguf(extra_dir, f"{bare}.gguf")
+        self._write_root_stub_gguf(extra_dir, filename)
 
         prior_dir = self._set_extra_models_dir(extra_dir)
         try:
@@ -1640,25 +1641,66 @@ class EndpointTests(ServerTestBase):
             self.assertEqual(models_response.status_code, 200)
             ids = {m["id"] for m in models_response.json()["data"]}
 
-            self.assertIn(bare, ids)
-            self.assertNotIn(f"{bare}.gguf", ids)
+            self.assertIn(filename, ids)
+            self.assertNotIn(bare, ids)
 
-            bare_resp = requests.get(
-                f"{self.base_url}/models/{bare}", timeout=TIMEOUT_DEFAULT
+            filename_resp = requests.get(
+                f"{self.base_url}/models/{filename}", timeout=TIMEOUT_DEFAULT
             )
-            self.assertEqual(bare_resp.status_code, 200)
-            self.assertEqual(bare_resp.json()["id"], bare)
+            self.assertEqual(filename_resp.status_code, 200)
+            self.assertEqual(filename_resp.json()["id"], filename)
             self.assertEqual(
-                bare_resp.json()["checkpoint"],
-                os.path.join(extra_dir, f"{bare}.gguf"),
+                filename_resp.json()["checkpoint"],
+                os.path.join(extra_dir, filename),
             )
 
-            print(f"[OK] root GGUF emits stem: {bare}")
+            print(f"[OK] root GGUF emits filename: {filename}")
         finally:
             self._set_extra_models_dir(prior_dir)
             shutil.rmtree(extra_dir, ignore_errors=True)
 
-    def test_021j_extra_models_skip_reserved_source_prefix_stems(self):
+    def test_021j_extra_root_gguf_does_not_collide_with_directory(self):
+        """Extra root files and directory models with the same stem both load."""
+        bare = f"Collision-{uuid.uuid4().hex[:6]}"
+        filename = f"{bare}.gguf"
+        extra_dir = tempfile.mkdtemp(prefix="lemon_extra_collision_")
+        self._write_root_stub_gguf(extra_dir, filename)
+        self._write_stub_gguf(extra_dir, bare)
+
+        prior_dir = self._set_extra_models_dir(extra_dir)
+        try:
+            models_response = requests.get(
+                f"{self.base_url}/models?show_all=true", timeout=TIMEOUT_DEFAULT
+            )
+            self.assertEqual(models_response.status_code, 200)
+            ids = {m["id"] for m in models_response.json()["data"]}
+            self.assertIn(filename, ids)
+            self.assertIn(bare, ids)
+
+            file_resp = requests.get(
+                f"{self.base_url}/models/{filename}", timeout=TIMEOUT_DEFAULT
+            )
+            self.assertEqual(file_resp.status_code, 200)
+            self.assertEqual(
+                file_resp.json()["checkpoint"],
+                os.path.join(extra_dir, filename),
+            )
+
+            dir_resp = requests.get(
+                f"{self.base_url}/models/{bare}", timeout=TIMEOUT_DEFAULT
+            )
+            self.assertEqual(dir_resp.status_code, 200)
+            self.assertEqual(
+                dir_resp.json()["checkpoint"],
+                os.path.join(extra_dir, bare),
+            )
+
+            print("[OK] root GGUF and directory names do not collide")
+        finally:
+            self._set_extra_models_dir(prior_dir)
+            shutil.rmtree(extra_dir, ignore_errors=True)
+
+    def test_021k_extra_models_skip_reserved_source_prefix_stems(self):
         """Extra model discovery skips names that would form nested canonical IDs."""
         extra_dir = tempfile.mkdtemp(prefix="lemon_extra_reserved_")
         reserved_root = f"builtin.ReservedRoot-{uuid.uuid4().hex[:6]}"
@@ -1674,7 +1716,7 @@ class EndpointTests(ServerTestBase):
             self.assertEqual(models_response.status_code, 200)
             ids = {m["id"] for m in models_response.json()["data"]}
 
-            for reserved in [reserved_root, reserved_dir]:
+            for reserved in [f"{reserved_root}.gguf", reserved_dir]:
                 self.assertNotIn(reserved, ids)
                 self.assertNotIn(f"extra.{reserved}", ids)
                 response = requests.get(
