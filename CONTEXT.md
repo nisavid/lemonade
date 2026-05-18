@@ -133,6 +133,10 @@ _Avoid_: Updating backend pins without checking the corresponding recipe behavio
 Per-model or global runtime settings that shape how a recipe launches and runs.
 _Avoid_: Treating recipe options as model registry identity.
 
+**Model pin**:
+A server-owned model lifecycle preference that asks `lemond` to keep a model resident across startup and automatic eviction pressure.
+_Avoid_: Treating it as a desktop-app-local preference or as a backend version pin.
+
 **NPU exclusivity**:
 The rule that exclusive NPU recipes evict other NPU models before loading.
 _Avoid_: Assuming FLM coexistence rules apply to RyzenAI or whisper.cpp NPU models.
@@ -254,6 +258,7 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - **lemond** delegates model lifecycle and inference work to backend subprocesses.
 - A **model name** resolves to model metadata, a **recipe**, **checkpoints**, labels, loaded-model category, and recipe options.
 - A **recipe** selects the execution family; a **backend** selects the concrete engine or device path inside that family.
+- A **Model pin** is stored in `lemond` configuration and edited by clients through server APIs.
 - Loaded-model categories control per-type LRU slots; **NPU exclusivity** controls cross-type NPU eviction.
 - **OmniRouter** uses **Collections** and **tool definitions** to expose multi-modal endpoints through the standard tool-calling loop.
 - **Fork-local changes** target **fork origin** unless the user declares an **upstream contribution exception**.

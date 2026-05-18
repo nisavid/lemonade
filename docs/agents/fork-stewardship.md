@@ -43,13 +43,30 @@ Prefer short entries that tell future agents where to look and which false assum
 
 Preserve upstream commit identity when bringing upstream changes into this fork. Patch-equivalent content is not enough if upstream ancestry is lost.
 
-For upstream sync work:
+### Upstream tracking refs
+
+- `upstream` fetches from `https://github.com/lemonade-sdk/lemonade.git`; its push URL is disabled.
+- `upstream-main` tracks `upstream/main` and is mirrored to `origin/upstream-main` for proactive upstream scouting.
+- `origin/upstream-stable` marks this fork's chosen stable upstream release baseline; local `upstream-stable` tracks it for baseline maintenance.
+
+Use `.agents/skills/working-with-upstream-refs/SKILL.md` for upstream commit work, upstream release tags, branch comparisons, fork sync baselines, or repo-specific inputs to `syncing-forks-with-upstream`.
+
+For stable-baseline sync work:
+
+```bash
+git fetch origin
+git merge-base --is-ancestor origin/upstream-stable HEAD
+```
+
+When using `syncing-forks-with-upstream` in this repo, `origin/upstream-stable` is the default upstream baseline. Use `upstream/main` only when the user explicitly asks for unreleased upstream `main`.
+
+For user-requested upstream `main` sync work:
 
 ```bash
 git merge-base --is-ancestor upstream/main HEAD
 ```
 
-Use the equivalent check against the fetched upstream ref if an `upstream` remote is not configured. Avoid rebase, force-push, `gh repo sync --force`, and other history-replacing flows unless the user explicitly requests that behavior.
+Avoid rebase, force-push, `gh repo sync --force`, and other history-replacing flows unless the user explicitly requests that behavior.
 
 ## Documentation Shape
 

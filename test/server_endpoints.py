@@ -21,6 +21,9 @@ Usage:
 """
 
 import platform
+import threading
+import time
+from urllib.parse import quote
 import uuid
 import requests
 from openai import NotFoundError
@@ -101,6 +104,7 @@ class EndpointTests(ServerTestBase):
             "completions",
             "embeddings",
             "models",
+            "pins",
             "responses",
             "pull",
             "delete",
@@ -622,6 +626,137 @@ class EndpointTests(ServerTestBase):
             f"[OK] /load after auto-load was a no-op and kept PID "
             f"{loaded_after['pid']}"
         )
+
+    def test_012d_pin_loaded_model_and_unpin_without_unloading(self):
+        """Pins apply to an already-loaded model and unpinning does not unload it."""
+        requests.post(
+            f"{self.base_url}/unload",
+            json={"model_name": ENDPOINT_TEST_MODEL},
+            timeout=TIMEOUT_DEFAULT,
+        )
+        response = requests.post(
+            f"{self.base_url}/load",
+            json={"model_name": ENDPOINT_TEST_MODEL},
+            timeout=TIMEOUT_MODEL_OPERATION,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/pins",
+                json={"model_name": ENDPOINT_TEST_MODEL},
+                timeout=TIMEOUT_DEFAULT,
+            )
+            self.assertEqual(response.status_code, 200)
+
+            pins = requests.get(f"{self.base_url}/pins", timeout=TIMEOUT_DEFAULT).json()
+            pin_entry = next(
+                item for item in pins["data"] if item["model_name"] == ENDPOINT_TEST_MODEL
+            )
+            self.assertTrue(pin_entry["loaded"])
+            self.assertIsNone(pin_entry["load_error"])
+
+            loaded = self._get_loaded_model_info(ENDPOINT_TEST_MODEL)
+            self.assertTrue(loaded["pinned"])
+
+            response = requests.delete(
+                f"{self.base_url}/pins/{quote(ENDPOINT_TEST_MODEL, safe='')}",
+                timeout=TIMEOUT_DEFAULT,
+            )
+            self.assertEqual(response.status_code, 200)
+
+            pins = requests.get(f"{self.base_url}/pins", timeout=TIMEOUT_DEFAULT).json()
+            self.assertNotIn(
+                ENDPOINT_TEST_MODEL,
+                {item["model_name"] for item in pins["data"]},
+            )
+
+            loaded = self._get_loaded_model_info(ENDPOINT_TEST_MODEL)
+            self.assertIsNotNone(loaded)
+            self.assertFalse(loaded["pinned"])
+        finally:
+            requests.delete(
+                f"{self.base_url}/pins/{quote(ENDPOINT_TEST_MODEL, safe='')}",
+                timeout=TIMEOUT_DEFAULT,
+            )
+
+    def test_012e_pin_model_while_loading(self):
+        """POST /pins accepts a model while its /load request is still running."""
+        requests.post(
+            f"{self.base_url}/unload",
+            json={"model_name": ENDPOINT_TEST_MODEL},
+            timeout=TIMEOUT_DEFAULT,
+        )
+
+        load_result = {}
+
+        def load_model():
+            load_result["response"] = requests.post(
+                f"{self.base_url}/load",
+                json={"model_name": ENDPOINT_TEST_MODEL, "ctx_size": 3072},
+                timeout=TIMEOUT_MODEL_OPERATION,
+            )
+
+        load_thread = threading.Thread(target=load_model)
+        load_thread.start()
+
+        try:
+            pin_response = None
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                pin_response = requests.post(
+                    f"{self.base_url}/pins",
+                    json={"model_name": ENDPOINT_TEST_MODEL},
+                    timeout=TIMEOUT_DEFAULT,
+                )
+                if pin_response.status_code == 200:
+                    break
+                if not load_thread.is_alive():
+                    break
+                time.sleep(0.05)
+
+            load_thread.join(timeout=TIMEOUT_MODEL_OPERATION)
+            self.assertFalse(load_thread.is_alive(), "/load request did not finish")
+            self.assertEqual(load_result["response"].status_code, 200)
+            if pin_response is not None and pin_response.status_code != 200:
+                pin_response = requests.post(
+                    f"{self.base_url}/pins",
+                    json={"model_name": ENDPOINT_TEST_MODEL},
+                    timeout=TIMEOUT_DEFAULT,
+                )
+            self.assertIsNotNone(pin_response)
+            self.assertEqual(pin_response.status_code, 200)
+
+            loaded = self._get_loaded_model_info(ENDPOINT_TEST_MODEL)
+            self.assertTrue(loaded["pinned"])
+        finally:
+            requests.delete(
+                f"{self.base_url}/pins/{quote(ENDPOINT_TEST_MODEL, safe='')}",
+                timeout=TIMEOUT_DEFAULT,
+            )
+            if load_thread.is_alive():
+                load_thread.join(timeout=TIMEOUT_MODEL_OPERATION)
+
+    def test_012f_pin_rejects_idle_unloaded_model(self):
+        """POST /pins rejects models that are neither loaded nor loading."""
+        requests.post(
+            f"{self.base_url}/unload",
+            json={"model_name": ENDPOINT_TEST_MODEL},
+            timeout=TIMEOUT_DEFAULT,
+        )
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/pins",
+                json={"model_name": ENDPOINT_TEST_MODEL},
+                timeout=TIMEOUT_DEFAULT,
+            )
+            self.assertEqual(response.status_code, 400)
+        finally:
+            requests.delete(
+                f"{self.base_url}/pins/{quote(ENDPOINT_TEST_MODEL, safe='')}",
+                timeout=TIMEOUT_DEFAULT,
+            )
 
     def test_013_unload_specific_model(self):
         """Test unloading a specific model by name."""

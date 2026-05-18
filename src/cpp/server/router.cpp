@@ -76,7 +76,7 @@ WrappedServer* Router::get_most_recent_server() const {
 int Router::count_servers_by_type(ModelType type) const {
     int count = 0;
     for (const auto& server : loaded_servers_) {
-        if (server->get_model_type() == type) {
+        if (server->get_model_type() == type && !server->is_pinned()) {
             count++;
         }
     }
@@ -87,7 +87,7 @@ WrappedServer* Router::find_lru_server_by_type(ModelType type) const {
     WrappedServer* lru = nullptr;
 
     for (const auto& server : loaded_servers_) {
-        if (server->get_model_type() == type) {
+        if (server->get_model_type() == type && !server->is_pinned()) {
             if (!lru || server->get_last_access_time() < lru->get_last_access_time()) {
                 lru = server.get();
             }
@@ -95,6 +95,12 @@ WrappedServer* Router::find_lru_server_by_type(ModelType type) const {
     }
 
     return lru;
+}
+
+bool Router::is_config_pinned(const std::string& canonical_model_name) const {
+    auto pinned_models = config_->pinned_models();
+    return std::find(pinned_models.begin(), pinned_models.end(), canonical_model_name)
+        != pinned_models.end();
 }
 
 bool Router::has_npu_server() const {
@@ -138,10 +144,15 @@ WrappedServer* Router::find_flm_server_by_type(ModelType type) const {
 }
 
 // Helper: Evict all NPU servers
-void Router::evict_all_npu_servers() {
+void Router::evict_all_npu_servers(bool include_pinned) {
     std::vector<WrappedServer*> npu_servers;
     for (const auto& server : loaded_servers_) {
         if (server->get_device_type() & DEVICE_NPU) {
+            if (server->is_pinned() && !include_pinned) {
+                throw std::runtime_error(
+                    "Pinned model requires NPU access and cannot be evicted: "
+                    + server->get_model_name());
+            }
             npu_servers.push_back(server.get());
         }
     }
@@ -176,21 +187,29 @@ void Router::evict_server(WrappedServer* server) {
     LOG(INFO, "Router") << "Evicted model: " << model_name << std::endl;
 }
 
-void Router::evict_all_servers() {
+void Router::evict_all_servers(bool include_pinned) {
     LOG(INFO, "Router") << "Evicting all models (" << loaded_servers_.size() << " total)" << std::endl;
 
     // Wait for all servers to finish (with timeout to prevent infinite hang).
     for (const auto& server : loaded_servers_) {
+        if (server->is_pinned() && !include_pinned) continue;
         server->wait_until_not_busy(EVICTION_TIMEOUT);
     }
 
     // Unload all
     for (const auto& server : loaded_servers_) {
-    LOG(INFO, "Router") << "Unloading: " << server->get_model_name() << std::endl;
+        if (server->is_pinned() && !include_pinned) continue;
+        LOG(INFO, "Router") << "Unloading: " << server->get_model_name() << std::endl;
         server->unload();
     }
 
-    loaded_servers_.clear();
+    loaded_servers_.erase(
+        std::remove_if(loaded_servers_.begin(), loaded_servers_.end(),
+                      [include_pinned](const std::unique_ptr<WrappedServer>& server) {
+                          return include_pinned || !server->is_pinned();
+                      }),
+        loaded_servers_.end()
+    );
     LOG(INFO, "Router") << "All models evicted" << std::endl;
 }
 
@@ -274,7 +293,7 @@ double Router::sample_total_gpu_occupancy_gb() const {
 double Router::get_lemonade_gpu_occupancy_gb() const {
     double total = 0.0;
     for (const auto& server : loaded_servers_) {
-        if (is_gpu_resident_server(*server)) {
+        if (!server->is_pinned() && is_gpu_resident_server(*server)) {
             total += std::max(0.0, server->get_gpu_memory_occupancy_gb());
         }
     }
@@ -388,7 +407,7 @@ void Router::enforce_gpu_memory_capacity(const ModelInfo& model_info,
     inputs.candidate_occupancy_gb = estimate_gpu_memory_occupancy_gb(model_info, options);
     for (const auto& server : loaded_servers_) {
         if (server.get() == replacement_server) continue;
-        if (is_gpu_resident_server(*server)) {
+        if (!server->is_pinned() && is_gpu_resident_server(*server)) {
             inputs.residents.push_back({
                 server->get_model_name(),
                 server->get_gpu_memory_occupancy_gb()
@@ -423,9 +442,11 @@ void Router::load_model(const std::string& model_name,
                        const ModelInfo& model_info,
                        RecipeOptions options,
                        bool do_not_upgrade,
-                       bool allow_reload_on_option_change) {
+                       bool allow_reload_on_option_change,
+                       bool pin_model) {
     const std::string canonical_model_name = resolve_model_name(model_name);
     RecipeOptions default_opt = RecipeOptions(model_info.recipe, config_->recipe_options());
+    const bool model_should_be_pinned = pin_model || is_config_pinned(canonical_model_name);
 
     // Resolve settings: load overrides take precedence over per-model overrides which take precedence over defaults
         RecipeOptions effective_options = options.inherit(model_info.recipe_options.inherit(default_opt));
@@ -464,6 +485,9 @@ void Router::load_model(const std::string& model_name,
                 // Fall through to admission checks before unloading the existing instance.
             } else {
                 LOG(INFO, "Router") << "Model already loaded, updating access time" << std::endl;
+                if (model_should_be_pinned) {
+                    existing->set_pinned(true);
+                }
                 existing->update_access_time();
                 is_loading_ = false;
                 load_cv_.notify_all();
@@ -487,7 +511,7 @@ void Router::load_model(const std::string& model_name,
                 if (has_npu_server()) {
                     LOG(INFO, "Router") << model_info.recipe
                               << " requires exclusive NPU access, evicting all NPU servers..." << std::endl;
-                    evict_all_npu_servers();
+                    evict_all_npu_servers(/*include_pinned=*/model_should_be_pinned);
                 }
             } else if (model_info.recipe == "flm") {
                 // FLM can coexist with other FLM types, but not with exclusive-NPU recipes
@@ -495,6 +519,11 @@ void Router::load_model(const std::string& model_name,
                 for (const std::string& exclusive_recipe : {"ryzenai-llm", "whispercpp"}) {
                     WrappedServer* exclusive_server = find_npu_server_by_recipe(exclusive_recipe);
                     if (exclusive_server) {
+                        if (exclusive_server->is_pinned() && !model_should_be_pinned) {
+                            throw std::runtime_error(
+                                "Pinned model requires NPU access and cannot be evicted: "
+                                + exclusive_server->get_model_name());
+                        }
                         LOG(INFO, "Router") << "FLM cannot coexist with " << exclusive_recipe
                                   << ", evicting: " << exclusive_server->get_model_name() << std::endl;
                         evict_server(exclusive_server);
@@ -503,6 +532,11 @@ void Router::load_model(const std::string& model_name,
                 // 2. Evict FLM of the SAME model type (max 1 per type: 1 LLM, 1 audio, 1 embed)
                 WrappedServer* same_type_flm = find_flm_server_by_type(model_type);
                 if (same_type_flm) {
+                    if (same_type_flm->is_pinned() && !model_should_be_pinned) {
+                        throw std::runtime_error(
+                            "Pinned model requires NPU access and cannot be evicted: "
+                            + same_type_flm->get_model_name());
+                    }
                     LOG(INFO, "Router") << "FLM " << model_type_to_string(model_type)
                               << " slot occupied by: " << same_type_flm->get_model_name()
                               << ", evicting..." << std::endl;
@@ -512,7 +546,7 @@ void Router::load_model(const std::string& model_name,
                 // Unknown NPU recipe - default to exclusive access
                 if (has_npu_server()) {
                     LOG(INFO, "Router") << "Unknown NPU recipe, evicting all NPU servers..." << std::endl;
-                    evict_all_npu_servers();
+                    evict_all_npu_servers(/*include_pinned=*/model_should_be_pinned);
                 }
             }
         }
@@ -545,6 +579,7 @@ void Router::load_model(const std::string& model_name,
 
         // Set model metadata
         new_server->set_model_metadata(canonical_model_name, model_info.checkpoint(), model_type, device_type, effective_options);
+        new_server->set_pinned(model_should_be_pinned);
         new_server->update_access_time();
 
         // CRITICAL: Release lock before slow backend startup
@@ -625,6 +660,7 @@ void Router::load_model(const std::string& model_name,
             // Create new server for retry
             std::unique_ptr<WrappedServer> retry_server = create_backend_server(model_info);
             retry_server->set_model_metadata(canonical_model_name, model_info.checkpoint(), model_type, device_type, effective_options);
+            retry_server->set_pinned(model_should_be_pinned);
             retry_server->update_access_time();
             const double retry_gpu_occupancy_before_load = requested_gpu ? sample_total_gpu_occupancy_gb() : -1.0;
 
@@ -682,7 +718,7 @@ void Router::unload_model(const std::string& model_name) {
     if (model_name.empty()) {
         // Unload all models
     LOG(INFO, "Router") << "Unload all models called" << std::endl;
-        evict_all_servers();
+        evict_all_servers(/*include_pinned=*/true);
     } else {
         // Unload specific model
     LOG(INFO, "Router") << "Unload model called: " << model_name << std::endl;
@@ -724,6 +760,7 @@ json Router::get_all_loaded_models() const {
         model_info["backend_url"] = server->get_address();  // For debugging port issues
         model_info["pid"] = server->get_process_id();
         model_info["gpu_memory_occupancy_gb"] = server->get_gpu_memory_occupancy_gb();
+        model_info["pinned"] = server->is_pinned();
         RecipeOptions recipe_options =  server->get_recipe_options();
         model_info["recipe"] = recipe_options.get_recipe();
         model_info["recipe_options"] = recipe_options.to_json();
@@ -767,6 +804,14 @@ RecipeOptions Router::get_model_recipe_options(const std::string& model_name) co
     auto* server = find_server_by_model_name(resolve_model_name(model_name));
     if (server) return server->get_recipe_options();
     return RecipeOptions();
+}
+
+void Router::set_model_pinned(const std::string& model_name, bool pinned) {
+    std::lock_guard<std::mutex> lock(load_mutex_);
+    auto* server = find_server_by_model_name(resolve_model_name(model_name));
+    if (server) {
+        server->set_pinned(pinned);
+    }
 }
 
 ModelType Router::get_model_type(const std::string& model_name) const {

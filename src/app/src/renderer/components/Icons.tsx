@@ -135,15 +135,21 @@ export const PlusIcon: React.FC = () => (
   </svg>
 );
 
-export const RefreshIcon: React.FC = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+export const RefreshIcon: React.FC<IconProps> = ({ size = 16, strokeWidth = 2 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <path
       d="M21 3V8M21 8H16M21 8L18 5.29168C16.4077 3.86656 14.3051 3 12 3C7.02944 3 3 7.02944 3 12C3 16.9706 7.02944 21 12 21C16.2832 21 19.8675 18.008 20.777 14"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
     />
+  </svg>
+);
+
+export const PlayIcon: React.FC<Pick<IconProps, 'size'>> = ({ size = 13 }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <polygon points="6 3 20 12 6 21 6 3" fill="currentColor" stroke="none" />
   </svg>
 );
 
@@ -159,6 +165,13 @@ export const EjectIcon: React.FC = () => (
     <path d="M9 11L12 8L15 11" />
     <path d="M12 8V16" />
     <path d="M5 20H19" />
+  </svg>
+);
+
+export const PinIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 17v5" />
+    <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
   </svg>
 );
 

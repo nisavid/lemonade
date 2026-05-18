@@ -128,6 +128,8 @@ public:
     int get_process_id() const { return process_handle_.pid; }
     double get_gpu_memory_occupancy_gb() const { return gpu_memory_occupancy_gb_.load(); }
     void set_gpu_memory_occupancy_gb(double value) { gpu_memory_occupancy_gb_.store(value); }
+    bool is_pinned() const { return is_pinned_.load(); }
+    void set_pinned(bool pinned) { is_pinned_.store(pinned); }
 
     // Load a model and start the server
     virtual void load(const std::string& model_name,
@@ -212,6 +214,7 @@ protected:
     std::chrono::steady_clock::time_point last_access_time_;
     RecipeOptions recipe_options_;
     std::atomic<double> gpu_memory_occupancy_gb_{0.0};
+    std::atomic<bool> is_pinned_{false};
 
     // Busy state tracking (for safe eviction)
     mutable std::mutex busy_mutex_;
