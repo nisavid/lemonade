@@ -1296,6 +1296,9 @@ class EndpointTests(ServerTestBase):
     def test_021c_naming_spec_pull_rejects_reserved_prefixes(self):
         """Naming spec: /pull rejects canonical source prefixes in registrations."""
         for reserved in [
+            "user.",
+            "extra.",
+            "builtin.",
             f"extra.Rejected-{uuid.uuid4().hex[:6]}",
             f"builtin.Rejected-{uuid.uuid4().hex[:6]}",
             # user.<source>.<bare> must also be rejected, otherwise it can

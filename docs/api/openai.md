@@ -977,16 +977,16 @@ curl http://localhost:13305/v1/models?show_all=true
 
 Labels describe what a model can do. A model may carry multiple labels.
 
-**Deployment labels** — determine which backend endpoint the model is routed to:
+**Deployment labels** — determine which public `/v1` API route the model is routed to:
 
 | Label | Endpoint | Description |
 |-------|----------|-------------|
-| `transcription` | `/audio/transcriptions` | Speech-to-text transcription model (e.g. Whisper). Mutually exclusive with LLM deployment. |
-| `embeddings` | `/embeddings` | Produces text embedding vectors. |
-| `reranking` | `/reranking` | Scores and reranks a list of passages given a query. |
-| `image` | `/images/generations` | Text-to-image generation model. |
-| `edit` | `/images/edits` | Image editing model. |
-| `tts` | `/audio/speech` | Text-to-speech synthesis model. |
+| `transcription` | `/v1/audio/transcriptions` | Speech-to-text transcription model (e.g. Whisper). Mutually exclusive with LLM deployment. |
+| `embeddings` | `/v1/embeddings` | Produces text embedding vectors. |
+| `reranking` | `/v1/reranking` | Scores and reranks a list of passages given a query. |
+| `image` | `/v1/images/generations` | Text-to-image generation model. |
+| `edit` | `/v1/images/edits` | Image editing model. |
+| `tts` | `/v1/audio/speech` | Text-to-speech synthesis model. |
 
 **Input-modality labels** — the model is deployed as an LLM but accepts additional input types in `/chat/completions`:
 

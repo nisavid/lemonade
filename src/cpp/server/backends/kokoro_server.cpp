@@ -25,8 +25,10 @@ namespace {
 // Kokoro doesn't expose backend selection through RuntimeConfig; we resolve it
 // from the host platform so each OS gets the right binary archive.
 std::string default_kokoro_backend() {
-#if defined(__APPLE__)
+#if defined(__APPLE__) && (defined(__arm64__) || defined(__aarch64__))
     return "metal";
+#elif defined(__APPLE__)
+    throw std::runtime_error("[KokoroServer] Kokoro is supported only on Apple Silicon macOS");
 #else
     return "cpu";
 #endif

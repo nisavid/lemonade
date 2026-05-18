@@ -151,7 +151,7 @@ void SDServer::load(const std::string& model_name,
 
     // Update device type based on the actual backend selected.
     // get_device_type_from_recipe() defaults sd-cpp to CPU, but rocm/vulkan/metal are GPU backends.
-    if (backend == "rocm" || backend == "vulkan" || backend == "metal") {
+    if (is_rocm_backend(resolved_backend) || resolved_backend == "vulkan" || resolved_backend == "metal") {
         device_type_ = DEVICE_GPU;
     } else {
         device_type_ = DEVICE_CPU;

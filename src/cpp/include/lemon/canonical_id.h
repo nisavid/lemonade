@@ -53,13 +53,19 @@ inline std::optional<CanonicalId> parse_canonical_id(const std::string& id) {
     static constexpr const char EXTRA_PREFIX[] = "extra.";
     static constexpr const char BUILTIN_PREFIX[] = "builtin.";
     if (id.rfind(USER_PREFIX, 0) == 0) {
-        return CanonicalId{ModelSource::Registered, id.substr(sizeof(USER_PREFIX) - 1)};
+        std::string bare_name = id.substr(sizeof(USER_PREFIX) - 1);
+        if (bare_name.empty()) return std::nullopt;
+        return CanonicalId{ModelSource::Registered, bare_name};
     }
     if (id.rfind(EXTRA_PREFIX, 0) == 0) {
-        return CanonicalId{ModelSource::Imported, id.substr(sizeof(EXTRA_PREFIX) - 1)};
+        std::string bare_name = id.substr(sizeof(EXTRA_PREFIX) - 1);
+        if (bare_name.empty()) return std::nullopt;
+        return CanonicalId{ModelSource::Imported, bare_name};
     }
     if (id.rfind(BUILTIN_PREFIX, 0) == 0) {
-        return CanonicalId{ModelSource::Builtin, id.substr(sizeof(BUILTIN_PREFIX) - 1)};
+        std::string bare_name = id.substr(sizeof(BUILTIN_PREFIX) - 1);
+        if (bare_name.empty()) return std::nullopt;
+        return CanonicalId{ModelSource::Builtin, bare_name};
     }
     return std::nullopt;
 }
@@ -87,7 +93,7 @@ inline bool is_reserved_for_registration(ModelSource source) {
 inline bool is_reserved_registration_name(const std::string& model_name) {
     auto canon = parse_canonical_id(model_name);
     if (!canon) {
-        return false;
+        return model_name == "user." || model_name == "extra." || model_name == "builtin.";
     }
     if (is_reserved_for_registration(canon->source)) {
         return true;
