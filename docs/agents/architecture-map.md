@@ -56,6 +56,10 @@ This file captures implementation landmarks that are useful before changing Lemo
 - Do not consolidate `src/app/package.json` and `src/web-app/package.json`; the split supports Debian native packaging with system Node modules.
 - Model pin controls belong at the leading edge of active-model list rows, not in the trailing unload/action button cluster.
 - The active-model UI should surface configured pinned models even when they are not currently loaded, so users can see failed/manual-unloaded pins and unpin them.
+- Keep the active-model section label as "ACTIVE MODELS". Without pins, its count pill reports `N loaded`; with pins, report `N loaded · M pinned`.
+- Active-model row ordering should prioritize current and actionable runtime state: loading rows, pinned rows with load errors, loaded pinned rows, loaded unpinned rows, then pinned-not-loaded rows without errors. Preserve server pin order inside pinned buckets; sort unpinned rows by display name.
+- Avoid visible group headers or separators in the active-model list until normal usage shows the list is too long to scan by row state alone.
+- Pinned-not-loaded rows should use the trailing action slot for `Load`; pinned rows with load errors should use that slot for `Retry`.
 
 ## OmniRouter
 

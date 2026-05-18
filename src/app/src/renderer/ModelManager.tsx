@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Boxes, Brain, ChevronRight, Cpu, EjectIcon, Eye, Flame, Layers, ListOrdered, PinIcon, Settings, SlidersHorizontal, Sparkles, SquareCode, Store, User, Wrench, XIcon } from './components/Icons';
+import { Boxes, Brain, ChevronRight, Cpu, EjectIcon, Eye, Flame, Layers, ListOrdered, PinIcon, PlayIcon, RefreshIcon, Settings, SlidersHorizontal, Sparkles, SquareCode, Store, User, Wrench, XIcon } from './components/Icons';
 import { ModelInfo } from './utils/modelData';
 import { ToastContainer, useToast } from './Toast';
 import { useConfirmDialog } from './ConfirmDialog';
@@ -302,6 +302,14 @@ interface PinInfo {
   model_name: string;
   loaded: boolean;
   load_error: string | null;
+}
+
+interface ActiveModelEntry {
+  modelName: string;
+  isLoading: boolean;
+  isLoaded: boolean;
+  isPinned: boolean;
+  loadError: string | null;
 }
 
 interface ServerErrorDetails {
@@ -715,19 +723,36 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
     }
   };
 
-  // Merge loaded and loading models so the list shows components as they
-  // start loading, not just after /health confirms them. Loading entries
-  // get an `isLoading` flag so the UI can render a pending indicator.
-  // Skip collection entries themselves — only show component models.
-  const loadedModelEntries = (() => {
-    const entries: Array<{
-      modelName: string;
-      isLoading: boolean;
-      isLoaded: boolean;
-      isPinned: boolean;
-      loadError: string | null;
-    }> = [];
+  // Merge loaded, loading, and configured pinned models so the active area can
+  // show both current residency and durable lifecycle preferences.
+  const loadedModelEntries = useMemo<ActiveModelEntry[]>(() => {
+    const entries: ActiveModelEntry[] = [];
     const seen = new Set<string>();
+    const pinOrderIndex = new Map(pinnedModelOrder.map((modelName, index) => [modelName, index]));
+    const compareByDisplayName = (a: ActiveModelEntry, b: ActiveModelEntry) =>
+      getModelDisplayName(a.modelName).localeCompare(getModelDisplayName(b.modelName)) ||
+      a.modelName.localeCompare(b.modelName);
+    const getBucket = (entry: ActiveModelEntry): number => {
+      if (entry.isLoading) return 0;
+      if (entry.isPinned && entry.loadError) return 1;
+      if (entry.isLoaded && entry.isPinned) return 2;
+      if (entry.isLoaded) return 3;
+      return 4;
+    };
+    const comparePinnedOrder = (a: ActiveModelEntry, b: ActiveModelEntry) => {
+      if (a.isPinned && b.isPinned) {
+        const pinOrderDiff = (pinOrderIndex.get(a.modelName) ?? Number.MAX_SAFE_INTEGER) -
+          (pinOrderIndex.get(b.modelName) ?? Number.MAX_SAFE_INTEGER);
+        return pinOrderDiff || compareByDisplayName(a, b);
+      }
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+      return compareByDisplayName(a, b);
+    };
+    const compareActiveEntries = (a: ActiveModelEntry, b: ActiveModelEntry) => {
+      const bucketDiff = getBucket(a) - getBucket(b);
+      return bucketDiff || comparePinnedOrder(a, b);
+    };
+
     for (const modelName of loadedModels) {
       if (isCollectionModel(modelsData[modelName])) continue;
       if (seen.has(modelName)) continue;
@@ -752,15 +777,11 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
         loadError: pinLoadErrors[modelName] ?? null,
       });
     }
-    const activeEntries = entries.sort((a, b) =>
-      getModelDisplayName(a.modelName).localeCompare(getModelDisplayName(b.modelName)) ||
-      a.modelName.localeCompare(b.modelName)
-    );
     for (const modelName of pinnedModelOrder) {
       if (seen.has(modelName)) continue;
       if (isCollectionModel(modelsData[modelName])) continue;
       seen.add(modelName);
-      activeEntries.push({
+      entries.push({
         modelName,
         isLoading: false,
         isLoaded: false,
@@ -768,8 +789,13 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
         loadError: pinLoadErrors[modelName] ?? null,
       });
     }
-    return activeEntries;
-  })();
+    return entries.sort(compareActiveEntries);
+  }, [loadedModels, loadingModels, modelsData, pinnedModelOrder, pinnedModels, pinLoadErrors]);
+  const loadedModelCount = loadedModelEntries.filter(entry => entry.isLoaded).length;
+  const pinnedModelCount = loadedModelEntries.filter(entry => entry.isPinned).length;
+  const activeModelCountText = pinnedModelCount > 0
+    ? `${loadedModelCount} loaded · ${pinnedModelCount} pinned`
+    : `${loadedModelCount} loaded`;
 
 
 
@@ -1852,21 +1878,30 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
             <div className="loaded-model-section widget">
               <div className="loaded-model-header">
                 <div className="loaded-model-label">ACTIVE MODELS</div>
-                <div className="loaded-model-count-pill">
-                  {loadedModelEntries.filter(e => e.isLoaded).length} loaded
+                <div className="loaded-model-count-pill active-model-count-pill">
+                  {activeModelCountText}
                 </div>
               </div>
               {loadedModelEntries.length === 0 && <div className="loaded-model-empty">No models loaded</div>}
               <div className="loaded-model-list">
                 {loadedModelEntries.map(({ modelName, isLoading, isLoaded, isPinned, loadError }) => {
                   const isPinning = pinningModels.has(modelName);
+                  const displayName = getModelDisplayName(modelName);
                   const pinDisabled = !pinsAvailable || isPinning || (!isPinned && !isLoaded && !isLoading);
                   const canPinActiveModel = pinsAvailable && !isPinned && (isLoaded || isLoading);
                   const pinTitle = !pinsAvailable
                     ? 'Pins require a newer Lemonade server'
                     : (isPinned ? 'Unpin model' : 'Pin model');
-                  const indicatorTitle = isLoading ? 'Loading' : (isLoaded ? 'Loaded' : (loadError || 'Pinned'));
-                  const indicatorClassName = `loaded-model-indicator${isLoading ? ' loading' : ''}${!isLoaded && !isLoading ? ' not-loaded' : ''}${loadError ? ' error' : ''}`;
+                  const pinAriaLabel = !pinsAvailable
+                    ? `Pins require a newer Lemonade server for ${displayName}`
+                    : `${isPinned ? 'Unpin' : 'Pin'} ${displayName}`;
+                  const hasLoadError = Boolean(loadError) && !isLoading;
+                  const indicatorTitle = isLoading
+                    ? 'Loading'
+                    : (isLoaded ? 'Loaded' : (hasLoadError ? `Load failed: ${loadError}` : 'Pinned'));
+                  const indicatorClassName = `loaded-model-indicator${isLoading ? ' loading' : ''}${!isLoaded && !isLoading ? ' not-loaded' : ''}${hasLoadError ? ' error' : ''}`;
+                  const showPinnedLoadAction = isPinned && !isLoaded && !isLoading;
+                  const loadActionLabel = `${hasLoadError ? 'Retry' : 'Load'} ${displayName}`;
 
                   return (
                     <div key={modelName} className={`loaded-model-info${isPinned ? ' pinned' : ''}${!isLoaded && !isLoading ? ' pinned-not-loaded' : ''}`}>
@@ -1875,7 +1910,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
                         onClick={() => isPinned ? handleUnpinModel(modelName) : handlePinModel(modelName)}
                         disabled={pinDisabled}
                         title={pinTitle}
-                        aria-label={pinTitle}
+                        aria-label={pinAriaLabel}
                         aria-pressed={isPinned}
                       >
                         <PinIcon />
@@ -1885,11 +1920,30 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
                           className={indicatorClassName}
                           title={indicatorTitle}
                         />
-                        <span className="loaded-model-name" title={modelName}>{getModelDisplayName(modelName)}</span>
+                        <span className="loaded-model-name" title={modelName}>{displayName}</span>
                       </div>
                       {isLoaded && !isLoading && (
-                        <button className="model-action-btn unload-btn active-model-eject-button" onClick={() => handleUnloadModel(modelName)} title="Eject model">
+                        <button
+                          className="model-action-btn unload-btn active-model-eject-button"
+                          onClick={() => handleUnloadModel(modelName)}
+                          title={`Eject ${displayName}`}
+                          aria-label={`Eject ${displayName}`}
+                        >
                           <EjectIcon />
+                        </button>
+                      )}
+                      {showPinnedLoadAction && (
+                        <button
+                          className={`model-action-btn ${hasLoadError ? 'retry-btn' : 'load-btn'} active-model-load-button`}
+                          onClick={() => handleLoadModel(modelName)}
+                          title={loadActionLabel}
+                          aria-label={loadActionLabel}
+                        >
+                          {hasLoadError ? (
+                            <RefreshIcon size={13} strokeWidth={2} />
+                          ) : (
+                            <PlayIcon size={12} strokeWidth={2} />
+                          )}
                         </button>
                       )}
                     </div>
@@ -1904,7 +1958,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
               <div className="available-models-section widget">
                 <div className="available-models-header">
                   <div className="loaded-model-label">SUGGESTED MODELS</div>
-                  <div className="loaded-model-count-pill">{availableModelCount} shown</div>
+                  <div className="loaded-model-count-pill suggested-model-count-pill">{availableModelCount} shown</div>
                 </div>
                 {renderModelsView()}
               </div>
