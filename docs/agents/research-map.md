@@ -13,6 +13,15 @@ Initial scout date: 2026-05-14. The local fork base matched upstream `lemonade-s
 
 Prefer live upstream sources for time-sensitive details such as latest releases, supported platforms, backend pins, model lists, or current website language.
 
+## Local Upstream Refs
+
+- `upstream/main`: fetched upstream `main`.
+- `upstream-main`: local scouting branch that tracks `upstream/main` and is mirrored to `origin/upstream-main`.
+- `origin/upstream-stable`: fork-owned stable upstream release baseline.
+- `upstream-stable`: local maintenance branch that tracks `origin/upstream-stable`.
+
+Use `.agents/skills/working-with-upstream-refs/SKILL.md` for current commands and branch-role rules before comparing, syncing, or investigating upstream commits.
+
 ## Local Source Routes
 
 ### Product shape and philosophy
