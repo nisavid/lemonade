@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   upload-ppa:
+    if: ${{ github.repository == 'lemonade-sdk/lemonade' }}
     runs-on: ubuntu-24.04
 
     name: Upload to PPA
