@@ -147,8 +147,8 @@ export const RefreshIcon: React.FC<IconProps> = ({ size = 16, strokeWidth = 2 })
   </svg>
 );
 
-export const PlayIcon: React.FC<IconProps> = ({ size = 13, strokeWidth = 2 }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+export const PlayIcon: React.FC<Pick<IconProps, 'size'>> = ({ size = 13 }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none">
     <polygon points="6 3 20 12 6 21 6 3" fill="currentColor" stroke="none" />
   </svg>
 );

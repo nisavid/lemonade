@@ -1943,7 +1943,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
                           {hasLoadError ? (
                             <RefreshIcon size={13} strokeWidth={2} />
                           ) : (
-                            <PlayIcon size={12} strokeWidth={2} />
+                            <PlayIcon size={12} />
                           )}
                         </button>
                       )}
