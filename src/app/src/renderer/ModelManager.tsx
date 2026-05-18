@@ -1896,7 +1896,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
                   const pinAriaLabel = !pinsAvailable
                     ? `Pins require a newer Lemonade server for ${displayName}`
                     : `${isPinned ? 'Unpin' : 'Pin'} ${displayName}`;
-                  const hasLoadError = Boolean(loadError) && !isLoading;
+                  const hasLoadError = Boolean(loadError) && !isLoading && !isLoaded;
                   const indicatorTitle = isLoading
                     ? 'Loading'
                     : (isLoaded ? 'Loaded' : (hasLoadError ? `Load failed: ${loadError}` : 'Pinned'));
