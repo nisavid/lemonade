@@ -290,7 +290,7 @@ const ModelOptionsModal: React.FC<SettingsModalProps> = ({ isOpen, onCancel, onS
   const handleReset = () => {
     if (!options?.recipe) return;
     setNumericDrafts({});
-    setOptions(createDefaultOptions(options.recipe));
+    setOptions(createDefaultOptions(options.recipe, modelInfo?.recipe_options as Record<string, unknown> | undefined));
   };
 
   const handleCopyModelName = async () => {
@@ -404,7 +404,7 @@ const ModelOptionsModal: React.FC<SettingsModalProps> = ({ isOpen, onCancel, onS
   }
 
   const recipe = options.recipe;
-  const availableOptions = getOptionsForRecipe(recipe);
+  const availableOptions = getOptionsForRecipe(recipe, modelInfo?.recipe_options as Record<string, unknown> | undefined);
 
   // Check if recipe has multiple backends available
   const hasMultipleBackends = modelInfo?.recipe && (supportedRecipes[modelInfo.recipe]?.length ?? 0) > 1;
