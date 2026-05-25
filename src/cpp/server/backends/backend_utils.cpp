@@ -16,6 +16,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -33,6 +34,27 @@
 using json = nlohmann::json;
 
 namespace lemon::backends {
+
+    static int run_archive_process(const std::string& executable,
+                                   const std::vector<std::string>& args,
+                                   std::string& output) {
+        output.clear();
+        try {
+            return lemon::utils::ProcessManager::run_process_with_output(
+                executable,
+                args,
+                [&](const std::string& line) {
+                    if (output.size() < 8192) {
+                        output += line;
+                        output += '\n';
+                    }
+                    return true;
+                });
+        } catch (const std::exception& e) {
+            output = e.what();
+            return -1;
+        }
+    }
 
     const BackendSpec* try_get_spec_for_recipe(const std::string& recipe) {
         if (recipe == "llamacpp") return &LlamaCppServer::SPEC;
@@ -60,19 +82,20 @@ namespace lemon::backends {
 
     static bool is_native_tar_available() {
         std::string tar_path = get_native_tar_path();
-        std::string command = tar_path + " --version >nul 2>&1";
         std::string unused;
-        return lemon::utils::ProcessManager::run_command(command, unused) == 0;
+        return run_archive_process(tar_path, {"--version"}, unused) == 0;
     }
 #endif
 
     bool BackendUtils::extract_zip(const std::string& zip_path, const std::string& dest_dir, const std::string& backend_name) {
-        std::string command;
+        std::string executable;
+        std::vector<std::string> args;
         fs::create_directories(dest_dir);
 #ifdef _WIN32
         if (is_native_tar_available()) {
             LOG(DEBUG, backend_name) << "Extracting ZIP with native tar to " << dest_dir << std::endl;
-            command = get_native_tar_path() + " -xf \"" + zip_path + "\" -C \"" + dest_dir + "\"";
+            executable = get_native_tar_path();
+            args = {"-xf", zip_path, "-C", dest_dir};
         } else {
             LOG(DEBUG, backend_name) << "Extracting ZIP via PowerShell to " << dest_dir << std::endl;
             std::string powershell_path = "powershell";
@@ -80,27 +103,35 @@ namespace lemon::backends {
             if (system_root) {
                 powershell_path = std::string(system_root) + "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
             }
-            command = powershell_path + " -Command \"Expand-Archive -Path '" + zip_path +
-                    "' -DestinationPath '" + dest_dir + "' -Force\"";
+            executable = powershell_path;
+            args = {"-NoProfile", "-NonInteractive", "-Command",
+                    "Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force",
+                    zip_path, dest_dir};
         }
 #elif defined(__APPLE__) || defined(__linux__)
         LOG(DEBUG, backend_name) << "Extracting zip to " << dest_dir << std::endl;
-        command = "unzip -o -q \"" + zip_path + "\" -d \"" + dest_dir + "\"";
+        executable = "unzip";
+        args = {"-o", "-q", zip_path, "-d", dest_dir};
 #endif
-        int result = system(command.c_str());
+        std::string output;
+        int result = run_archive_process(executable, args, output);
         if (result != 0) {
             #ifdef _WIN32
                 LOG(ERROR, backend_name) << "Extraction failed with code: " << result << std::endl;
             #else
                 LOG(ERROR, backend_name) << "Extraction failed. Ensure 'unzip' is installed. Code: " << result << std::endl;
             #endif
+            if (!output.empty()) {
+                LOG(ERROR, backend_name) << output;
+            }
             return false;
         }
         return true;
     }
 
     bool BackendUtils::extract_tarball(const std::string& tarball_path, const std::string& dest_dir, const std::string& backend_name) {
-        std::string command;
+        std::string executable;
+        std::vector<std::string> args;
         fs::create_directories(dest_dir);
         LOG(DEBUG, backend_name) << "Extracting tarball to " << dest_dir << std::endl;
 #ifdef _WIN32
@@ -108,13 +139,19 @@ namespace lemon::backends {
             LOG(ERROR, backend_name) << "Error: 'tar' command not found. Windows 10 (17063+) required." << std::endl;
             return false;
         }
-        command = get_native_tar_path() + " -xzf \"" + tarball_path + "\" -C \"" + dest_dir + "\" --strip-components=1 --no-same-owner";
+        executable = get_native_tar_path();
+        args = {"-xzf", tarball_path, "-C", dest_dir, "--strip-components=1", "--no-same-owner"};
 #else
-        command = "tar -xzf \"" + tarball_path + "\" -C \"" + dest_dir + "\" --strip-components=1 --no-same-owner";
+        executable = "tar";
+        args = {"-xzf", tarball_path, "-C", dest_dir, "--strip-components=1", "--no-same-owner"};
 #endif
-        int result = system(command.c_str());
+        std::string output;
+        int result = run_archive_process(executable, args, output);
         if (result != 0) {
             LOG(ERROR, backend_name) << "Extraction failed with code: " << result << std::endl;
+            if (!output.empty()) {
+                LOG(ERROR, backend_name) << output;
+            }
             return false;
         }
         return true;
