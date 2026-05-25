@@ -36,9 +36,9 @@ export interface LlamaOptions {
   ctxSize: NumericOption;
   llamacppBackend: StringOption;
   llamacppArgs: StringOption;
-  llamacppRerankingAdapter: StringOption;
-  llamacppRerankingTrueTokenId: NumericOption;
-  llamacppRerankingLogitScale: NumericOption;
+  llamacppRerankingAdapter?: StringOption;
+  llamacppRerankingTrueTokenId?: NumericOption;
+  llamacppRerankingLogitScale?: NumericOption;
   mergeArgs: BooleanOption;
   saveOptions: BooleanOption;
 }
@@ -293,12 +293,24 @@ export const OPTION_DEFINITIONS: Record<string, OptionDef> = {
 
 export type RecipeName = 'llamacpp' | 'whispercpp' | 'flm' | 'ryzenai-llm' | 'sd-cpp' | 'vllm';
 
+export const LLAMACPP_RERANKING_ADAPTER_OPTIONS = [
+  'llamacppRerankingAdapter',
+  'llamacppRerankingTrueTokenId',
+  'llamacppRerankingLogitScale',
+];
+
+const hasLlamacppRerankingAdapterOptions = (recipeOptions?: Record<string, unknown>): boolean => {
+  return recipeOptions != null
+    && Object.prototype.hasOwnProperty.call(recipeOptions, 'llamacpp_reranking_adapter');
+};
+
 /**
  * Maps recipe names to the option keys they support.
- * This mirrors the C++ get_keys_for_recipe() function in recipe_options.cpp
+ * This mirrors the baseline C++ get_keys_for_recipe() surface; model-specific
+ * controls are added by getOptionsForRecipe().
  */
 export const RECIPE_OPTIONS_MAP: Record<RecipeName, string[]> = {
-  'llamacpp': ['ctxSize', 'llamacppBackend', 'llamacppArgs', 'llamacppRerankingAdapter', 'llamacppRerankingTrueTokenId', 'llamacppRerankingLogitScale', 'mergeArgs', 'saveOptions'],
+  'llamacpp': ['ctxSize', 'llamacppBackend', 'llamacppArgs', 'mergeArgs', 'saveOptions'],
   'whispercpp': ['whispercppBackend', 'whispercppArgs', 'mergeArgs', 'saveOptions'],
   'flm': ['ctxSize', 'mergeArgs', 'saveOptions'],
   'ryzenai-llm': ['ctxSize', 'saveOptions'],
@@ -309,11 +321,25 @@ export const RECIPE_OPTIONS_MAP: Record<RecipeName, string[]> = {
 /**
  * Gets the option keys for a given recipe
  */
-export function getOptionsForRecipe(recipe: string): string[] {
-  if (recipe in RECIPE_OPTIONS_MAP) {
-    return RECIPE_OPTIONS_MAP[recipe as RecipeName];
+export function getOptionsForRecipe(recipe: string, recipeOptions?: Record<string, unknown>): string[] {
+  if (!(recipe in RECIPE_OPTIONS_MAP)) {
+    return [];
   }
-  return [];
+
+  const optionKeys = RECIPE_OPTIONS_MAP[recipe as RecipeName];
+  if (recipe === 'llamacpp' && hasLlamacppRerankingAdapterOptions(recipeOptions)) {
+    const insertionIndex = optionKeys.indexOf('mergeArgs');
+    if (insertionIndex === -1) {
+      return [...optionKeys, ...LLAMACPP_RERANKING_ADAPTER_OPTIONS];
+    }
+    return [
+      ...optionKeys.slice(0, insertionIndex),
+      ...LLAMACPP_RERANKING_ADAPTER_OPTIONS,
+      ...optionKeys.slice(insertionIndex),
+    ];
+  }
+
+  return [...optionKeys];
 }
 
 /**
@@ -379,8 +405,8 @@ export function clampOptionValue(key: string, value: number): number {
 /**
  * Creates default options for a recipe
  */
-export function createDefaultOptions(recipe: string): RecipeOptions {
-  const optionKeys = getOptionsForRecipe(recipe);
+export function createDefaultOptions(recipe: string, recipeOptions?: Record<string, unknown>): RecipeOptions {
+  const optionKeys = getOptionsForRecipe(recipe, recipeOptions);
   const result: Record<string, unknown> = { recipe };
 
   for (const key of optionKeys) {
@@ -397,7 +423,7 @@ export function createDefaultOptions(recipe: string): RecipeOptions {
  * Converts API response options to RecipeOptions format
  */
 export function apiToRecipeOptions(recipe: string, apiOptions?: Record<string, unknown>): RecipeOptions {
-  const optionKeys = getOptionsForRecipe(recipe);
+  const optionKeys = getOptionsForRecipe(recipe, apiOptions);
   const result: Record<string, unknown> = { recipe };
 
   for (const key of optionKeys) {
