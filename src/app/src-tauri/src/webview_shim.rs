@@ -93,7 +93,7 @@ pub(crate) fn apply(window: &WebviewWindow) {
 
 #[cfg(target_os = "linux")]
 fn install_platform_shim(webview: tauri::webview::PlatformWebview) {
-    use glib::object::{Cast, ObjectExt};
+    use webkit2gtk::glib::object::{Cast, ObjectExt};
     use webkit2gtk::{
         NavigationPolicyDecision, NavigationPolicyDecisionExt, PermissionRequestExt,
         PolicyDecisionExt, PolicyDecisionType, SettingsExt, URIRequestExt, UserContentInjectedFrames,
