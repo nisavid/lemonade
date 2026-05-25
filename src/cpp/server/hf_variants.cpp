@@ -1,5 +1,7 @@
 #include "lemon/hf_variants.h"
 
+#include "lemon/backends/llamacpp_reranking_adapter.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -292,11 +294,10 @@ nlohmann::json fetch_pull_variants(const std::string& checkpoint, bool& not_foun
     // Suggested labels.
     std::vector<std::string> labels;
     if (!vset.mmproj_files.empty()) add_label(labels, "vision");
-    {
-        std::string id_lower = to_lower(checkpoint);
-        if (id_lower.find("embed") != std::string::npos) add_label(labels, "embeddings");
-        if (id_lower.find("rerank") != std::string::npos) add_label(labels, "reranking");
-    }
+    std::string id_lower = to_lower(checkpoint);
+    if (id_lower.find("embed") != std::string::npos) add_label(labels, "embeddings");
+    if (id_lower.find("rerank") != std::string::npos) add_label(labels, "reranking");
+    if (id_lower.find("zerank-2") != std::string::npos) add_label(labels, "reranking");
 
     nlohmann::json out;
     out["checkpoint"] = checkpoint;
@@ -305,6 +306,13 @@ nlohmann::json fetch_pull_variants(const std::string& checkpoint, bool& not_foun
     out["suggested_name"] = suggested_name;
     out["suggested_labels"] = labels;
     out["mmproj_files"] = vset.mmproj_files;
+    if (id_lower.find("zerank-2") != std::string::npos) {
+        out["recipe_options"] = {
+            {"llamacpp_reranking_adapter", backends::ZEROENTROPY_LOGIT_SCORE_ADAPTER},
+            {"llamacpp_reranking_true_token_id", backends::ZEROENTROPY_TRUE_TOKEN_ID},
+            {"llamacpp_reranking_logit_scale", backends::ZEROENTROPY_LOGIT_SCALE}
+        };
+    }
 
     nlohmann::json variants_json = nlohmann::json::array();
     for (const auto& v : vset.variants) {

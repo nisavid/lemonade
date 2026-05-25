@@ -1109,6 +1109,20 @@
         ],
         "size": 0.0367
     },
+    "zerank-2-GGUF": {
+        "checkpoint": "mradermacher/zerank-2-GGUF:Q8_0",
+        "recipe": "llamacpp",
+        "suggested": false,
+        "labels": [
+            "reranking"
+        ],
+        "recipe_options": {
+            "llamacpp_reranking_adapter": "zeroentropy-logit-score",
+            "llamacpp_reranking_true_token_id": 9454,
+            "llamacpp_reranking_logit_scale": 5.0
+        },
+        "size": 8.1
+    },
     "Devstral-Small-2507-GGUF": {
         "checkpoint": "mistralai/Devstral-Small-2507_gguf:Q4_K_M",
         "recipe": "llamacpp",

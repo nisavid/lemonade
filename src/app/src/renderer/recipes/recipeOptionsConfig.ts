@@ -36,6 +36,9 @@ export interface LlamaOptions {
   ctxSize: NumericOption;
   llamacppBackend: StringOption;
   llamacppArgs: StringOption;
+  llamacppRerankingAdapter: StringOption;
+  llamacppRerankingTrueTokenId: NumericOption;
+  llamacppRerankingLogitScale: NumericOption;
   mergeArgs: BooleanOption;
   saveOptions: BooleanOption;
 }
@@ -172,6 +175,30 @@ export const OPTION_DEFINITIONS: Record<string, OptionDef> = {
     label: 'LlamaCpp Arguments',
     description: 'Custom arguments to pass to llama-server',
   },
+  llamacppRerankingAdapter: {
+    type: 'string',
+    default: '',
+    label: 'Reranking adapter',
+    description: 'Adapter used for llama.cpp reranking models',
+  },
+  llamacppRerankingTrueTokenId: {
+    type: 'numeric',
+    default: -1,
+    min: -1,
+    max: 99999999,
+    step: 1,
+    label: 'Reranking true token ID',
+    description: 'Selected token ID used by logit-score reranking adapters',
+  },
+  llamacppRerankingLogitScale: {
+    type: 'numeric',
+    default: 5.0,
+    min: 0.000001,
+    max: 99999999,
+    step: 0.1,
+    label: 'Reranking logit scale',
+    description: 'Scale applied when converting raw logits to relevance scores',
+  },
 
   // vLLM-specific options
   vllmBackend: {
@@ -271,7 +298,7 @@ export type RecipeName = 'llamacpp' | 'whispercpp' | 'flm' | 'ryzenai-llm' | 'sd
  * This mirrors the C++ get_keys_for_recipe() function in recipe_options.cpp
  */
 export const RECIPE_OPTIONS_MAP: Record<RecipeName, string[]> = {
-  'llamacpp': ['ctxSize', 'llamacppBackend', 'llamacppArgs', 'mergeArgs', 'saveOptions'],
+  'llamacpp': ['ctxSize', 'llamacppBackend', 'llamacppArgs', 'llamacppRerankingAdapter', 'llamacppRerankingTrueTokenId', 'llamacppRerankingLogitScale', 'mergeArgs', 'saveOptions'],
   'whispercpp': ['whispercppBackend', 'whispercppArgs', 'mergeArgs', 'saveOptions'],
   'flm': ['ctxSize', 'mergeArgs', 'saveOptions'],
   'ryzenai-llm': ['ctxSize', 'saveOptions'],
@@ -305,6 +332,9 @@ const FRONTEND_TO_API_MAP: Record<string, string> = {
   mergeArgs: 'merge_args',
   llamacppBackend: 'llamacpp_backend',
   llamacppArgs: 'llamacpp_args',
+  llamacppRerankingAdapter: 'llamacpp_reranking_adapter',
+  llamacppRerankingTrueTokenId: 'llamacpp_reranking_true_token_id',
+  llamacppRerankingLogitScale: 'llamacpp_reranking_logit_scale',
   whispercppBackend: 'whispercpp_backend',
   whispercppArgs: 'whispercpp_args',
   sdcppBackend: 'sd-cpp_backend',

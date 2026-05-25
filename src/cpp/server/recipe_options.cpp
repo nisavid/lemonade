@@ -18,6 +18,9 @@ static const json DEFAULTS = {
     {"llamacpp_device", ""},
     {"llamacpp_backend", ""},  // Will be overridden dynamically
     {"llamacpp_args", ""},
+    {"llamacpp_reranking_adapter", ""},
+    {"llamacpp_reranking_true_token_id", -1},
+    {"llamacpp_reranking_logit_scale", 5.0},
     {"sd-cpp_backend", ""},   // "" means auto-detect (mapped from "auto" in config.json)
     {"sdcpp_args", ""},
     {"whispercpp_backend", ""},  // "" means auto-detect (mapped from "auto" in config.json)
@@ -59,7 +62,14 @@ static const std::map<std::string, std::string> OPTION_TO_CLI_FLAG = {
 
 static std::vector<std::string> get_keys_for_recipe(const std::string& recipe) {
     if (recipe == "llamacpp") {
-        return {"ctx_size", "llamacpp_device", "llamacpp_backend", "llamacpp_args", "merge_args"};
+        return {"ctx_size",
+                "llamacpp_device",
+                "llamacpp_backend",
+                "llamacpp_args",
+                "llamacpp_reranking_adapter",
+                "llamacpp_reranking_true_token_id",
+                "llamacpp_reranking_logit_scale",
+                "merge_args"};
     } else if (recipe == "whispercpp") {
         return {"whispercpp_backend", "whispercpp_args", "merge_args"};
     } else if (recipe == "flm") {
