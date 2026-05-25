@@ -75,7 +75,7 @@ std::string get_therock_version() {
 
 InstallParams SDServer::get_install_params(const std::string& backend, const std::string& version) {
     InstallParams params;
-    params.repo = "lemonade-sdk/stable-diffusion.cpp";
+    params.repo = "leejet/stable-diffusion.cpp";
     std::string resolved_backend = resolve_sdcpp_backend(backend);
 
     // Transform version for URL (master-NNN-HASH -> master-HASH)
@@ -91,7 +91,7 @@ InstallParams SDServer::get_install_params(const std::string& backend, const std
 
     if (resolved_backend == "metal") {
 #if defined(__APPLE__) && (defined(__arm64__) || defined(__aarch64__))
-        params.filename = "sd-" + short_version + "-bin-Darwin-arm64-metal.zip";
+        params.filename = "sd-" + short_version + "-bin-Darwin-macOS-15.7.4-arm64.zip";
 #else
         throw std::runtime_error("Metal sd.cpp backend is currently supported only on Apple Silicon macOS");
 #endif
