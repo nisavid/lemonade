@@ -38,15 +38,25 @@ namespace lemon::backends {
     static int run_archive_process(const std::string& executable,
                                    const std::vector<std::string>& args,
                                    std::string& output) {
+        constexpr size_t max_output_size = 8192;
+        const std::string truncated_suffix = "... (output truncated)\n";
+        bool output_truncated = false;
+
         output.clear();
         try {
             return lemon::utils::ProcessManager::run_process_with_output(
                 executable,
                 args,
                 [&](const std::string& line) {
-                    if (output.size() < 8192) {
-                        output += line;
-                        output += '\n';
+                    const std::string next_line = line + '\n';
+                    if (output.size() + next_line.size() <= max_output_size) {
+                        output += next_line;
+                    } else if (!output_truncated) {
+                        if (output.size() > max_output_size - truncated_suffix.size()) {
+                            output.resize(max_output_size - truncated_suffix.size());
+                        }
+                        output += truncated_suffix;
+                        output_truncated = true;
                     }
                     return true;
                 });
@@ -122,7 +132,7 @@ namespace lemon::backends {
                 LOG(ERROR, backend_name) << "Extraction failed. Ensure 'unzip' is installed. Code: " << result << std::endl;
             #endif
             if (!output.empty()) {
-                LOG(ERROR, backend_name) << output;
+                LOG(ERROR, backend_name) << output << std::endl;
             }
             return false;
         }
@@ -150,7 +160,7 @@ namespace lemon::backends {
         if (result != 0) {
             LOG(ERROR, backend_name) << "Extraction failed with code: " << result << std::endl;
             if (!output.empty()) {
-                LOG(ERROR, backend_name) << output;
+                LOG(ERROR, backend_name) << output << std::endl;
             }
             return false;
         }
