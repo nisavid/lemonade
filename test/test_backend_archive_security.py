@@ -7,7 +7,7 @@ BACKEND_UTILS = REPO_ROOT / "src/cpp/server/backends/backend_utils.cpp"
 
 
 def _function_body(source: str, name: str) -> str:
-    match = re.search(rf"bool BackendUtils::{name}\([^)]*\) \{{", source)
+    match = re.search(rf"bool BackendUtils::{name}\b[^\{{]*\{{", source)
     if not match:
         raise AssertionError(f"{name} not found")
 
