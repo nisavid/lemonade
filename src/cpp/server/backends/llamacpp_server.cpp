@@ -1,13 +1,14 @@
-#include "lemon/backends/llamacpp_server.h"
-#include "lemon/backends/backend_utils.h"
 #include "lemon/backend_manager.h"
+#include "lemon/backends/backend_utils.h"
+#include "lemon/backends/llamacpp_reranking_adapter.h"
+#include "lemon/backends/llamacpp_server.h"
+#include "lemon/error_types.h"
 #include "lemon/runtime_config.h"
+#include "lemon/system_info.h"
 #include "lemon/utils/custom_args.h"
-#include "lemon/utils/process_manager.h"
 #include "lemon/utils/json_utils.h"
 #include "lemon/utils/path_utils.h"
-#include "lemon/error_types.h"
-#include "lemon/system_info.h"
+#include "lemon/utils/process_manager.h"
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -215,6 +216,7 @@ void LlamaCppServer::load(const std::string& model_name,
                          const RecipeOptions& options,
                          bool do_not_upgrade) {
     LOG(INFO, "LlamaCpp") << "Loading model: " << model_name << std::endl;
+    uses_zeroentropy_reranking_adapter_ = false;
 
     // Llamacpp Backend logging
     LOG(DEBUG, "LlamaCpp") << "Per-model settings: " << options.to_log_string() << std::endl;
@@ -263,6 +265,8 @@ void LlamaCppServer::load(const std::string& model_name,
     // Check for embeddings and reranking support based on model type
     bool supports_embeddings = (model_info.type == ModelType::EMBEDDING);
     bool supports_reranking = (model_info.type == ModelType::RERANKING);
+    bool uses_reranking_adapter = supports_reranking && is_zeroentropy_logit_score_adapter(options);
+    bool use_native_reranking = should_launch_native_llamacpp_reranking(model_info.type, options);
 
     // For embedding models, use a larger context size to support longer individual
     // strings. Embedding requests can include multiple strings in a batch, and each
@@ -344,9 +348,11 @@ void LlamaCppServer::load(const std::string& model_name,
     push_reserved(reserved_flags, "--embeddings", std::vector<std::string>{"--embedding"});
 
     // Add reranking support if the model supports it
-    if (supports_reranking) {
+    if (use_native_reranking) {
         LOG(INFO, "LlamaCpp") << "Model supports reranking, adding --reranking flag" << std::endl;
         push_arg(args, reserved_flags, "--reranking");
+    } else if (uses_reranking_adapter) {
+        LOG(INFO, "LlamaCpp") << "Model uses ZeroEntropy logit-score reranking adapter; starting llama-server as completion backend" << std::endl;
     }
     push_reserved(reserved_flags, "--reranking", std::vector<std::string>{"--rerank"});
 
@@ -475,10 +481,12 @@ void LlamaCppServer::load(const std::string& model_name,
     }
 
     LOG(DEBUG, "LlamaCpp") << "Model loaded on port " << port_ << std::endl;
+    uses_zeroentropy_reranking_adapter_ = uses_reranking_adapter;
 }
 
 void LlamaCppServer::unload() {
     LOG(INFO, "LlamaCpp") << "Unloading model..." << std::endl;
+    uses_zeroentropy_reranking_adapter_ = false;
 #ifdef _WIN32
     if (process_handle_.handle) {
 #else
@@ -517,6 +525,17 @@ json LlamaCppServer::embeddings(const json& request) {
 }
 
 json LlamaCppServer::reranking(const json& request) {
+    if (uses_zeroentropy_reranking_adapter_) {
+        int true_token_id = recipe_options_.get_option("llamacpp_reranking_true_token_id").get<int>();
+        double logit_scale = recipe_options_.get_option("llamacpp_reranking_logit_scale").get<double>();
+        return rerank_with_zeroentropy_logit_score_adapter(
+            request,
+            true_token_id,
+            logit_scale,
+            [this](const json& completion_request) {
+                return forward_request("/completion", completion_request);
+            });
+    }
     return forward_request("/v1/rerank", request);
 }
 

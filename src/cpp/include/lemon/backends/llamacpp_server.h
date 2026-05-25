@@ -51,6 +51,9 @@ public:
 
     // ITokenizerServer implementation
     json tokenize(const json& request) override;
+
+private:
+    bool uses_zeroentropy_reranking_adapter_ = false;
 };
 
 } // namespace backends

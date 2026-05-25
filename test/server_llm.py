@@ -670,6 +670,46 @@ class LLMTests(ServerTestBase):
             f"Expected food-related documents {expected_top_3} in top 3, got {actual_top_3}",
         )
 
+    @skip_if_unsupported("reranking")
+    def test_019_zeroentropy_zerank_adapter_reranking(self):
+        """Test zerank-2 reranking through Lemonade's selected-logit adapter."""
+        if os.environ.get("LEMONADE_TEST_ZERANK_ADAPTER") != "1":
+            self.skipTest(
+                "Set LEMONADE_TEST_ZERANK_ADAPTER=1 for live zerank-2 adapter validation"
+            )
+
+        model = os.environ.get("LEMONADE_TEST_ZERANK_MODEL", "zerank-2-GGUF")
+        documents = [
+            "Berlin is the capital of Germany.",
+            "Paris is the capital of France.",
+            "A baguette is bread.",
+        ]
+
+        response = requests.post(
+            f"{self.base_url}/reranking",
+            json={
+                "query": "capital of France",
+                "documents": documents,
+                "model": model,
+            },
+            timeout=TIMEOUT_MODEL_OPERATION,
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        self.assertNotIn("error", result)
+        results = result.get("results", [])
+        self.assertEqual(len(results), len(documents))
+        self.assertEqual(
+            results[0]["index"],
+            1,
+            f"Expected Paris document to rank first, got {results}",
+        )
+        self.assertTrue(
+            all(0 < r.get("relevance_score", 0) <= 1 for r in results),
+            f"Expected normalized scores in (0, 1], got {results}",
+        )
+
     # =========================================================================
     # MULTI-MODEL TESTS
     # =========================================================================

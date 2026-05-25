@@ -1,4 +1,5 @@
 #include <lemon/model_manager.h>
+#include <lemon/backends/llamacpp_reranking_adapter.h>
 #include <lemon/gguf_metadata.h>
 #include <lemon/gpu_memory_planner.h>
 #include <lemon/runtime_config.h>
@@ -54,7 +55,7 @@ static constexpr auto safe_dir_options = fs::directory_options::none;
 namespace lemon {
 
 // Properties which are defined by the user for model registration.
-static const std::vector<std::string> USER_DEFINED_MODEL_PROPS = std::vector<std::string>{"checkpoints", "checkpoint", "recipe", "mmproj", "size", "image_defaults", "components"};
+static const std::vector<std::string> USER_DEFINED_MODEL_PROPS = std::vector<std::string>{"checkpoints", "checkpoint", "recipe", "mmproj", "size", "image_defaults", "components", "recipe_options"};
 
 // Helper functions for string operations
 static std::string to_lower(const std::string& str) {
@@ -81,11 +82,72 @@ static bool contains_ignore_case(const std::string& str, const std::string& subs
     return to_lower(str).find(to_lower(substr)) != std::string::npos;
 }
 
+static bool is_zerank_2_model_id(const std::string& value) {
+    return contains_ignore_case(value, "zerank-2");
+}
+
+static json zeroentropy_logit_score_recipe_options() {
+    // 9454 is the "True" token in the zerank-2 tokenizer. A 5.0 scale keeps
+    // returned scores in a useful sigmoid range while preserving raw-logit rank.
+    return {
+        {"llamacpp_reranking_adapter", backends::ZEROENTROPY_LOGIT_SCORE_ADAPTER},
+        {"llamacpp_reranking_true_token_id", backends::ZEROENTROPY_TRUE_TOKEN_ID},
+        {"llamacpp_reranking_logit_scale", backends::ZEROENTROPY_LOGIT_SCALE}
+    };
+}
+
+static void merge_zeroentropy_logit_score_recipe_options(json& recipe_options) {
+    if (!recipe_options.is_object()) {
+        recipe_options = json::object();
+    }
+    json defaults = zeroentropy_logit_score_recipe_options();
+    for (auto& [key, value] : defaults.items()) {
+        if (!recipe_options.contains(key)) {
+            recipe_options[key] = value;
+        }
+    }
+}
+
 static constexpr const char USER_MODEL_PREFIX[] = "user.";
 static constexpr size_t USER_MODEL_PREFIX_LEN = sizeof(USER_MODEL_PREFIX) - 1;
 
 static bool has_label(const ModelInfo& info, const std::string& label) {
     return std::find(info.labels.begin(), info.labels.end(), label) != info.labels.end();
+}
+
+static bool is_zerank_2_model_info(const ModelInfo& info) {
+    if (info.recipe != "llamacpp") {
+        return false;
+    }
+    std::string main_path = info.resolved_path("main");
+    return is_zerank_2_model_id(info.model_name) ||
+           is_zerank_2_model_id(info.checkpoint()) ||
+           is_zerank_2_model_id(main_path) ||
+           (!main_path.empty() && is_zerank_2_model_id(fs::path(main_path).filename().string()));
+}
+
+static void normalize_zerank_2_labels(ModelInfo& info) {
+    if (!is_zerank_2_model_info(info)) {
+        return;
+    }
+
+    static const std::set<std::string> chat_labels = {
+        "chat-transcription",
+        "reasoning",
+        "tool-calling",
+        "tools",
+        "vision"
+    };
+    info.labels.erase(
+        std::remove_if(info.labels.begin(), info.labels.end(),
+                       [](const std::string& label) {
+                           return chat_labels.find(label) != chat_labels.end();
+                       }),
+        info.labels.end());
+
+    if (!has_label(info, "reranking")) {
+        info.labels.push_back("reranking");
+    }
 }
 
 // Built-ins are keyed bare in models_cache_; user.* and extra.* keys already
@@ -872,7 +934,11 @@ std::map<std::string, ModelInfo> ModelManager::discover_extra_models() const {
         ModelInfo info = init_extra_model_info(model_name);
         info.checkpoints["main"] = gguf_path.string();
         info.resolved_paths["main"] = gguf_path.string();
-        info.type = ModelType::LLM;
+        if (is_zerank_2_model_id(filename)) {
+            info.labels.push_back("reranking");
+        }
+        normalize_zerank_2_labels(info);
+        info.type = get_model_type_from_labels(info.labels);
 
         // Calculate size in GB
         try {
@@ -928,6 +994,9 @@ std::map<std::string, ModelInfo> ModelManager::discover_extra_models() const {
         info.checkpoints["main"] = dir_path;
         info.resolved_paths["main"] = main_model_path.string();
         info.size = total_size;
+        if (is_zerank_2_model_id(dir_name) || is_zerank_2_model_id(main_model_path.filename().string())) {
+            info.labels.push_back("reranking");
+        }
 
         // If mmproj found, set it and add vision label
         if (!mmproj_file.empty()) {
@@ -936,6 +1005,7 @@ std::map<std::string, ModelInfo> ModelManager::discover_extra_models() const {
             info.labels.push_back("vision");
         }
 
+        normalize_zerank_2_labels(info);
         info.type = get_model_type_from_labels(info.labels);
 
         discovered[model_name] = info;
@@ -1352,6 +1422,7 @@ void ModelManager::build_cache() {
         }
 
         // Populate type and device fields (multi-model support)
+        normalize_zerank_2_labels(info);
         info.type = get_model_type_from_labels(info.labels);
         info.device = get_device_type_from_recipe(info.recipe);
 
@@ -1391,6 +1462,7 @@ void ModelManager::build_cache() {
         }
 
         // Populate type and device fields (multi-model support)
+        normalize_zerank_2_labels(info);
         info.type = get_model_type_from_labels(info.labels);
         info.device = get_device_type_from_recipe(info.recipe);
 
@@ -1434,6 +1506,9 @@ void ModelManager::build_cache() {
     // we translate before lookup.
     for (auto& [name, info] : all_models) {
         json jro = json_recipe_options.count(name) ? json_recipe_options[name] : json(nullptr);
+        if (is_zerank_2_model_info(info)) {
+            merge_zeroentropy_logit_score_recipe_options(jro);
+        }
         info.recipe_options = build_recipe_options(info, jro, cache_key_to_canonical_id(name), recipe_options_);
     }
 
@@ -1557,7 +1632,6 @@ void ModelManager::add_model_to_cache(const std::string& model_name) {
     parse_image_defaults(info, *model_json);
     json jro = (model_json->contains("recipe_options") && (*model_json)["recipe_options"].is_object())
         ? (*model_json)["recipe_options"] : json(nullptr);
-    info.recipe_options = build_recipe_options(info, jro, cache_key_to_canonical_id(model_name), recipe_options_);
 
     info.suggested = JsonUtils::get_or_default<bool>(*model_json, "suggested", is_user_model);
     info.hf_load = JsonUtils::get_or_default<bool>(*model_json, "hf_load", false);
@@ -1570,10 +1644,14 @@ void ModelManager::add_model_to_cache(const std::string& model_name) {
     }
 
     // Populate type and device fields (multi-model support)
+    resolve_all_model_paths(info);
+    normalize_zerank_2_labels(info);
+    if (is_zerank_2_model_info(info)) {
+        merge_zeroentropy_logit_score_recipe_options(jro);
+    }
+    info.recipe_options = build_recipe_options(info, jro, cache_key_to_canonical_id(model_name), recipe_options_);
     info.type = get_model_type_from_labels(info.labels);
     info.device = get_device_type_from_recipe(info.recipe);
-
-    resolve_all_model_paths(info);
 
     // Check if it should be filtered out by backend availability
     std::map<std::string, ModelInfo> temp_map = {{model_name, info}};
@@ -2021,6 +2099,20 @@ void ModelManager::register_user_model(const std::string& model_name,
     }
     if (model_data.value("reranking", false)) {
         labels.insert("reranking");
+    }
+
+    std::string checkpoint = model_data.value("checkpoint", clean_name);
+    if (is_zerank_2_model_id(checkpoint) || is_zerank_2_model_id(clean_name)) {
+        labels.insert("reranking");
+        labels.erase("chat-transcription");
+        labels.erase("reasoning");
+        labels.erase("tool-calling");
+        labels.erase("tools");
+        labels.erase("vision");
+        json merged_recipe_options = model_entry.contains("recipe_options")
+            ? model_entry["recipe_options"] : json(nullptr);
+        merge_zeroentropy_logit_score_recipe_options(merged_recipe_options);
+        model_entry["recipe_options"] = std::move(merged_recipe_options);
     }
 
     // `recipe` already copied into `model_entry` by the USER_DEFINED_MODEL_PROPS
