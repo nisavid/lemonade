@@ -30,6 +30,13 @@ const RerankIcon: React.FC = () => (
   </svg>
 );
 
+const extractServerErrorMessage = (error: any): string => {
+  if (typeof error === 'string') return error;
+  if (error?.message) return error.message;
+  if (error?.details?.backend_error?.message) return error.details.backend_error.message;
+  return 'Unknown server error';
+};
+
 const RerankingPanel: React.FC<RerankingPanelProps> = ({
   isBusy, isInferring, activeModality,
   runPreFlight, reset, showError,
@@ -70,9 +77,13 @@ const RerankingPanel: React.FC<RerankingPanelProps> = ({
         }),
       });
 
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
       const data = await response.json();
+
+      if (data?.error) {
+        throw new Error(extractServerErrorMessage(data.error));
+      }
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
       if (data.results && Array.isArray(data.results)) {
         const results = data.results.map((r: any) => ({

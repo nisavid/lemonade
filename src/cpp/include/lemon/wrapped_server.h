@@ -175,6 +175,8 @@ public:
         telemetry_.prompt_tokens = prompt_tokens;
     }
 
+    friend class Router;
+
 protected:
     // Choose an available port
     int choose_port();
