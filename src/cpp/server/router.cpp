@@ -920,6 +920,7 @@ void Router::execute_streaming(const std::string& request_body, httplib::DataSin
             LOG(ERROR, "Router") << "No model specified in streaming request" << std::endl;
             std::string error_msg = "data: {\"error\":{\"message\":\"No model specified in request\",\"type\":\"invalid_request_error\"}}\n\n";
             sink.write(error_msg.c_str(), error_msg.size());
+            sink.done();
             return;
         }
 
@@ -927,11 +928,13 @@ void Router::execute_streaming(const std::string& request_body, httplib::DataSin
         if (!server) {
             std::string error_msg = "data: {\"error\":{\"message\":\"Model not loaded: " + requested_model + "\",\"type\":\"model_not_loaded\"}}\n\n";
             sink.write(error_msg.c_str(), error_msg.size());
+            sink.done();
             return;
         }
         if (!server->is_process_running()) {
             std::string error_msg = "data: {\"error\":{\"message\":\"Model not loaded: " + requested_model + "\",\"type\":\"model_not_loaded\"}}\n\n";
             sink.write(error_msg.c_str(), error_msg.size());
+            sink.done();
             return;
         }
 

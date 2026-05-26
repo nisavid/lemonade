@@ -9,10 +9,37 @@
 
 #include <chrono>
 #include <cstdio>
+#include <string>
 #include <thread>
+#include <vector>
 
 using lemon::utils::ProcessHandle;
 using lemon::utils::ProcessManager;
+
+namespace {
+
+struct Command {
+    std::string executable;
+    std::vector<std::string> args;
+};
+
+Command long_running_command() {
+#ifdef _WIN32
+    return {"cmd.exe", {"/C", "timeout /T 5 /NOBREAK > NUL"}};
+#else
+    return {"sleep", {"5"}};
+#endif
+}
+
+Command successful_exit_command() {
+#ifdef _WIN32
+    return {"cmd.exe", {"/C", "exit 0"}};
+#else
+    return {"true", {}};
+#endif
+}
+
+} // namespace
 
 int main() {
     int failures = 0;
@@ -23,8 +50,9 @@ int main() {
 
     ProcessHandle worker_child{nullptr, 0};
     std::thread launcher([&worker_child] {
+        const Command command = long_running_command();
         worker_child = ProcessManager::start_process(
-            "sleep", {"5"}, "", false);
+            command.executable, command.args, "", false);
     });
     launcher.join();
 
@@ -35,8 +63,9 @@ int main() {
 
     ProcessManager::stop_process(worker_child);
 
+    const Command command = successful_exit_command();
     ProcessHandle short_lived = ProcessManager::start_process(
-        "true", {}, "", false);
+        command.executable, command.args, "", false);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     expect_true(
         !ProcessManager::is_running(short_lived),
