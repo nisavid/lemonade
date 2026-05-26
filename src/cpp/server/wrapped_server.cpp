@@ -140,9 +140,9 @@ bool WrappedServer::wait_for_ready(const std::string& endpoint, long timeout_sec
 
 bool WrappedServer::is_process_running() const {
 #ifdef _WIN32
-    return process_handle_.handle != nullptr;
+    return utils::ProcessManager::is_running(process_handle_);
 #else
-    return process_handle_.pid > 0;
+    return utils::ProcessManager::is_running(process_handle_);
 #endif
 }
 

@@ -64,9 +64,12 @@ WrappedServer* Router::get_most_recent_server() const {
         return nullptr;
     }
 
-    WrappedServer* most_recent = loaded_servers_[0].get();
+    WrappedServer* most_recent = nullptr;
     for (const auto& server : loaded_servers_) {
-        if (server->get_last_access_time() > most_recent->get_last_access_time()) {
+        if (!server->is_process_running()) {
+            continue;
+        }
+        if (!most_recent || server->get_last_access_time() > most_recent->get_last_access_time()) {
             most_recent = server.get();
         }
     }
@@ -76,7 +79,8 @@ WrappedServer* Router::get_most_recent_server() const {
 int Router::count_servers_by_type(ModelType type) const {
     int count = 0;
     for (const auto& server : loaded_servers_) {
-        if (server->get_model_type() == type && !server->is_pinned()) {
+        if (server->is_process_running() &&
+            server->get_model_type() == type && !server->is_pinned()) {
             count++;
         }
     }
@@ -87,7 +91,8 @@ WrappedServer* Router::find_lru_server_by_type(ModelType type) const {
     WrappedServer* lru = nullptr;
 
     for (const auto& server : loaded_servers_) {
-        if (server->get_model_type() == type && !server->is_pinned()) {
+        if (server->is_process_running() &&
+            server->get_model_type() == type && !server->is_pinned()) {
             if (!lru || server->get_last_access_time() < lru->get_last_access_time()) {
                 lru = server.get();
             }
@@ -105,7 +110,7 @@ bool Router::is_config_pinned(const std::string& canonical_model_name) const {
 
 bool Router::has_npu_server() const {
     for (const auto& server : loaded_servers_) {
-        if (server->get_device_type() & DEVICE_NPU) {
+        if (server->is_process_running() && (server->get_device_type() & DEVICE_NPU)) {
             return true;
         }
     }
@@ -114,7 +119,7 @@ bool Router::has_npu_server() const {
 
 WrappedServer* Router::find_npu_server() const {
     for (const auto& server : loaded_servers_) {
-        if (server->get_device_type() & DEVICE_NPU) {
+        if (server->is_process_running() && (server->get_device_type() & DEVICE_NPU)) {
             return server.get();
         }
     }
@@ -124,7 +129,8 @@ WrappedServer* Router::find_npu_server() const {
 // Helper: Find NPU server with a specific recipe
 WrappedServer* Router::find_npu_server_by_recipe(const std::string& recipe) const {
     for (const auto& server : loaded_servers_) {
-        if ((server->get_device_type() & DEVICE_NPU) &&
+        if (server->is_process_running() &&
+            (server->get_device_type() & DEVICE_NPU) &&
             server->get_recipe_options().get_recipe() == recipe) {
             return server.get();
         }
@@ -135,7 +141,8 @@ WrappedServer* Router::find_npu_server_by_recipe(const std::string& recipe) cons
 // Helper: Find FLM server of a specific model type
 WrappedServer* Router::find_flm_server_by_type(ModelType type) const {
     for (const auto& server : loaded_servers_) {
-        if (server->get_recipe_options().get_recipe() == "flm" &&
+        if (server->is_process_running() &&
+            server->get_recipe_options().get_recipe() == "flm" &&
             server->get_model_type() == type) {
             return server.get();
         }
@@ -147,7 +154,7 @@ WrappedServer* Router::find_flm_server_by_type(ModelType type) const {
 void Router::evict_all_npu_servers(bool include_pinned) {
     std::vector<WrappedServer*> npu_servers;
     for (const auto& server : loaded_servers_) {
-        if (server->get_device_type() & DEVICE_NPU) {
+        if (server->is_process_running() && (server->get_device_type() & DEVICE_NPU)) {
             if (server->is_pinned() && !include_pinned) {
                 throw std::runtime_error(
                     "Pinned model requires NPU access and cannot be evicted: "
@@ -482,7 +489,12 @@ void Router::load_model(const std::string& model_name,
         // Check if model is already loaded
         WrappedServer* existing = find_server_by_model_name(canonical_model_name);
         if (existing) {
-            if (allow_reload_on_option_change &&
+            if (!existing->is_process_running()) {
+                LOG(WARNING, "Router") << "Discarding exited backend for model: "
+                                       << canonical_model_name << std::endl;
+                evict_server(existing);
+                existing = nullptr;
+            } else if (allow_reload_on_option_change &&
                 existing->get_recipe_options().to_json() != effective_options.to_json()) {
                 LOG(INFO, "Router") << "Options changed, reloading model: " << canonical_model_name << std::endl;
                 reload_existing = existing;
@@ -756,6 +768,9 @@ json Router::get_all_loaded_models() const {
     json result = json::array();
 
     for (const auto& server : loaded_servers_) {
+        if (!server->is_process_running()) {
+            continue;
+        }
         json model_info;
         model_info["model_name"] = model_manager_->get_public_model_name(server->get_model_name());
         model_info["checkpoint"] = server->get_checkpoint();
@@ -795,18 +810,24 @@ json Router::get_max_model_limits() const {
 
 bool Router::is_model_loaded() const {
     std::lock_guard<std::mutex> lock(load_mutex_);
-    return !loaded_servers_.empty();
+    return std::any_of(
+        loaded_servers_.begin(),
+        loaded_servers_.end(),
+        [](const std::unique_ptr<WrappedServer>& server) {
+            return server->is_process_running();
+        });
 }
 
 bool Router::is_model_loaded(const std::string& model_name) const {
     std::lock_guard<std::mutex> lock(load_mutex_);
-    return find_server_by_model_name(resolve_model_name(model_name)) != nullptr;
+    auto* server = find_server_by_model_name(resolve_model_name(model_name));
+    return server && server->is_process_running();
 }
 
 RecipeOptions Router::get_model_recipe_options(const std::string& model_name) const {
     std::lock_guard<std::mutex> lock(load_mutex_);
     auto* server = find_server_by_model_name(resolve_model_name(model_name));
-    if (server) return server->get_recipe_options();
+    if (server && server->is_process_running()) return server->get_recipe_options();
     return RecipeOptions();
 }
 
@@ -823,7 +844,7 @@ ModelType Router::get_model_type(const std::string& model_name) const {
     WrappedServer* server = model_name.empty()
         ? get_most_recent_server()
         : find_server_by_model_name(resolve_model_name(model_name));
-    return server ? server->get_model_type() : ModelType::LLM;
+    return (server && server->is_process_running()) ? server->get_model_type() : ModelType::LLM;
 }
 
 std::string Router::get_backend_address() const {
@@ -852,6 +873,9 @@ auto Router::execute_inference(const json& request, Func&& inference_func) -> de
 
         server = find_server_by_model_name(resolve_model_name(requested_model));
         if (!server) {
+            return ErrorResponse::from_exception(ModelNotLoadedException(requested_model));
+        }
+        if (!server->is_process_running()) {
             return ErrorResponse::from_exception(ModelNotLoadedException(requested_model));
         }
 
@@ -901,6 +925,11 @@ void Router::execute_streaming(const std::string& request_body, httplib::DataSin
 
         server = find_server_by_model_name(resolve_model_name(requested_model));
         if (!server) {
+            std::string error_msg = "data: {\"error\":{\"message\":\"Model not loaded: " + requested_model + "\",\"type\":\"model_not_loaded\"}}\n\n";
+            sink.write(error_msg.c_str(), error_msg.size());
+            return;
+        }
+        if (!server->is_process_running()) {
             std::string error_msg = "data: {\"error\":{\"message\":\"Model not loaded: " + requested_model + "\",\"type\":\"model_not_loaded\"}}\n\n";
             sink.write(error_msg.c_str(), error_msg.size());
             return;

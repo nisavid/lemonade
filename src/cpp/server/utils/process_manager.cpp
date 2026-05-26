@@ -38,6 +38,7 @@
 #include <errno.h>
 #ifdef __linux__
 #include <sys/prctl.h>  // PR_SET_PDEATHSIG — kill child when parent dies
+#include <sys/syscall.h>
 #endif
 #ifdef __APPLE__
 #include <spawn.h>      // posix_spawn — fork-safe child creation on macOS
@@ -536,6 +537,11 @@ ProcessHandle ProcessManager::start_process(
             std::string("posix_spawn failed: ") + strerror(spawn_rc));
     }
 #else
+#ifdef __linux__
+    const bool parent_thread_is_process_leader =
+        static_cast<pid_t>(syscall(SYS_gettid)) == getpid();
+#endif
+
     pid_t pid = fork();
 
     if (pid < 0) {
@@ -545,11 +551,13 @@ ProcessHandle ProcessManager::start_process(
     if (pid == 0) {
         // Child process
 #ifdef __linux__
-        // Ensure this child is killed when the parent process dies.
-        // This is the Linux equivalent of the Windows Job Object and
-        // prevents orphaned backend processes (llama-server, etc.)
-        // when lemond is killed or crashes.
-        prctl(PR_SET_PDEATHSIG, SIGTERM);
+        // Linux delivers PR_SET_PDEATHSIG when the forking thread exits, not
+        // only when the whole process exits. Lemonade can launch backends from
+        // temporary loader/request threads, so only enable it from the process
+        // leader. Service managers still clean up the full cgroup.
+        if (parent_thread_is_process_leader) {
+            prctl(PR_SET_PDEATHSIG, SIGTERM);
+        }
 #endif
 
         if (!working_dir.empty()) {
@@ -679,13 +687,20 @@ void ProcessManager::stop_process(ProcessHandle handle) {
     }
 #else
     if (handle.pid > 0) {
-        kill(handle.pid, SIGTERM);
+        if (kill(handle.pid, SIGTERM) != 0 && errno == ESRCH) {
+            return;
+        }
 
         // Wait for process to exit
         int status;
         bool exited_gracefully = false;
         for (int i = 0; i < 50; i++) {  // Try for 5 seconds
-            if (waitpid(handle.pid, &status, WNOHANG) > 0) {
+            pid_t wait_result = waitpid(handle.pid, &status, WNOHANG);
+            if (wait_result > 0) {
+                exited_gracefully = true;
+                break;
+            }
+            if (wait_result < 0 && errno == ECHILD) {
                 exited_gracefully = true;
                 break;
             }
