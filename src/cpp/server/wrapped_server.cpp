@@ -139,11 +139,7 @@ bool WrappedServer::wait_for_ready(const std::string& endpoint, long timeout_sec
 }
 
 bool WrappedServer::is_process_running() const {
-#ifdef _WIN32
     return utils::ProcessManager::is_running(process_handle_);
-#else
-    return utils::ProcessManager::is_running(process_handle_);
-#endif
 }
 
 json WrappedServer::forward_request(const std::string& endpoint, const json& request, long timeout_seconds) {

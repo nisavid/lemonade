@@ -14,7 +14,9 @@
 #include <chrono>
 #include <cstdio>
 #include <stdexcept>
+#include <string>
 #include <thread>
+#include <vector>
 
 using lemon::ModelInfo;
 using lemon::RecipeOptions;
@@ -22,6 +24,23 @@ using lemon::WrappedServer;
 using lemon::json;
 using lemon::utils::ProcessHandle;
 using lemon::utils::ProcessManager;
+
+namespace {
+
+struct Command {
+    std::string executable;
+    std::vector<std::string> args;
+};
+
+Command successful_exit_command() {
+#ifdef _WIN32
+    return {"cmd.exe", {"/C", "exit 0"}};
+#else
+    return {"true", {}};
+#endif
+}
+
+} // namespace
 
 namespace lemon {
 namespace utils {
@@ -88,7 +107,9 @@ int main() {
     };
 
     TestWrappedServer server;
-    ProcessHandle child = ProcessManager::start_process("true", {}, "", false);
+    const Command command = successful_exit_command();
+    ProcessHandle child = ProcessManager::start_process(
+        command.executable, command.args, "", false);
     server.set_process_handle(child);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));

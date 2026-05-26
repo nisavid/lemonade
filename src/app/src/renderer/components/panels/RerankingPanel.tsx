@@ -31,9 +31,20 @@ const RerankIcon: React.FC = () => (
 );
 
 const extractServerErrorMessage = (error: any): string => {
+  const stringifyFallback = (value: any, fallback: string): string => {
+    if (typeof value === 'string') return value;
+    if (value?.message) return value.message;
+    try {
+      return JSON.stringify(value) || fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const backendError = error?.details?.backend_error;
+  if (backendError) return stringifyFallback(backendError, 'Unknown backend error');
   if (typeof error === 'string') return error;
   if (error?.message) return error.message;
-  if (error?.details?.backend_error?.message) return error.details.backend_error.message;
   return 'Unknown server error';
 };
 
@@ -77,7 +88,13 @@ const RerankingPanel: React.FC<RerankingPanelProps> = ({
         }),
       });
 
-      const data = await response.json();
+      let data: any;
+      try {
+        data = await response.json();
+      } catch {
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error('Unexpected response format');
+      }
 
       if (data?.error) {
         throw new Error(extractServerErrorMessage(data.error));
