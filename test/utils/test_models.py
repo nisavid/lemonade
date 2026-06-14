@@ -97,9 +97,7 @@ def get_default_hf_cache_dir():
         return os.path.join(userprofile, ".cache", "huggingface", "hub")
     home = os.environ.get("HOME")
     if not home:
-        raise RuntimeError(
-            "HOME is not set; cannot resolve HuggingFace cache directory"
-        )
+        return None
     return os.path.join(home, ".cache", "huggingface", "hub")
 
 
@@ -123,6 +121,8 @@ def get_hf_cache_dir_candidates():
             continue
 
     for path in raw_candidates:
+        if not path:
+            continue
         normalized = os.path.normcase(os.path.abspath(path))
         if normalized in seen:
             continue

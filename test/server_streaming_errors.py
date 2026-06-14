@@ -59,7 +59,7 @@ class StreamingErrorTests(ServerTestBase):
             self.fail(f"Stream not properly terminated (sink.done() missing?): {exc}")
         return lines
 
-    def _ensure_test_model_loaded(self, attempts=3) -> None:
+    def _ensure_test_model_loaded(self, attempts: int = 3) -> None:
         """Load ENDPOINT_TEST_MODEL with bounded retry for transient setup failures.
 
         These tests are about streaming response termination, not /load reliability.

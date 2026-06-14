@@ -33,7 +33,21 @@ docker run -d \
 
 ### Docker Run with CPU backend
 
-To use the CPU backend, create or modify the `config.json` file in the `lemonade-recipe` volume:
+To use the CPU backend, create or modify `config.json` inside the `lemonade-recipe` volume, then start or restart the container. For a named Docker volume, one option is to write the file through a temporary helper container:
+
+```bash
+docker run --rm \
+  -v lemonade-recipe:/root/.cache/lemonade \
+  alpine sh -c 'mkdir -p /root/.cache/lemonade && cat > /root/.cache/lemonade/config.json <<EOF
+{
+  "llamacpp": {
+    "backend": "cpu"
+  }
+}
+EOF'
+```
+
+The resulting file should contain:
 
 ```json
 {
@@ -62,7 +76,7 @@ To use the ROCm backend, create or modify `config.json` inside the `lemonade-rec
 ```bash
 docker run --rm \
   -v lemonade-recipe:/root/.cache/lemonade \
-  alpine sh -c 'cat > /root/.cache/lemonade/config.json <<EOF
+  alpine sh -c 'mkdir -p /root/.cache/lemonade && cat > /root/.cache/lemonade/config.json <<EOF
 {
   "llamacpp": {
     "backend": "rocm"

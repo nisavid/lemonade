@@ -16,11 +16,6 @@
     <key>KeepAlive</key>
     <false/>
 
-    <key>StandardOutPath</key>
-    <string>/Users/Shared/lemonade-tray.out.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/Shared/lemonade-tray.err.log</string>
-
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>

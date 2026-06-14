@@ -72,7 +72,7 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
             text=True,
             env=env,
         )
-        for i in range(30):
+        for _ in range(30):
             try:
                 requests.get(f"http://localhost:{self.port}/api/v1/models", timeout=1)
                 break
