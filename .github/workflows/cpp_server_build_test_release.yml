@@ -133,9 +133,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: fetchcontent-windows-${{ hashFiles('CMakeLists.txt') }}
+          key: fetchcontent-windows-vs18-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
           restore-keys: |
-            fetchcontent-windows-
+            fetchcontent-windows-vs18-
 
       - name: Run setup.ps1 to configure environment
         shell: PowerShell
@@ -752,8 +752,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: fetchcontent-windows-embeddable-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: fetchcontent-windows-embeddable-
+          key: fetchcontent-windows-embeddable-vs18-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
+          restore-keys: fetchcontent-windows-embeddable-vs18-
 
       - name: Build embeddable archive
         shell: PowerShell
