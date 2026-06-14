@@ -66,6 +66,11 @@ For user-requested upstream `main` sync work:
 git merge-base --is-ancestor upstream/main HEAD
 ```
 
+This fork preserves legacy `LEMONADE_*` configuration environment migration as
+an active compatibility contract. Keep `ConfigFile::migrate_from_env()` and
+`test/server_env_vars.py` working when syncing upstream release changes around
+runtime configuration.
+
 Avoid rebase, force-push, `gh repo sync --force`, and other history-replacing flows unless the user explicitly requests that behavior.
 
 ## Documentation Shape
