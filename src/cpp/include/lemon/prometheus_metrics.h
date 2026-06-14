@@ -2,9 +2,9 @@
 
 #include <string>
 
-#include "router.h"
-
 namespace lemon {
+
+class Router;
 
 struct SystemMetrics {
     double cpu_percent = -1.0;

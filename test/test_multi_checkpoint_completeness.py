@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import struct
 import subprocess
 import tempfile
 import time
@@ -38,12 +39,28 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
         self.stop_server()
         shutil.rmtree(self.tmp_dir)
 
+    def list_row_for_model(self, output, model_id):
+        row = next((line for line in output.splitlines() if model_id in line), None)
+        self.assertIsNotNone(
+            row, f"Model {model_id} not found in CLI output:\n{output}"
+        )
+        return row
+
+    def write_stub_gguf(self, path):
+        with open(path, "wb") as f:
+            f.write(b"GGUF")
+            f.write(struct.pack("<I", 3))  # version
+            f.write(struct.pack("<Q", 0))  # tensor_count
+            f.write(struct.pack("<Q", 0))  # kv_count
+
     def start_server(self, capture_output=False):
         self.stop_server()
         env = os.environ.copy()
         # Ensure it doesn't use the real HF cache
         env["HF_HUB_CACHE"] = os.path.join(self.tmp_dir, "hf")
         os.makedirs(env["HF_HUB_CACHE"], exist_ok=True)
+        env["XDG_RUNTIME_DIR"] = os.path.join(self.tmp_dir, "xdg-runtime")
+        os.makedirs(env["XDG_RUNTIME_DIR"], mode=0o700, exist_ok=True)
 
         stdout = subprocess.PIPE if capture_output else subprocess.DEVNULL
         stderr = subprocess.PIPE if capture_output else subprocess.DEVNULL
@@ -59,7 +76,7 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
             try:
                 requests.get(f"http://localhost:{self.port}/api/v1/models", timeout=1)
                 break
-            except:
+            except requests.RequestException:
                 time.sleep(1)
         else:
             self.fail("Server timed out")
@@ -71,7 +88,7 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
                 stdout, stderr = self.server_proc.communicate(timeout=5)
                 self.server_stdout = stdout if stdout else ""
                 self.server_stderr = stderr if stderr else ""
-            except:
+            except subprocess.TimeoutExpired:
                 self.server_proc.kill()
                 stdout, stderr = self.server_proc.communicate()
                 self.server_stdout = stdout if stdout else ""
@@ -101,29 +118,27 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertIn("No", [l for l in res.stdout.splitlines() if model_id in l][0])
+        self.assertIn("No", self.list_row_for_model(res.stdout, model_id))
 
         # 2. One file
-        with open(path1, "w") as f:
-            f.write("fake")
+        self.write_stub_gguf(path1)
         self.start_server()
         res = subprocess.run(
             [self.cli_bin, "--port", str(self.port), "list"],
             capture_output=True,
             text=True,
         )
-        self.assertIn("No", [l for l in res.stdout.splitlines() if model_id in l][0])
+        self.assertIn("No", self.list_row_for_model(res.stdout, model_id))
 
         # 3. Two files
-        with open(path2, "w") as f:
-            f.write("fake")
+        self.write_stub_gguf(path2)
         self.start_server()
         res = subprocess.run(
             [self.cli_bin, "--port", str(self.port), "list"],
             capture_output=True,
             text=True,
         )
-        self.assertIn("Yes", [l for l in res.stdout.splitlines() if model_id in l][0])
+        self.assertIn("Yes", self.list_row_for_model(res.stdout, model_id))
 
         # 4. Partial file
         partial = path1 + ".partial"
@@ -135,7 +150,7 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertIn("No", [l for l in res.stdout.splitlines() if model_id in l][0])
+        self.assertIn("No", self.list_row_for_model(res.stdout, model_id))
         os.remove(partial)
 
         # 5. HF Marker logic
@@ -147,8 +162,7 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
         snapshot_dir = os.path.join(repo_dir, "snapshots", "main")
         os.makedirs(snapshot_dir, exist_ok=True)
         gguf_path = os.path.join(snapshot_dir, "model.gguf")
-        with open(gguf_path, "w") as f:
-            f.write("fake")
+        self.write_stub_gguf(gguf_path)
 
         # Register it
         with open(os.path.join(self.tmp_dir, "user_models.json"), "r") as f:
@@ -167,9 +181,7 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertIn(
-            "Yes", [l for l in res.stdout.splitlines() if hf_model_id in l][0]
-        )
+        self.assertIn("Yes", self.list_row_for_model(res.stdout, hf_model_id))
 
         # Add manifest at snapshot root
         manifest = os.path.join(snapshot_dir, ".download_manifest.json")
@@ -181,7 +193,21 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertIn("No", [l for l in res.stdout.splitlines() if hf_model_id in l][0])
+        self.assertIn("No", self.list_row_for_model(res.stdout, hf_model_id))
+
+        os.remove(manifest)
+        nested = os.path.join(snapshot_dir, "nested")
+        os.makedirs(nested, exist_ok=True)
+        nested_manifest = os.path.join(nested, ".download_manifest.json")
+        with open(nested_manifest, "w") as f:
+            f.write("{}")
+        self.start_server()
+        res = subprocess.run(
+            [self.cli_bin, "--port", str(self.port), "list"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("No", self.list_row_for_model(res.stdout, hf_model_id))
 
     def test_collection_status_with_incomplete_component(self):
         # Status-regression coverage for the collection fan-out skip predicate.
@@ -206,8 +232,7 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
             json.dump(user_models, f)
 
         # 1. Component incomplete (only 1 file)
-        with open(path1, "w") as f:
-            f.write("fake")
+        self.write_stub_gguf(path1)
 
         # Start server and capture output to verify fan-out logs
         self.start_server(capture_output=True)
@@ -247,15 +272,14 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
             json.dump(user_models, f)
 
         # Downloaded
-        with open(path, "w") as f:
-            f.write("fake")
+        self.write_stub_gguf(path)
         self.start_server()
         res = subprocess.run(
             [self.cli_bin, "--port", str(self.port), "list"],
             capture_output=True,
             text=True,
         )
-        self.assertIn("Yes", [l for l in res.stdout.splitlines() if model_id in l][0])
+        self.assertIn("Yes", self.list_row_for_model(res.stdout, model_id))
 
         # Partial
         with open(path + ".partial", "w") as f:
@@ -266,7 +290,7 @@ class TestMultiCheckpointCompleteness(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertIn("No", [l for l in res.stdout.splitlines() if model_id in l][0])
+        self.assertIn("No", self.list_row_for_model(res.stdout, model_id))
 
 
 if __name__ == "__main__":

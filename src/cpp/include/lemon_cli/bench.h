@@ -1,5 +1,4 @@
-#ifndef LEMON_CLI_BENCH_H
-#define LEMON_CLI_BENCH_H
+#pragma once
 
 #include <map>
 #include <optional>
@@ -271,5 +270,3 @@ json build_comparison_json(const std::vector<BenchBackendResult>& results,
 std::string get_timestamp_iso();
 
 } // namespace lemon_cli
-
-#endif // LEMON_CLI_BENCH_H

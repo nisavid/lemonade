@@ -1,5 +1,6 @@
 #include "lemon/prometheus_metrics.h"
 
+#include "lemon/router.h"
 #include "lemon/version.h"
 
 #include <algorithm>
@@ -14,6 +15,7 @@
 #include <string>
 
 #include <httplib.h>
+#include <nlohmann/json.hpp>
 
 #ifdef _WIN32
     #include <windows.h>

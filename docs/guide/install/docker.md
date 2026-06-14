@@ -57,7 +57,21 @@ docker run -d \
 
 ### Docker Run with AMD GPU Passthrough using ROCm
 
-To use the ROCm backend, create or modify the `config.json` file in the `lemonade-recipe` volume:
+To use the ROCm backend, create or modify `config.json` inside the `lemonade-recipe` volume, then start or restart the container. For a named Docker volume, one option is to write the file through a temporary helper container:
+
+```bash
+docker run --rm \
+  -v lemonade-recipe:/root/.cache/lemonade \
+  alpine sh -c 'cat > /root/.cache/lemonade/config.json <<EOF
+{
+  "llamacpp": {
+    "backend": "rocm"
+  }
+}
+EOF'
+```
+
+The resulting file should contain:
 
 ```json
 {

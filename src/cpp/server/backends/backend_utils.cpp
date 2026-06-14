@@ -133,8 +133,9 @@ namespace lemon::backends {
             };
 
             for (const auto& path : candidate_paths) {
-                // Skip repo-keyed shapes when no repo is available (e.g. TheRock).
-                if (std::find(path.begin(), path.end(), std::string()) != path.end()) {
+                const bool path_has_empty_segment =
+                    std::find(path.begin(), path.end(), std::string()) != path.end();
+                if (path_has_empty_segment) {
                     continue;
                 }
                 std::string hash = lookup_hash_path(config, path);

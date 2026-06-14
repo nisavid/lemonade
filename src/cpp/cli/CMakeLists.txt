@@ -53,7 +53,7 @@ if(NOT TARGET lemonade-digest-crypto)
             include(FetchContent)
             FetchContent_Declare(mbedtls
                 GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
-                GIT_TAG 107ea89daaefb9867ea9121002fbbdf926780e98
+                GIT_TAG v3.6.2
                 EXCLUDE_FROM_ALL
             )
             set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)

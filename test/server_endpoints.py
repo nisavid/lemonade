@@ -721,7 +721,9 @@ class EndpointTests(ServerTestBase):
 
             pins = requests.get(f"{self.base_url}/pins", timeout=TIMEOUT_DEFAULT).json()
             pin_entry = next(
-                item for item in pins["data"] if item["model_name"] == ENDPOINT_TEST_MODEL
+                item
+                for item in pins["data"]
+                if item["model_name"] == ENDPOINT_TEST_MODEL
             )
             self.assertTrue(pin_entry["loaded"])
             self.assertIsNone(pin_entry["load_error"])
@@ -1382,9 +1384,7 @@ class EndpointTests(ServerTestBase):
                 f"{response.status_code}: {response.text}",
             )
             self.assertIn("reserved", response.text.lower())
-        print(
-            "[OK] /pull rejects canonical source prefixes in registration names"
-        )
+        print("[OK] /pull rejects canonical source prefixes in registration names")
 
     def test_021d_naming_spec_builtin_canonical_alias(self):
         """Naming spec: builtin.<name> resolves to the same model as the bare name."""
@@ -2095,7 +2095,10 @@ class EndpointTests(ServerTestBase):
         # Use a built-in model name to prove precedence and alias resolution simultaneously
         bare = ENDPOINT_TEST_MODEL
         extra_dir = tempfile.mkdtemp(prefix="lemon_extra_regression_")
-        self._write_root_stub_gguf(extra_dir, f"{bare}.gguf")
+        shadow_dir = os.path.join(extra_dir, bare)
+        os.makedirs(shadow_dir, exist_ok=True)
+        with open(os.path.join(shadow_dir, "model.gguf"), "wb") as f:
+            f.write(b"not a valid gguf")
 
         prior_dir = self._set_extra_models_dir(extra_dir)
         try:
@@ -2304,7 +2307,6 @@ class EndpointTests(ServerTestBase):
         )
         print("[OK] system-info contains release_url for backends")
 
-
     # =========================================================================
     # PULL/VARIANTS TESTS
     # The two error-only tests (030, 031) run in every CI environment because
@@ -2356,7 +2358,9 @@ class EndpointTests(ServerTestBase):
             data["error"],
             f"Expected 'owner/name' format hint in error message, got: {data['error']}",
         )
-        print("[OK] Malformed checkpoint (no slash) returns 400 with owner/name format hint")
+        print(
+            "[OK] Malformed checkpoint (no slash) returns 400 with owner/name format hint"
+        )
 
     @unittest.skipUnless(
         os.environ.get("LEMONADE_INTEGRATION_TESTS") == "1",
@@ -2390,7 +2394,9 @@ class EndpointTests(ServerTestBase):
             data["error"],
             f"Unexpected 404 error message: {data['error']}",
         )
-        print("[OK] Nonexistent HuggingFace checkpoint returns 404 with descriptive error")
+        print(
+            "[OK] Nonexistent HuggingFace checkpoint returns 404 with descriptive error"
+        )
 
     @unittest.skipUnless(
         os.environ.get("LEMONADE_INTEGRATION_TESTS") == "1",
@@ -2446,7 +2452,9 @@ class EndpointTests(ServerTestBase):
             self.assertIn("files", v)
             self.assertIn("sharded", v)
             self.assertIn(
-                "size_bytes", v, f"Variant '{v.get('name')}' is missing 'size_bytes' field"
+                "size_bytes",
+                v,
+                f"Variant '{v.get('name')}' is missing 'size_bytes' field",
             )
             self.assertIsInstance(v["files"], list)
             self.assertGreater(

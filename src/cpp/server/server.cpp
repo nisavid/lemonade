@@ -520,6 +520,10 @@ void Server::setup_routes(httplib::Server &web_server) {
         web_server.Get("/v1/" + endpoint, handler);
     };
 
+    register_get("metrics", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_metrics(req, res);
+    });
+
     auto register_post = [this, &web_server](const std::string& endpoint,
                                 std::function<void(const httplib::Request&, httplib::Response&)> handler) {
         web_server.Post("/api/v0/" + endpoint, handler);
@@ -1650,8 +1654,9 @@ void Server::ensure_collection_loaded(const ModelInfo& info) {
     LOG(INFO, "Server") << "Loading collection components for: " << info.model_name << std::endl;
     for (const auto& component : info.components) {
         if (!model_manager_->model_exists(component)) {
-            LOG(WARNING, "Server") << "Skipping unknown component: " << component << std::endl;
-            continue;
+            throw std::runtime_error(
+                "Collection '" + info.model_name + "' references unknown component '" + component + "'"
+            );
         }
         if (router_->is_model_loaded(component)) {
             LOG(INFO, "Server") << "Component already loaded: " << component << std::endl;
@@ -1886,6 +1891,11 @@ void Server::handle_collection_chat_completions(const nlohmann::json& request_js
                     orchestrator.chat_completion_stream(request_json, collection_info, sink);
                 } catch (const std::exception& e) {
                     LOG(ERROR, "Server") << "Collection streaming failed: " << e.what() << std::endl;
+                    auto error_response = create_model_error(collection_info.model_name, e.what());
+                    std::string error_frame = "data: " + error_response.dump() + "\n\n";
+                    sink.write(error_frame.c_str(), error_frame.size());
+                    const std::string done = "data: [DONE]\n\n";
+                    sink.write(done.c_str(), done.size());
                 }
                 return false;
             });

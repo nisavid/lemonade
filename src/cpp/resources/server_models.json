@@ -689,7 +689,7 @@
         "size": 19.5
     },
     "Gemma-4-12B-it-GGUF": {
-        "checkpoint": "unsloth/gemma-4-12b-it-GGUF:Q4_K_M",
+        "checkpoint": "unsloth/gemma-4-12b-it-GGUF:gemma-4-12b-it-Q4_K_M.gguf",
         "recipe": "llamacpp",
         "suggested": true,
         "labels": [

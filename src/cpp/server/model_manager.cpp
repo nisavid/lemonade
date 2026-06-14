@@ -1637,11 +1637,21 @@ static bool check_component_downloaded(const ModelInfo& info,
     return true;
 }
 
+static bool has_download_manifest(const fs::path& dir) {
+    std::error_code ec;
+    if (!safe_is_directory(dir)) return false;
+    for (const auto& entry : fs::recursive_directory_iterator(dir, safe_dir_options, ec)) {
+        if (entry.path().filename() == ".download_manifest.json") {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool has_partial_files(const fs::path& dir) {
     std::error_code ec;
     if (!safe_is_directory(dir)) return false;
-    // Non-recursive scan for .partial markers to confirm folder integrity
-    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+    for (const auto& entry : fs::recursive_directory_iterator(dir, safe_dir_options, ec)) {
         if (entry.path().extension() == ".partial") {
             return true;
         }
@@ -1671,11 +1681,8 @@ static bool is_checkpoint_path_complete(const std::string& path_str) {
     if (!safe_exists(resolved)) return false;
 
     // A manifest or .partial file indicates an interrupted multi-file download.
-    // Preserve the existing semantics: file checkpoints check their parent
-    // directory for the manifest and their own .partial marker; directory
-    // checkpoints check the directory itself.
     fs::path marker_dir = safe_is_directory(resolved) ? resolved : resolved.parent_path();
-    if (safe_exists(marker_dir / ".download_manifest.json")) return false;
+    if (has_download_manifest(marker_dir)) return false;
 
     if (!safe_is_directory(resolved)) {
         return !safe_exists(path_from_utf8(path_str + ".partial"));

@@ -202,7 +202,7 @@ const AppContent: React.FC = () => {
       window.removeEventListener('download:chatComplete' as any, handleChatDownloadComplete);
       window.removeEventListener('open-external-content' as any, handleOpenExternalContent);
     };
-  }, [refreshModels]);
+  }, []);
 
   // Handle lemonade:// protocol navigation from main process.
   // Must await tauriReady because window.api is installed asynchronously

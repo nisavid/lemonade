@@ -115,7 +115,14 @@ def get_hf_cache_dir_candidates():
     candidates = []
     seen = set()
 
-    for path in [get_hf_cache_dir(), get_default_hf_cache_dir()]:
+    raw_candidates = []
+    for resolver in [get_hf_cache_dir, get_default_hf_cache_dir]:
+        try:
+            raw_candidates.append(resolver())
+        except RuntimeError:
+            continue
+
+    for path in raw_candidates:
         normalized = os.path.normcase(os.path.abspath(path))
         if normalized in seen:
             continue

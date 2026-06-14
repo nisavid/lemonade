@@ -315,7 +315,7 @@ lemonade backends
 
 ## Project Roadmap
 
-Lemonade's roadmap is defined by a set of working groups. Visit the landing page [here](./docs/dev/working-groups/README.md) to learn each group's goal and roadmap.
+Lemonade's roadmap is defined by a set of working groups. Visit the [working groups landing page](./docs/dev/working-groups/README.md) to learn each group's goal and roadmap.
 
 ## Integrate Embeddable Lemonade in You Application
 

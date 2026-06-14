@@ -558,7 +558,7 @@ lemonade scan --duration 5
 
 The `bench` command measures chat completion performance (TTFT and tokens-per-second) for one or more models across one or more installed backends, context sizes, and scenario workloads. It sends `POST /api/v1/chat/completions` requests and extracts timing data from the server response.
 
-```
+```bash
 lemonade bench [options] MODEL_NAME [MODEL_NAME ...]
 ```
 
@@ -641,7 +641,7 @@ You can override these with `--scenario-file` or `--scenario-dir`.
 
 Results are printed as a table grouped by backend. Columns show TTFT (Time To First Token) and TPS (Tokens Per Second) with mean, min/max (or p50/p95 when `--runs >= 10`), and peak VRAM usage:
 
-```
+```text
 Benchmark: Qwen3-0.6B-GGUF
 ====================================================================================================
 
