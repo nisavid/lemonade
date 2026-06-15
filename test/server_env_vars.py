@@ -36,7 +36,7 @@ _lemond_binary = get_default_lemond_binary()
 def shutdown_existing_server():
     """Shut down any pre-existing server on the test port (e.g. deb-installed in CI)."""
     try:
-        requests.post(f"{BASE}/internal/shutdown", timeout=5)
+        requests.post(f"{BASE}/internal/shutdown", json={}, timeout=5)
     except Exception:
         return  # nothing was listening
     # Wait for port to be fully released before starting a new server
@@ -60,10 +60,13 @@ def start_server(env_overrides=None):
         if k.startswith("LEMONADE_"):
             del env[k]
     cache_dir = tempfile.mkdtemp(prefix="lemon_test_")
+    runtime_dir = tempfile.mkdtemp(prefix="lemon_runtime_")
+    os.chmod(runtime_dir, 0o700)
     env["LEMONADE_CACHE_DIR"] = cache_dir
     env["LEMONADE_PORT"] = str(PORT)
     env["LEMONADE_HOST"] = "localhost"
     env["LEMONADE_NO_BROADCAST"] = "1"
+    env["XDG_RUNTIME_DIR"] = runtime_dir
     if env_overrides:
         env.update(env_overrides)
 
@@ -81,6 +84,7 @@ def stop_server(proc):
     try:
         requests.post(
             f"{BASE}/internal/shutdown",
+            json={},
             timeout=5,
         )
     except Exception:
