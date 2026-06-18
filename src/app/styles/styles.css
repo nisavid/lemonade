@@ -1461,19 +1461,12 @@ footer {
     font-size: 0.57rem;
     color: var(--text-secondary);
     letter-spacing: 0.2px;
+    text-transform: uppercase;
     padding: 2px 6px;
     border-radius: 6px;
     border: 1px solid var(--border-alpha-09);
     background: var(--bg-secondary);
     flex-shrink: 0;
-}
-
-.active-model-count-pill {
-    letter-spacing: 0;
-}
-
-.suggested-model-count-pill {
-    text-transform: uppercase;
 }
 
 .loaded-model-list {
@@ -1502,12 +1495,12 @@ footer {
 
 .loaded-model-info {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr) 22px;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     margin-bottom: 0;
     border-radius: 5px;
-    padding: 2px;
+    padding: 2px 2px 2px 1px;
     transition: background-color 0.15s ease;
 }
 
@@ -1562,6 +1555,7 @@ footer {
     align-items: center;
     gap: 8px;
     min-width: 0;
+    padding-left: 8px;
 }
 
 .loaded-model-indicator {
@@ -1582,18 +1576,6 @@ footer {
     background-color: #facc15;
     animation: pulse 1.5s ease-in-out infinite;
     filter: drop-shadow(0 0 2px #facc15);
-}
-
-.loaded-model-indicator.not-loaded {
-    background-color: var(--text-quaternary);
-    animation: none;
-    filter: none;
-}
-
-.loaded-model-indicator.error {
-    background-color: var(--error-color);
-    animation: none;
-    filter: drop-shadow(0 0 2px var(--error-color));
 }
 
 @keyframes pulse-glow {
@@ -1620,6 +1602,27 @@ footer {
     flex-shrink: 0;
     width: 14px;
     height: 14px;
+}
+
+.active-model-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    margin-right: 2px;
+}
+
+.active-model-actions svg {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+}
+
+.model-action-btn.pin-btn.pinned {
+    color: var(--info-color);
+}
+
+.model-action-btn.pin-btn:hover {
+    color: var(--info-color);
 }
 
 .downloaded-filter {
@@ -1995,18 +1998,13 @@ footer {
     color: var(--text-secondary);
     cursor: pointer;
     border-radius: 2px;
-    transition: background-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+    transition: all 0.15s ease;
     padding: 0;
 }
 
 .model-action-btn:hover {
     background: var(--bg-alpha-06);
     color: var(--text-tertiary);
-}
-
-.model-action-btn:focus-visible {
-    outline: 2px solid rgba(250, 204, 21, 0.55);
-    outline-offset: 1px;
 }
 
 .model-action-btn.download-btn:hover {
@@ -2023,55 +2021,6 @@ footer {
 
 .model-action-btn.unload-btn:hover {
     color: var(--action-color);
-}
-
-.model-action-btn.retry-btn:hover {
-    color: var(--warning-color);
-}
-
-.model-action-btn.pin-btn {
-    background: transparent;
-    box-shadow: none;
-    color: var(--text-secondary);
-    opacity: 0.24;
-}
-
-.model-action-btn.pin-btn.pin-available {
-    opacity: 0.48;
-}
-
-.model-action-btn.pin-btn.pinned {
-    background: transparent;
-    box-shadow: none;
-    color: var(--text-tertiary);
-    opacity: 0.96;
-}
-
-.model-action-btn.pin-btn:not(.pinned):not(:disabled):hover {
-    background: var(--bg-alpha-06);
-    color: var(--text-tertiary);
-    opacity: 0.82;
-}
-
-.model-action-btn.pin-btn.pinned:not(:disabled):hover {
-    background: var(--bg-alpha-06);
-    color: var(--text-tertiary);
-    opacity: 1;
-}
-
-.model-action-btn.pin-btn.pending {
-    color: var(--text-tertiary);
-    opacity: 0.65;
-}
-
-.model-action-btn.pin-btn:disabled {
-    cursor: default;
-    opacity: 0.22;
-}
-
-.model-action-btn.pin-btn:disabled:hover {
-    background: transparent;
-    color: var(--text-secondary);
 }
 
 .model-action-btn.delete-btn:hover {
@@ -5364,6 +5313,14 @@ input::-webkit-calendar-picker-indicator {
     display: flex;
     gap: 12px;
     justify-content: flex-end;
+    flex-shrink: 0;
+}
+
+.settings-export-error {
+    padding: 8px 24px;
+    color: var(--toast-error-text);
+    font-size: 13px;
+    text-align: right;
     flex-shrink: 0;
 }
 

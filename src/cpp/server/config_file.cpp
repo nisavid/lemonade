@@ -2,8 +2,13 @@
 #include "lemon/utils/json_utils.h"
 #include "lemon/utils/path_utils.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <vector>
 
 #include <lemon/utils/aixlog.hpp>
 
@@ -36,6 +41,12 @@ json ConfigFile::get_defaults() {
         defaults = utils::JsonUtils::merge(defaults, load_json_file(distro_defaults));
     }
 #endif
+
+    // Packagers on non-FHS distros (Nix, Guix) can't write the /usr/share
+    // file above; this seeds the same defaults from any path.
+    if (const char* env = std::getenv("LEMONADE_DEFAULTS_PATH"); env && *env && fs::exists(env)) {
+        defaults = utils::JsonUtils::merge(defaults, load_json_file(env));
+    }
 
     return defaults;
 }
@@ -130,10 +141,29 @@ json ConfigFile::load(const std::string& cache_dir) {
         return defaults;
     }
 
+    // Deep-merge: user values override defaults, missing fields filled from defaults.
     json merged = utils::JsonUtils::merge(defaults, loaded);
-    if (migrate_deprecated_rocm_preview_channel(merged)) {
+
+    // Capture the original config version BEFORE merge, so that migration
+    // can see past the defaults-injected version number.
+    int original_version = config_get_version(loaded);
+
+    // Apply migrations if the config is older than the current version.
+    // The inline config_migrate() handles version bumping and field removal.
+    bool migrated = config_migrate(merged, defaults, original_version);
+    migrated = migrate_deprecated_rocm_preview_channel(merged) || migrated;
+    if (migrated) {
+        // Log migration details for user visibility.
+        if (original_version < config_get_version(defaults)) {
+            if (loaded.contains("ctx_size") && loaded["ctx_size"].is_number_integer()
+                && loaded["ctx_size"].get<int>() == 4096) {
+                LOG(INFO) << "Migrating config: ctx_size 4096 -> -1 (auto-tune enabled)"
+                          << std::endl;
+            }
+        }
         save(cache_dir, merged);
     }
+
     return merged;
 }
 
@@ -178,64 +208,56 @@ void ConfigFile::save(const std::string& cache_dir, const json& config) {
 struct EnvMapping {
     const char* env_name;
     const char* top_key;
-    const char* nested_key; // nullptr for top-level keys
+    const char* nested_key;
 };
 
 static const EnvMapping env_mappings[] = {
-    // Top-level settings
-    {"LEMONADE_PORT",                    "port",                     nullptr},
-    {"LEMONADE_HOST",                    "host",                     nullptr},
-    {"LEMONADE_LOG_LEVEL",               "log_level",                nullptr},
-    {"LEMONADE_GLOBAL_TIMEOUT",          "global_timeout",           nullptr},
-    {"LEMONADE_MAX_LOADED_MODELS",       "max_loaded_models",        nullptr},
-    {"LEMONADE_MAX_GPU_MEMORY_OCCUPANCY_GB", "max_gpu_memory_occupancy_gb", nullptr},
-    {"LEMONADE_NO_BROADCAST",            "no_broadcast",             nullptr},
-    {"LEMONADE_EXTRA_MODELS_DIR",        "extra_models_dir",         nullptr},
-    {"LEMONADE_CTX_SIZE",                "ctx_size",                 nullptr},
-    {"LEMONADE_OFFLINE",                 "offline",                  nullptr},
-    {"LEMONADE_NO_FETCH_EXECUTABLES",     "no_fetch_executables",     nullptr},
-    {"LEMONADE_DISABLE_MODEL_FILTERING", "disable_model_filtering",  nullptr},
-    {"LEMONADE_ENABLE_DGPU_GTT",         "enable_dgpu_gtt",          nullptr},
-    // llamacpp
-    {"LEMONADE_LLAMACPP",                "llamacpp",  "backend"},
-    {"LEMONADE_LLAMACPP_ARGS",           "llamacpp",  "args"},
-    {"LEMONADE_LLAMACPP_ROCM_ARGS",      "llamacpp",  "rocm_args"},
-    {"LEMONADE_LLAMACPP_VULKAN_ARGS",    "llamacpp",  "vulkan_args"},
-    {"LEMONADE_LLAMACPP_CPU_ARGS",       "llamacpp",  "cpu_args"},
-    {"LEMONADE_LLAMACPP_DEVICE",         "llamacpp",  "device"},
-    {"LEMONADE_LLAMACPP_PREFER_SYSTEM",  "llamacpp",  "prefer_system"},
-    {"LEMONADE_LLAMACPP_ROCM_BIN",       "llamacpp",  "rocm_bin"},
-    {"LEMONADE_LLAMACPP_VULKAN_BIN",     "llamacpp",  "vulkan_bin"},
-    {"LEMONADE_LLAMACPP_CPU_BIN",        "llamacpp",  "cpu_bin"},
-    // whispercpp
-    {"LEMONADE_WHISPERCPP",              "whispercpp", "backend"},
-    {"LEMONADE_WHISPERCPP_ARGS",         "whispercpp", "args"},
-    {"LEMONADE_WHISPERCPP_CPU_ARGS",     "whispercpp", "cpu_args"},
-    {"LEMONADE_WHISPERCPP_NPU_ARGS",     "whispercpp", "npu_args"},
-    {"LEMONADE_WHISPERCPP_CPU_BIN",      "whispercpp", "cpu_bin"},
-    {"LEMONADE_WHISPERCPP_NPU_BIN",      "whispercpp", "npu_bin"},
-    // sdcpp
-    {"LEMONADE_SDCPP",                   "sdcpp", "backend"},
-    {"LEMONADE_SDCPP_ARGS",              "sdcpp", "args"},
-    {"LEMONADE_SDCPP_CPU_ARGS",          "sdcpp", "cpu_args"},
-    {"LEMONADE_SDCPP_ROCM_ARGS",         "sdcpp", "rocm_args"},
-    {"LEMONADE_SDCPP_VULKAN_ARGS",       "sdcpp", "vulkan_args"},
-    {"LEMONADE_STEPS",                   "sdcpp", "steps"},
-    {"LEMONADE_CFG_SCALE",               "sdcpp", "cfg_scale"},
-    {"LEMONADE_WIDTH",                   "sdcpp", "width"},
-    {"LEMONADE_HEIGHT",                  "sdcpp", "height"},
-    {"LEMONADE_SDCPP_CPU_BIN",           "sdcpp", "cpu_bin"},
-    {"LEMONADE_SDCPP_ROCM_BIN",          "sdcpp", "rocm_bin"},
-    {"LEMONADE_SDCPP_VULKAN_BIN",        "sdcpp", "vulkan_bin"},
-    // flm
-    {"LEMONADE_FLM_ARGS",               "flm", "args"},
-    // ryzenai
-    {"LEMONADE_RYZENAI_SERVER_BIN",      "ryzenai", "server_bin"},
-    // kokoro
-    {"LEMONADE_KOKORO_CPU_BIN",          "kokoro", "cpu_bin"},
+    {"LEMONADE_PORT",                         "port",                    nullptr},
+    {"LEMONADE_HOST",                         "host",                    nullptr},
+    {"LEMONADE_LOG_LEVEL",                    "log_level",               nullptr},
+    {"LEMONADE_GLOBAL_TIMEOUT",               "global_timeout",          nullptr},
+    {"LEMONADE_MAX_LOADED_MODELS",            "max_loaded_models",       nullptr},
+    {"LEMONADE_MAX_GPU_MEMORY_OCCUPANCY_GB",  "max_gpu_memory_occupancy_gb", nullptr},
+    {"LEMONADE_NO_BROADCAST",                 "no_broadcast",            nullptr},
+    {"LEMONADE_EXTRA_MODELS_DIR",             "extra_models_dir",        nullptr},
+    {"LEMONADE_CTX_SIZE",                     "ctx_size",                nullptr},
+    {"LEMONADE_OFFLINE",                      "offline",                 nullptr},
+    {"LEMONADE_NO_FETCH_EXECUTABLES",         "no_fetch_executables",    nullptr},
+    {"LEMONADE_DISABLE_MODEL_FILTERING",      "disable_model_filtering", nullptr},
+    {"LEMONADE_ENABLE_DGPU_GTT",              "enable_dgpu_gtt",         nullptr},
+    {"LEMONADE_LLAMACPP",                     "llamacpp",                "backend"},
+    {"LEMONADE_LLAMACPP_ARGS",                "llamacpp",                "args"},
+    {"LEMONADE_LLAMACPP_ROCM_ARGS",           "llamacpp",                "rocm_args"},
+    {"LEMONADE_LLAMACPP_VULKAN_ARGS",         "llamacpp",                "vulkan_args"},
+    {"LEMONADE_LLAMACPP_CPU_ARGS",            "llamacpp",                "cpu_args"},
+    {"LEMONADE_LLAMACPP_DEVICE",              "llamacpp",                "device"},
+    {"LEMONADE_LLAMACPP_PREFER_SYSTEM",       "llamacpp",                "prefer_system"},
+    {"LEMONADE_LLAMACPP_ROCM_BIN",            "llamacpp",                "rocm_bin"},
+    {"LEMONADE_LLAMACPP_VULKAN_BIN",          "llamacpp",                "vulkan_bin"},
+    {"LEMONADE_LLAMACPP_CPU_BIN",             "llamacpp",                "cpu_bin"},
+    {"LEMONADE_WHISPERCPP",                   "whispercpp",              "backend"},
+    {"LEMONADE_WHISPERCPP_ARGS",              "whispercpp",              "args"},
+    {"LEMONADE_WHISPERCPP_CPU_ARGS",          "whispercpp",              "cpu_args"},
+    {"LEMONADE_WHISPERCPP_NPU_ARGS",          "whispercpp",              "npu_args"},
+    {"LEMONADE_WHISPERCPP_CPU_BIN",           "whispercpp",              "cpu_bin"},
+    {"LEMONADE_WHISPERCPP_NPU_BIN",           "whispercpp",              "npu_bin"},
+    {"LEMONADE_SDCPP",                        "sdcpp",                   "backend"},
+    {"LEMONADE_SDCPP_ARGS",                   "sdcpp",                   "args"},
+    {"LEMONADE_SDCPP_CPU_ARGS",               "sdcpp",                   "cpu_args"},
+    {"LEMONADE_SDCPP_ROCM_ARGS",              "sdcpp",                   "rocm_args"},
+    {"LEMONADE_SDCPP_VULKAN_ARGS",            "sdcpp",                   "vulkan_args"},
+    {"LEMONADE_STEPS",                        "sdcpp",                   "steps"},
+    {"LEMONADE_CFG_SCALE",                    "sdcpp",                   "cfg_scale"},
+    {"LEMONADE_WIDTH",                        "sdcpp",                   "width"},
+    {"LEMONADE_HEIGHT",                       "sdcpp",                   "height"},
+    {"LEMONADE_SDCPP_CPU_BIN",                "sdcpp",                   "cpu_bin"},
+    {"LEMONADE_SDCPP_ROCM_BIN",               "sdcpp",                   "rocm_bin"},
+    {"LEMONADE_SDCPP_VULKAN_BIN",             "sdcpp",                   "vulkan_bin"},
+    {"LEMONADE_FLM_ARGS",                     "flm",                     "args"},
+    {"LEMONADE_RYZENAI_SERVER_BIN",           "ryzenai",                 "server_bin"},
+    {"LEMONADE_KOKORO_CPU_BIN",               "kokoro",                  "cpu_bin"},
 };
 
-/// Parse a string value to match the JSON type of the corresponding default.
 static json parse_env_value(const std::string& value, const json& default_val) {
     if (default_val.is_boolean()) {
         std::string lower = value;
@@ -260,13 +282,11 @@ json ConfigFile::migrate_from_env(const json& defaults) {
         std::string val = utils::get_environment_variable_utf8(m.env_name);
         if (val.empty()) continue;
 
-        // Look up the default to determine the expected type
         json default_val;
         if (m.nested_key == nullptr) {
             if (defaults.contains(m.top_key)) default_val = defaults[m.top_key];
-        } else {
-            if (defaults.contains(m.top_key) && defaults[m.top_key].contains(m.nested_key))
-                default_val = defaults[m.top_key][m.nested_key];
+        } else if (defaults.contains(m.top_key) && defaults[m.top_key].contains(m.nested_key)) {
+            default_val = defaults[m.top_key][m.nested_key];
         }
 
         json parsed = parse_env_value(val, default_val);
@@ -293,5 +313,6 @@ json ConfigFile::migrate_from_env(const json& defaults) {
 
     return utils::JsonUtils::merge(defaults, overlay);
 }
+
 
 } // namespace lemon

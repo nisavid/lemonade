@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Boxes, Brain, ChevronRight, Cpu, EjectIcon, Eye, Flame, Layers, ListOrdered, PinIcon, PlayIcon, RefreshIcon, Settings, SlidersHorizontal, Sparkles, SquareCode, Store, User, Wrench, XIcon } from './components/Icons';
+import { Boxes, Brain, ChevronRight, Cpu, Eye, Flame, Layers, ListOrdered, Settings, SlidersHorizontal, Sparkles, SquareCode, Store, User, Wrench, XIcon } from './components/Icons';
 import { ModelInfo, USER_MODEL_PREFIX } from './utils/modelData';
 import { CANONICAL_PREFIXES, getModelDisplayName } from './utils/modelDisplayName';
 import { ToastContainer, useToast } from './Toast';
@@ -18,8 +18,11 @@ import BackendManager from './BackendManager';
 import ConnectedBackendRow from './components/ConnectedBackendRow';
 import MarketplacePanel, { MarketplaceCategory } from './MarketplacePanel';
 import { RECIPE_DISPLAY_NAMES } from './utils/recipeNames';
+import { EjectIcon, PinIcon } from './components/Icons';
 import { getCollectionComponents, isCollectionFullyDownloaded, isCollectionModel, isModelEffectivelyDownloaded, isModelEffectivelyLoaded } from './utils/collectionModels';
 import { getCollectionDisplayName, isCollectionEditableAsCustom } from './utils/customCollections';
+import { mergeWithDefaultSettings } from './utils/appSettings';
+import { tauriReady } from './tauriShim';
 
 interface ModelFamily {
   displayName: string;
@@ -266,6 +269,11 @@ function buildModelList(
     const members: { label: string; name: string; info: ModelInfo }[] = [];
     for (const m of models) {
       if (consumed.has(m.name)) continue;
+      // Cloud models are grouped under their provider and rendered with the
+      // provider prefix stripped; keep them as flat individual rows rather
+      // than folding them into local model families (whose labels assume the
+      // bare/canonical-prefixed local naming, not "<provider>.<model>").
+      if (m.info.recipe === 'cloud') continue;
       if (family.recipe && m.info.recipe !== family.recipe) continue;
       const match = family.regex.exec(stripCanonicalPrefix(m.name));
       if (match) {
@@ -335,46 +343,6 @@ interface ModelJSON {
   image_defaults?: []
 }
 
-interface PinInfo {
-  model_name: string;
-  loaded: boolean;
-  load_error: string | null;
-}
-
-interface ActiveModelEntry {
-  modelName: string;
-  isLoading: boolean;
-  isLoaded: boolean;
-  isPinned: boolean;
-  loadError: string | null;
-}
-
-interface ServerErrorDetails {
-  message: string;
-  code?: string;
-}
-
-async function getServerErrorDetails(response: Response, fallback: string): Promise<ServerErrorDetails> {
-  const text = await response.text().catch(() => '');
-  if (!text) return { message: fallback };
-  try {
-    const parsed = JSON.parse(text);
-    if (typeof parsed?.error === 'string') return { message: parsed.error, code: parsed.code };
-    if (typeof parsed?.error?.message === 'string') {
-      return { message: parsed.error.message, code: parsed.error.code ?? parsed.code };
-    }
-  } catch {
-    // Fall through to the raw response text.
-  }
-  return { message: text };
-}
-
-async function getServerErrorMessage(response: Response, fallback: string): Promise<string> {
-  return (await getServerErrorDetails(response, fallback)).message;
-}
-
-const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
-
 export type LeftPanelView = 'models' | 'backends' | 'marketplace' | 'settings';
 
 
@@ -388,14 +356,10 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
   const [organizationMode, setOrganizationMode] = useState<'recipe' | 'category'>('recipe');
   const [showDownloadedOnly, setShowDownloadedOnly] = useState(false);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+const [searchQuery, setSearchQuery] = useState('');
   const [loadedModels, setLoadedModels] = useState<Set<string>>(new Set());
-  const [loadingModels, setLoadingModels] = useState<Set<string>>(new Set());
   const [pinnedModels, setPinnedModels] = useState<Set<string>>(new Set());
-  const [pinnedModelOrder, setPinnedModelOrder] = useState<string[]>([]);
-  const [pinLoadErrors, setPinLoadErrors] = useState<Record<string, string | null>>({});
-  const [pinsAvailable, setPinsAvailable] = useState(true);
-  const [pinningModels, setPinningModels] = useState<Set<string>>(new Set());
+  const [loadingModels, setLoadingModels] = useState<Set<string>>(new Set());
   const [hoveredModel, setHoveredModel] = useState<string | null>(null);
   const [optionsModel, setOptionsModel] = useState<string | null>(null);
   const [showModelOptionsModal, setShowModelOptionsModal] = useState(false);
@@ -417,6 +381,41 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
   const { toasts, removeToast, showError, showSuccess, showWarning } = useToast();
   const { confirm, ConfirmDialog } = useConfirmDialog();
 
+  useEffect(() => {
+    const loadModelManagerSettings = async () => {
+      try {
+        await tauriReady;
+        if (!window.api?.getSettings) return;
+        const settings = mergeWithDefaultSettings(await window.api.getSettings());
+        setShowDownloadedOnly(settings.modelManager.showDownloadedOnly);
+      } catch (error) {
+        console.error('Failed to load model manager settings:', error);
+      }
+    };
+
+    loadModelManagerSettings();
+  }, []);
+
+  const updateShowDownloadedOnly = useCallback(async (checked: boolean) => {
+    setShowDownloadedOnly(checked);
+    setShowFilterPanel(false);
+
+    try {
+      await tauriReady;
+      if (!window.api?.getSettings || !window.api?.saveSettings) return;
+      const currentSettings = await window.api.getSettings();
+      await window.api.saveSettings({
+        ...currentSettings,
+        modelManager: {
+          ...currentSettings.modelManager,
+          showDownloadedOnly: checked,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to save model manager settings:', error);
+    }
+  }, []);
+
   const fetchCurrentLoadedModel = useCallback(async () => {
     try {
       const response = await serverFetch('/health');
@@ -429,6 +428,14 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
         );
         setLoadedModels(loadedModelNames);
 
+        // Extract pinned models from the all_models_loaded array
+        const pinnedModelNames = new Set<string>(
+          data.all_models_loaded
+            .filter((model: any) => model.pinned === true)
+            .map((model: any) => model.model_name)
+        );
+        setPinnedModels(pinnedModelNames);
+
         // Remove loaded models from loading state
         setLoadingModels(prev => {
           const newSet = new Set(prev);
@@ -437,41 +444,12 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
         });
       } else {
         setLoadedModels(new Set());
+        setPinnedModels(new Set());
       }
     } catch (error) {
       setLoadedModels(new Set());
+      setPinnedModels(new Set());
       console.error('Failed to fetch current loaded model:', error);
-    }
-  }, []);
-
-  const fetchPinnedModels = useCallback(async () => {
-    try {
-      const response = await serverFetch('/pins');
-      if (!response.ok) {
-        if (response.status === 404) {
-          setPinsAvailable(false);
-          setPinnedModels(new Set());
-          setPinnedModelOrder([]);
-          setPinLoadErrors({});
-          return;
-        }
-        throw new Error(await getServerErrorMessage(response, `Failed to fetch pins: ${response.statusText}`));
-      }
-
-      setPinsAvailable(true);
-      const data = await response.json();
-      const pins: PinInfo[] = Array.isArray(data?.data) ? data.data : [];
-      const pinNames = pins
-        .map((pin) => pin.model_name)
-        .filter((modelName): modelName is string => typeof modelName === 'string' && modelName.length > 0);
-
-      setPinnedModels(new Set(pinNames));
-      setPinnedModelOrder(pinNames);
-      setPinLoadErrors(Object.fromEntries(
-        pins.map((pin) => [pin.model_name, pin.load_error ?? null])
-      ));
-    } catch (error) {
-      console.error('Failed to fetch pinned models:', error);
     }
   }, []);
 
@@ -483,16 +461,10 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
 
   useEffect(() => {
     fetchCurrentLoadedModel();
-    if (pinsAvailable) {
-      fetchPinnedModels();
-    }
 
     // Poll for model status every 5 seconds to detect loaded models
     const interval = setInterval(() => {
       fetchCurrentLoadedModel();
-      if (pinsAvailable) {
-        fetchPinnedModels();
-      }
     }, 5000);
 
     // === Integration API for other parts of the app ===
@@ -532,9 +504,6 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
         });
         // Refresh the loaded model status
         fetchCurrentLoadedModel();
-        if (pinsAvailable) {
-          fetchPinnedModels();
-        }
       }
     };
 
@@ -547,7 +516,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
       window.removeEventListener('modelLoadEnd' as any, handleModelLoadEnd);
       delete (window as any).setModelLoading;
     };
-  }, [fetchCurrentLoadedModel, fetchPinnedModels, pinsAvailable]);
+  }, [fetchCurrentLoadedModel]);
 
   useEffect(() => {
     setShowFilterPanel(false);
@@ -592,16 +561,30 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
     return filtered;
   };
 
+  // Cloud models all share recipe='cloud', but each configured provider
+  // should get its own bucket so adding a second provider produces a
+  // second sub-heading rather than mixing into one. The bucket key for
+  // a cloud model is `<provider>-cloud` (e.g. "fireworks-cloud"); falls
+  // back to plain "cloud" if cloud_provider isn't on the entry yet.
+  const recipeBucketKey = (info: ModelInfo): string => {
+    const recipe = info.recipe || 'other';
+    if (recipe !== 'cloud') return recipe;
+    const provider = (info as { cloud_provider?: unknown }).cloud_provider;
+    return typeof provider === 'string' && provider.length > 0
+      ? `${provider}-cloud`
+      : 'cloud';
+  };
+
   const groupModelsByRecipe = () => {
     const grouped: { [key: string]: Array<{ name: string; info: ModelInfo }> } = {};
     const filteredModels = getFilteredModels();
 
     filteredModels.forEach(model => {
-      const recipe = model.info.recipe || 'other';
-      if (!grouped[recipe]) {
-        grouped[recipe] = [];
+      const bucket = recipeBucketKey(model.info);
+      if (!grouped[bucket]) {
+        grouped[bucket] = [];
       }
-      grouped[recipe].push(model);
+      grouped[bucket].push(model);
     });
 
     // Inject empty categories for supported recipes that have no models
@@ -752,88 +735,65 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
     return expandedCategories.has(category);
   };
 
+  // Proper-cased display names for known cloud providers. The provider
+  // name in config is constrained to lowercase (so we have a single
+  // canonical id used for env-var lookup, model prefix, etc.); this map
+  // is the one place we restore camel/acronym casing for the UI.
+  const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+    'openai':     'OpenAI',
+    'fireworks':  'Fireworks',
+    'together':   'Together',
+    'openrouter': 'OpenRouter',
+    'groq':       'Groq',
+    'deepinfra':  'DeepInfra',
+    'mistral':    'Mistral',
+    'mistralai':  'MistralAI',
+    'anthropic':  'Anthropic',
+    'cohere':     'Cohere',
+  };
+
   const getDisplayLabel = (key: string): string => {
     if (organizationMode === 'recipe') {
+      // Per-provider cloud buckets ("fireworks-cloud" -> "Fireworks") are
+      // synthesised in recipeBucketKey and won't be in RECIPE_DISPLAY_NAMES,
+      // so format them here. The bucket is labelled with the provider's
+      // registered name (with camel/acronym casing restored) — no " Cloud"
+      // suffix, matching how the model names themselves are prefixed.
+      if (key.endsWith('-cloud') && key !== 'cloud') {
+        const provider = key.slice(0, -'-cloud'.length);
+        return PROVIDER_DISPLAY_NAMES[provider]
+          ?? `${provider.charAt(0).toUpperCase()}${provider.slice(1)}`;
+      }
       return RECIPE_DISPLAY_NAMES[key] || key;
     } else {
       return getCategoryLabel(key);
     }
   };
 
-  // Merge loaded, loading, and configured pinned models so the active area can
-  // show both current residency and durable lifecycle preferences.
-  const loadedModelEntries = useMemo<ActiveModelEntry[]>(() => {
-    const entries: ActiveModelEntry[] = [];
+  // Merge loaded and loading models so the list shows components as they
+  // start loading, not just after /health confirms them. Loading entries
+  // get an `isLoading` flag so the UI can render a pending indicator.
+  // Skip collection entries themselves — only show component models.
+  const loadedModelEntries = (() => {
+    const entries: Array<{ modelName: string; isLoading: boolean }> = [];
     const seen = new Set<string>();
-    const pinOrderIndex = new Map(pinnedModelOrder.map((modelName, index) => [modelName, index]));
-    const compareByDisplayName = (a: ActiveModelEntry, b: ActiveModelEntry) =>
-      getModelDisplayName(a.modelName).localeCompare(getModelDisplayName(b.modelName)) ||
-      a.modelName.localeCompare(b.modelName);
-    const getBucket = (entry: ActiveModelEntry): number => {
-      if (entry.isLoading) return 0;
-      if (entry.isPinned && entry.loadError && !entry.isLoaded) return 1;
-      if (entry.isLoaded && entry.isPinned) return 2;
-      if (entry.isLoaded) return 3;
-      return 4;
-    };
-    const comparePinnedOrder = (a: ActiveModelEntry, b: ActiveModelEntry) => {
-      if (a.isPinned && b.isPinned) {
-        const pinOrderDiff = (pinOrderIndex.get(a.modelName) ?? Number.MAX_SAFE_INTEGER) -
-          (pinOrderIndex.get(b.modelName) ?? Number.MAX_SAFE_INTEGER);
-        return pinOrderDiff || compareByDisplayName(a, b);
-      }
-      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-      return compareByDisplayName(a, b);
-    };
-    const compareActiveEntries = (a: ActiveModelEntry, b: ActiveModelEntry) => {
-      const bucketDiff = getBucket(a) - getBucket(b);
-      return bucketDiff || comparePinnedOrder(a, b);
-    };
-
     for (const modelName of loadedModels) {
       if (isCollectionModel(modelsData[modelName])) continue;
       if (seen.has(modelName)) continue;
       seen.add(modelName);
-      const isCurrentlyLoading = loadingModels.has(modelName);
-      entries.push({
-        modelName,
-        isLoading: isCurrentlyLoading,
-        isLoaded: true,
-        isPinned: pinnedModels.has(modelName),
-        loadError: pinLoadErrors[modelName] ?? null,
-      });
+      entries.push({ modelName, isLoading: false });
     }
     for (const modelName of loadingModels) {
       if (isCollectionModel(modelsData[modelName])) continue;
       if (seen.has(modelName)) continue;
       seen.add(modelName);
-      entries.push({
-        modelName,
-        isLoading: true,
-        isLoaded: false,
-        isPinned: pinnedModels.has(modelName),
-        loadError: pinLoadErrors[modelName] ?? null,
-      });
+      entries.push({ modelName, isLoading: true });
     }
-    for (const modelName of pinnedModelOrder) {
-      if (seen.has(modelName)) continue;
-      if (isCollectionModel(modelsData[modelName])) continue;
-      seen.add(modelName);
-      entries.push({
-        modelName,
-        isLoading: false,
-        isLoaded: false,
-        isPinned: true,
-        loadError: pinLoadErrors[modelName] ?? null,
-      });
-    }
-    return entries.sort(compareActiveEntries);
-  }, [loadedModels, loadingModels, modelsData, pinnedModelOrder, pinnedModels, pinLoadErrors]);
-  const loadedModelCount = loadedModelEntries.filter(entry => entry.isLoaded).length;
-  const pinnedModelCount = loadedModelEntries.filter(entry => entry.isPinned).length;
-  const activeModelCountText = pinnedModelCount > 0
-    ? `${loadedModelCount} loaded · ${pinnedModelCount} pinned`
-    : `${loadedModelCount} loaded`;
+    return entries.sort((a, b) =>
+      getModelDisplayName(a.modelName).localeCompare(getModelDisplayName(b.modelName)) ||
+      a.modelName.localeCompare(b.modelName)
+    );
+  })();
 
 
 
@@ -967,6 +927,14 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
       // FLM detection (FastFlowLM)
       if (modelId.toLowerCase().startsWith('fastflowlm/') || tags.includes('flm') || files.some(f => f.endsWith('.flm'))) {
         setHfModelBackends((prev: Record<string, DetectedBackend | null>) => ({ ...prev, [modelId]: { recipe: 'flm', label: 'FLM NPU' } }));
+        if (totalFileSize) setHfModelSizes((prev: Record<string, number | undefined>) => ({ ...prev, [modelId]: totalFileSize }));
+        return;
+      }
+
+      // Moonshine streaming STT — must run before the generic ONNX detection
+      // (moonshine repos are ONNX-based and would be misclassified as ryzenai-llm)
+      if (modelId.toLowerCase().includes('moonshine') && files.some(f => f.endsWith('.onnx'))) {
+        setHfModelBackends((prev: Record<string, DetectedBackend | null>) => ({ ...prev, [modelId]: { recipe: 'moonshine', label: 'Moonshine' } }));
         if (totalFileSize) setHfModelSizes((prev: Record<string, number | undefined>) => ({ ...prev, [modelId]: totalFileSize }));
         return;
       }
@@ -1228,7 +1196,6 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
         }
 
         await fetchCurrentLoadedModel();
-        await fetchPinnedModels();
         window.dispatchEvent(new CustomEvent('modelLoadEnd', { detail: { modelId: modelName } }));
         window.dispatchEvent(new CustomEvent('modelsUpdated'));
         return;
@@ -1246,7 +1213,6 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
       });
 
       await fetchCurrentLoadedModel();
-      await fetchPinnedModels();
       window.dispatchEvent(new CustomEvent('modelLoadEnd', { detail: { modelId: modelName } }));
       window.dispatchEvent(new CustomEvent('modelsUpdated'));
     } catch (error) {
@@ -1291,7 +1257,6 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
           }
         }
         await fetchCurrentLoadedModel();
-        await fetchPinnedModels();
         window.dispatchEvent(new CustomEvent('modelUnload'));
         return;
       }
@@ -1308,7 +1273,6 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
 
       // Refresh current loaded model status
       await fetchCurrentLoadedModel();
-      await fetchPinnedModels();
 
       // Dispatch event to notify other components (e.g., ChatWindow) that model was unloaded
       window.dispatchEvent(new CustomEvent('modelUnload'));
@@ -1318,81 +1282,19 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
     }
   };
 
-  const handlePinModel = async (modelName: string) => {
-    if (!pinsAvailable) {
-      showWarning('Pins require a newer Lemonade server.');
-      return;
-    }
-
-    setPinningModels(prev => new Set(prev).add(modelName));
+  const handleTogglePin = async (modelName: string, pin: boolean) => {
     try {
-      const retryUntil = Date.now() + (loadingModels.has(modelName) ? 120_000 : 5_000);
-      while (true) {
-        const response = await serverFetch('/pins', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model_name: modelName })
-        });
-
-        if (response.ok) {
-          break;
-        }
-
-        const errorDetails = await getServerErrorDetails(response, `Failed to pin model: ${response.statusText}`);
-        const canRetryLoadingRace =
-          response.status === 400 &&
-          errorDetails.code === 'model_not_loaded_or_loading' &&
-          Date.now() < retryUntil;
-        if (!canRetryLoadingRace) {
-          throw new Error(errorDetails.message);
-        }
-
-        await delay(500);
-      }
-
-      await fetchPinnedModels();
-      await fetchCurrentLoadedModel();
-      showSuccess(`Pinned "${modelName}".`);
-    } catch (error) {
-      console.error('Error pinning model:', error);
-      showError(`Failed to pin model: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setPinningModels(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(modelName);
-        return newSet;
+      const response = await serverFetch('/internal/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_name: modelName, pinned: pin })
       });
-    }
-  };
-
-  const handleUnpinModel = async (modelName: string) => {
-    if (!pinsAvailable) {
-      showWarning('Pins require a newer Lemonade server.');
-      return;
-    }
-
-    setPinningModels(prev => new Set(prev).add(modelName));
-    try {
-      const response = await serverFetch(`/pins/${encodeURIComponent(modelName)}`, {
-        method: 'DELETE'
-      });
-
       if (!response.ok) {
-        throw new Error(await getServerErrorMessage(response, `Failed to unpin model: ${response.statusText}`));
+        throw new Error(`Failed to pin model: ${response.statusText}`);
       }
-
-      await fetchPinnedModels();
       await fetchCurrentLoadedModel();
-      showSuccess(`Unpinned "${modelName}".`);
     } catch (error) {
-      console.error('Error unpinning model:', error);
-      showError(`Failed to unpin model: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setPinningModels(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(modelName);
-        return newSet;
-      });
+      showError(`Failed to update pin: ${error instanceof Error ? error.message : 'Unknown'}`);
     }
   };
 
@@ -1452,7 +1354,6 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
         ? `Omni Model "${displayName}" deleted. Component models were kept.`
         : `Model "${displayName}" deleted successfully.`);
       await fetchCurrentLoadedModel();
-      await fetchPinnedModels();
     } catch (error) {
       console.error('Error deleting model:', error);
       showError('Failed to delete model: ' + (error instanceof Error ? error.message : 'Unknown error'));
@@ -1613,6 +1514,11 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
     const info = modelsData[modelName];
     const isUpscaling = info?.labels?.includes('upscaling');
     const isCollection = isCollectionModel(info);
+    // Cloud-recipe rows have no local artifact (Delete is meaningless and
+    // dynamic discovery would re-add anyway) and no per-model knobs the
+    // ModelOptionsModal can edit (provider config lives in the Backends
+    // panel). Show Load / Unload only.
+    const isCloud = info?.recipe === 'cloud';
     const isEditableCollection = isCollectionEditableAsCustom(info);
     const isBuiltInCollection = isCollection && info?.suggested === true &&
       !(info?.labels ?? []).includes('custom') &&
@@ -1654,9 +1560,9 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
                 <polygon points="5 3 19 12 5 21" fill="currentColor" />
               </svg>
             </button>
-            {canDeleteFromRow && renderDeleteButton(modelName, isCollection ? 'Delete Omni Model' : 'Delete model')}
+            {canDeleteFromRow && !isCloud && renderDeleteButton(modelName, isCollection ? 'Delete Omni Model' : 'Delete model')}
             {isEditableCollection && renderCustomCollectionOptionsButton(modelName)}
-            {!isCollection && renderLoadOptionsButton(modelName)}
+            {!isCloud && !isCollection && renderLoadOptionsButton(modelName)}
           </>
         )}
         {isLoaded && (
@@ -1672,9 +1578,9 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
                 <path d="M5 20H19" />
               </svg>
             </button>
-            {canDeleteFromRow && renderDeleteButton(modelName, isCollection ? 'Delete Omni Model' : 'Delete model')}
+            {canDeleteFromRow && !isCloud && renderDeleteButton(modelName, isCollection ? 'Delete Omni Model' : 'Delete model')}
             {isEditableCollection && renderCustomCollectionOptionsButton(modelName)}
-            {!isCollection && renderLoadOptionsButton(modelName)}
+            {!isCloud && !isCollection && renderLoadOptionsButton(modelName)}
           </>
         )}
       </>
@@ -1707,7 +1613,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
         return s ? `• ${c} (${s.toFixed(1)} GB)` : `• ${c}`;
       });
       nameTooltip = `Omni Model with ${components.length} component models:\n${lines.join('\n')}`;
-    } else if (displayName || getModelDisplayName(modelName) !== modelName) {
+    } else if (displayName || getModelDisplayName(modelName, modelInfo) !== modelName) {
       nameTooltip = modelName;
     }
 
@@ -1721,8 +1627,10 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
         <div className="model-item-content">
           <div className="model-info-left">
             <span className={`model-status-indicator ${statusClass}`} title={statusTitle}>●</span>
-            <span className="model-name" title={nameTooltip}>{displayName ?? (isCollectionModel(modelInfo) ? getCollectionDisplayName(modelName) : getModelDisplayName(modelName))}</span>
-            <span className="model-size">{formatSize(getModelSize(modelName, modelInfo))}</span>
+            <span className="model-name" title={nameTooltip}>{displayName ?? (isCollectionModel(modelInfo) ? getCollectionDisplayName(modelName) : getModelDisplayName(modelName, modelInfo))}</span>
+            {modelInfo.recipe !== 'cloud' && (
+              <span className="model-size">{formatSize(getModelSize(modelName, modelInfo))}</span>
+            )}
             {renderActionButtons(modelName, isHovered)}
           </div>
           {modelInfo.labels && modelInfo.labels.length > 0 && (
@@ -1994,8 +1902,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
                     <span className="toggle-label-text">Downloaded only</span>
                     <div className="toggle-switch">
                       <input type="checkbox" checked={showDownloadedOnly} onChange={(e) => {
-                        setShowDownloadedOnly(e.target.checked);
-                        setShowFilterPanel(false);
+                        updateShowDownloadedOnly(e.target.checked);
                       }} />
                       <span className="toggle-slider"></span>
                     </div>
@@ -2009,77 +1916,37 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
             <div className="loaded-model-section widget">
               <div className="loaded-model-header">
                 <div className="loaded-model-label">ACTIVE MODELS</div>
-                <div className="loaded-model-count-pill active-model-count-pill">
-                  {activeModelCountText}
+                <div className="loaded-model-count-pill">
+                  {loadedModelEntries.filter(e => !e.isLoading).length} loaded
                 </div>
               </div>
               {loadedModelEntries.length === 0 && <div className="loaded-model-empty">No models loaded</div>}
               <div className="loaded-model-list">
-                {loadedModelEntries.map(({ modelName, isLoading, isLoaded, isPinned, loadError }) => {
-                  const isPinning = pinningModels.has(modelName);
-                  const displayName = getModelDisplayName(modelName);
-                  const pinDisabled = !pinsAvailable || isPinning || (!isPinned && !isLoaded && !isLoading);
-                  const canPinActiveModel = pinsAvailable && !isPinned && (isLoaded || isLoading);
-                  const pinTitle = !pinsAvailable
-                    ? 'Pins require a newer Lemonade server'
-                    : (isPinned ? 'Unpin model' : 'Pin model');
-                  const pinAriaLabel = !pinsAvailable
-                    ? `Pins require a newer Lemonade server for ${displayName}`
-                    : `${isPinned ? 'Unpin' : 'Pin'} ${displayName}`;
-                  const hasLoadError = Boolean(loadError) && !isLoading && !isLoaded;
-                  const indicatorTitle = isLoading
-                    ? 'Loading'
-                    : (isLoaded ? 'Loaded' : (hasLoadError ? `Load failed: ${loadError}` : 'Pinned'));
-                  const indicatorClassName = `loaded-model-indicator${isLoading ? ' loading' : ''}${!isLoaded && !isLoading ? ' not-loaded' : ''}${hasLoadError ? ' error' : ''}`;
-                  const showPinnedLoadAction = isPinned && !isLoaded && !isLoading;
-                  const loadActionLabel = `${hasLoadError ? 'Retry' : 'Load'} ${displayName}`;
-
-                  return (
-                    <div key={modelName} className={`loaded-model-info${isPinned ? ' pinned' : ''}${!isLoaded && !isLoading ? ' pinned-not-loaded' : ''}`}>
-                      <button
-                        className={`model-action-btn pin-btn${isPinned ? ' pinned' : ''}${canPinActiveModel ? ' pin-available' : ''}${isPinning ? ' pending' : ''}`}
-                        onClick={() => isPinned ? handleUnpinModel(modelName) : handlePinModel(modelName)}
-                        disabled={pinDisabled}
-                        title={pinTitle}
-                        aria-label={pinAriaLabel}
-                        aria-pressed={isPinned}
-                      >
-                        <PinIcon />
-                      </button>
-                      <div className="loaded-model-details">
-                        <span
-                          className={indicatorClassName}
-                          title={indicatorTitle}
-                        />
-                        <span className="loaded-model-name" title={modelName}>{displayName}</span>
-                      </div>
-                      {isLoaded && !isLoading && (
+                {loadedModelEntries.map(({ modelName, isLoading }) => (
+                  <div key={modelName} className="loaded-model-info">
+                    <div className="loaded-model-details">
+                      <span
+                        className={`loaded-model-indicator${isLoading ? ' loading' : ''}`}
+                        title={isLoading ? 'Loading' : 'Loaded'}
+                      />
+                      <span className="loaded-model-name" title={modelName}>{getModelDisplayName(modelName)}</span>
+                    </div>
+                    {!isLoading && (
+                      <div className="active-model-actions">
                         <button
-                          className="model-action-btn unload-btn active-model-eject-button"
-                          onClick={() => handleUnloadModel(modelName)}
-                          title={`Eject ${displayName}`}
-                          aria-label={`Eject ${displayName}`}
+                          className={`model-action-btn pin-btn ${pinnedModels.has(modelName) ? 'pinned' : ''}`}
+                          onClick={() => handleTogglePin(modelName, !pinnedModels.has(modelName))}
+                          title={pinnedModels.has(modelName) ? "Unpin model" : "Pin model"}
                         >
+                          <PinIcon fill={pinnedModels.has(modelName) ? 'currentColor' : 'none'} />
+                        </button>
+                        <button className="model-action-btn unload-btn active-model-eject-button" onClick={() => handleUnloadModel(modelName)} title="Eject model">
                           <EjectIcon />
                         </button>
-                      )}
-                      {showPinnedLoadAction && (
-                        <button
-                          className={`model-action-btn ${hasLoadError ? 'retry-btn' : 'load-btn'} active-model-load-button`}
-                          onClick={() => handleLoadModel(modelName)}
-                          title={loadActionLabel}
-                          aria-label={loadActionLabel}
-                        >
-                          {hasLoadError ? (
-                            <RefreshIcon size={13} strokeWidth={2} />
-                          ) : (
-                            <PlayIcon size={12} />
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -2089,7 +1956,7 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
               <div className="available-models-section widget">
                 <div className="available-models-header">
                   <div className="loaded-model-label">SUGGESTED MODELS</div>
-                  <div className="loaded-model-count-pill suggested-model-count-pill">{availableModelCount} shown</div>
+                  <div className="loaded-model-count-pill">{availableModelCount} shown</div>
                 </div>
                 {renderModelsView()}
               </div>
@@ -2109,14 +1976,14 @@ const ModelManager: React.FC<ModelManagerProps> = ({ isContentVisible, onContent
                     detectingBackendFor === null &&
                     hfSearchResults.every((m: HFModelInfo) => {
                       const backend = hfModelBackends[m.id];
-                      return backend === null || (backend != null && ['sd-cpp', 'whispercpp'].includes(backend.recipe));
+                      return backend === null || (backend != null && ['sd-cpp', 'whispercpp', 'moonshine'].includes(backend.recipe));
                     }))
                 ) && (
                   <div className="hf-search-message">No compatible models found.</div>
                 )}
                 {hfSearchResults.filter((hfModel: HFModelInfo) => {
                   const backend = hfModelBackends[hfModel.id];
-                  return backend !== null && !(backend != null && ['sd-cpp', 'whispercpp'].includes(backend.recipe));
+                  return backend !== null && !(backend != null && ['sd-cpp', 'whispercpp', 'moonshine'].includes(backend.recipe));
                 }).map((hfModel: HFModelInfo) => {
                   const backend = hfModelBackends[hfModel.id];
                   const isDetecting = detectingBackendFor === hfModel.id;

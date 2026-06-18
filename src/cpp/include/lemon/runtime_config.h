@@ -34,6 +34,9 @@ public:
     double max_gpu_memory_occupancy_gb() const;
     std::string models_dir() const;
     int ctx_size() const;
+    bool auto_evict() const;
+    double auto_evict_threshold_pct() const;
+
 
     // Feature flags
     bool offline() const;

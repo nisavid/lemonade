@@ -154,6 +154,10 @@ jobs:
             echo "No items to label."
             exit 0
           fi
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY is not configured; skipping LLM labels."
+            exit 0
+          fi
           if [ "${{ steps.resolve.outputs.dry_run }}" = "true" ]; then
             python .github/scripts/auto_label.py $ITEMS --dry-run
           else
