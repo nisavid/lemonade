@@ -20,14 +20,12 @@ Usage:
     python server_endpoints.py
 """
 
+import json
 import os
 import platform
 import unittest
 import shutil
 import tempfile
-import threading
-import time
-from urllib.parse import quote
 import uuid
 import requests
 from openai import NotFoundError
@@ -49,6 +47,8 @@ from utils.test_models import (
     USER_MODEL_NAME,
     USER_MODEL_TE_CHECKPOINT,
     USER_MODEL_VAE_CHECKPOINT,
+    get_hf_cache_dir,
+    get_hf_cache_dir_candidates,
 )
 
 
@@ -96,19 +96,6 @@ class EndpointTests(ServerTestBase):
         self.assertIsInstance(model_info["pid"], int)
         self.assertGreater(model_info["pid"], 0)
 
-    def _delete_registered_model(self, model_name):
-        """Delete a registered model and fail on unexpected cleanup results."""
-        response = requests.post(
-            f"{self.base_url}/delete",
-            json={"model_name": model_name},
-            timeout=TIMEOUT_DEFAULT,
-        )
-        self.assertIn(
-            response.status_code,
-            [200, 422],
-            f"Unexpected cleanup response for {model_name}: {response.status_code} {response.text}",
-        )
-
     def _parse_prometheus_text(self, body):
         """Validate Prometheus text format and return sample labels by metric name."""
         samples = {}
@@ -129,7 +116,6 @@ class EndpointTests(ServerTestBase):
             "completions",
             "embeddings",
             "models",
-            "pins",
             "responses",
             "pull",
             "pull/variants",
@@ -697,138 +683,629 @@ class EndpointTests(ServerTestBase):
             f"{loaded_after['pid']}"
         )
 
-    def test_012d_pin_loaded_model_and_unpin_without_unloading(self):
-        """Pins apply to an already-loaded model and unpinning does not unload it."""
-        requests.post(
-            f"{self.base_url}/unload",
-            json={"model_name": ENDPOINT_TEST_MODEL},
-            timeout=TIMEOUT_DEFAULT,
+    def _start_mock_cloud_provider(
+        self, upstream_ids, chat_handler=None, sse_chunks=None
+    ):
+        """Spin up an in-process OpenAI-compatible mock provider.
+
+        Serves GET /v1/models with the given ids and (optionally) POST
+        /v1/chat/completions. When `sse_chunks` is provided, the chat
+        endpoint emits each chunk as an SSE `data:` line (the caller is
+        responsible for shaping each chunk as OpenAI-compat JSON) and
+        terminates with `data: [DONE]\\n\\n`. Otherwise it falls back to
+        the non-streaming chat_handler(body) -> dict shape. Returns
+        (base_url, stop_fn). The base URL ends with /v1.
+        """
+        import json as _json
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        class _FakeProvider(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                if self.path.rstrip("/").endswith("/models"):
+                    data = [{"id": uid, "object": "model"} for uid in upstream_ids]
+                    payload = _json.dumps({"object": "list", "data": data}).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def do_POST(self):  # noqa: N802
+                if "/chat/completions" not in self.path:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length) if length else b""
+                try:
+                    parsed = _json.loads(body or b"{}")
+                except _json.JSONDecodeError:
+                    parsed = {}
+                if sse_chunks is not None and parsed.get("stream") is True:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    for chunk in sse_chunks:
+                        line = f"data: {_json.dumps(chunk)}\n\n".encode()
+                        self.wfile.write(line)
+                        self.wfile.flush()
+                    self.wfile.write(b"data: [DONE]\n\n")
+                    self.wfile.flush()
+                    return
+                if chat_handler is None:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                resp = chat_handler(parsed)
+                payload = _json.dumps(resp).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *_args):
+                pass
+
+        httpd = HTTPServer(("127.0.0.1", 0), _FakeProvider)
+        port = httpd.server_address[1]
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+
+        def stop():
+            httpd.shutdown()
+            httpd.server_close()
+
+        return f"http://127.0.0.1:{port}/v1", stop
+
+    def test_012d_cloud_install_then_auth_then_chat(self):
+        """End-to-end cloud workflow on the refactored server-side path.
+
+        Verifies:
+          (1) /v1/install with backend=cloud registers a provider.
+          (2) /v1/system-info reports the provider with auth_state.runtime_key_set=false.
+          (3) /v1/cloud/auth stores a runtime key and triggers discovery.
+          (4) /v1/models lists the discovered cloud model.
+          (5) /v1/chat/completions round-trips through the mock provider.
+          (6) /v1/cloud/auth (DELETE) clears the runtime key and evicts models.
+          (7) /v1/uninstall removes the provider entirely.
+        """
+        provider = "testcloud"
+        upstream_id = "vendor/regression-model"
+        public_name = f"{provider}.{upstream_id}"
+
+        def chat_response(req):
+            return {
+                "id": "cmpl-1",
+                "object": "chat.completion",
+                "created": 1,
+                "model": req.get("model", upstream_id),
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "pong"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+
+        base_url, stop_provider = self._start_mock_cloud_provider(
+            [upstream_id],
+            chat_handler=chat_response,
         )
-        response = requests.post(
-            f"{self.base_url}/load",
-            json={"model_name": ENDPOINT_TEST_MODEL},
-            timeout=TIMEOUT_MODEL_OPERATION,
-        )
-        self.assertEqual(response.status_code, 200)
 
         try:
-            response = requests.post(
-                f"{self.base_url}/pins",
-                json={"model_name": ENDPOINT_TEST_MODEL},
+            # (1) Install with no api_key — provider is registered, no discovery
+            # happens yet (no resolvable key).
+            resp = requests.post(
+                f"{self.base_url}/install",
+                json={
+                    "backend": "cloud",
+                    "provider": provider,
+                    "base_url": base_url,
+                },
                 timeout=TIMEOUT_DEFAULT,
             )
-            self.assertEqual(response.status_code, 200)
-
-            pins = requests.get(f"{self.base_url}/pins", timeout=TIMEOUT_DEFAULT).json()
-            pin_entry = next(
-                item
-                for item in pins["data"]
-                if item["model_name"] == ENDPOINT_TEST_MODEL
+            self.assertEqual(resp.status_code, 200, f"install failed: {resp.text}")
+            data = resp.json()
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["provider"], provider)
+            self.assertEqual(
+                data["models_discovered"],
+                0,
+                "No key supplied — discovery should yield zero models",
             )
-            self.assertTrue(pin_entry["loaded"])
-            self.assertIsNone(pin_entry["load_error"])
 
-            loaded = self._get_loaded_model_info(ENDPOINT_TEST_MODEL)
-            self.assertTrue(loaded["pinned"])
+            # (2) system-info reports the new provider with no auth.
+            info = requests.get(
+                f"{self.base_url}/system-info",
+                timeout=TIMEOUT_DEFAULT,
+            ).json()
+            entries = [
+                p
+                for p in info.get("cloud", {}).get("providers", [])
+                if p["name"] == provider
+            ]
+            self.assertEqual(
+                len(entries), 1, "Provider should be listed in system-info"
+            )
+            self.assertFalse(entries[0]["env_var_set"])
+            self.assertFalse(entries[0]["runtime_key_set"])
 
-            response = requests.delete(
-                f"{self.base_url}/pins/{quote(ENDPOINT_TEST_MODEL, safe='')}",
+            # (3) /cloud/auth stores the runtime key and triggers discovery.
+            resp = requests.post(
+                f"{self.base_url}/cloud/auth",
+                json={"provider": provider, "api_key": "dummy-key"},
                 timeout=TIMEOUT_DEFAULT,
             )
-            self.assertEqual(response.status_code, 200)
+            self.assertEqual(resp.status_code, 200, f"auth set failed: {resp.text}")
+            auth_data = resp.json()
+            self.assertTrue(auth_data["auth_state"]["runtime_key_set"])
+            self.assertEqual(auth_data["models_discovered"], 1)
 
-            pins = requests.get(f"{self.base_url}/pins", timeout=TIMEOUT_DEFAULT).json()
-            self.assertNotIn(
-                ENDPOINT_TEST_MODEL,
-                {item["model_name"] for item in pins["data"]},
-            )
-
-            loaded = self._get_loaded_model_info(ENDPOINT_TEST_MODEL)
-            self.assertIsNotNone(loaded)
-            self.assertFalse(loaded["pinned"])
-        finally:
-            requests.delete(
-                f"{self.base_url}/pins/{quote(ENDPOINT_TEST_MODEL, safe='')}",
+            # (4) /models now lists the discovered cloud model.
+            models = requests.get(
+                f"{self.base_url}/models",
                 timeout=TIMEOUT_DEFAULT,
+            ).json()
+            ids = [m["id"] for m in models.get("data", [])]
+            self.assertIn(
+                public_name,
+                ids,
+                f"Discovered cloud model should appear in /models; got {ids}",
             )
 
-    def test_012e_pin_model_while_loading(self):
-        """POST /pins accepts a model while its /load request is still running."""
-        requests.post(
-            f"{self.base_url}/unload",
-            json={"model_name": ENDPOINT_TEST_MODEL},
-            timeout=TIMEOUT_DEFAULT,
-        )
-
-        load_result = {}
-
-        def load_model():
-            load_result["response"] = requests.post(
-                f"{self.base_url}/load",
-                json={"model_name": ENDPOINT_TEST_MODEL, "ctx_size": 3072},
+            # (5) Round-trip chat completion through the mock.
+            resp = requests.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": public_name,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 5,
+                },
                 timeout=TIMEOUT_MODEL_OPERATION,
             )
+            self.assertEqual(resp.status_code, 200, f"chat failed: {resp.text}")
+            reply = resp.json()["choices"][0]["message"]["content"]
+            self.assertEqual(reply, "pong")
 
-        load_thread = threading.Thread(target=load_model)
-        load_thread.start()
-
-        try:
-            pin_response = None
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                pin_response = requests.post(
-                    f"{self.base_url}/pins",
-                    json={"model_name": ENDPOINT_TEST_MODEL},
-                    timeout=TIMEOUT_DEFAULT,
-                )
-                if pin_response.status_code == 200:
-                    break
-                if not load_thread.is_alive():
-                    break
-                time.sleep(0.05)
-
-            load_thread.join(timeout=TIMEOUT_MODEL_OPERATION)
-            self.assertFalse(load_thread.is_alive(), "/load request did not finish")
-            self.assertEqual(load_result["response"].status_code, 200)
-            if pin_response is not None and pin_response.status_code != 200:
-                pin_response = requests.post(
-                    f"{self.base_url}/pins",
-                    json={"model_name": ENDPOINT_TEST_MODEL},
-                    timeout=TIMEOUT_DEFAULT,
-                )
-            self.assertIsNotNone(pin_response)
-            self.assertEqual(pin_response.status_code, 200)
-
-            loaded = self._get_loaded_model_info(ENDPOINT_TEST_MODEL)
-            self.assertTrue(loaded["pinned"])
-        finally:
-            requests.delete(
-                f"{self.base_url}/pins/{quote(ENDPOINT_TEST_MODEL, safe='')}",
+            # (6) DELETE /cloud/auth clears the runtime key and evicts models.
+            resp = requests.delete(
+                f"{self.base_url}/cloud/auth/{provider}",
                 timeout=TIMEOUT_DEFAULT,
             )
-            if load_thread.is_alive():
-                load_thread.join(timeout=TIMEOUT_MODEL_OPERATION)
+            self.assertEqual(resp.status_code, 200, resp.text)
+            cleared = resp.json()
+            self.assertTrue(cleared["cleared_runtime_key"])
+            self.assertFalse(cleared["auth_state"]["runtime_key_set"])
+            # Without a key, the model should be gone from /models.
+            models = requests.get(
+                f"{self.base_url}/models",
+                timeout=TIMEOUT_DEFAULT,
+            ).json()
+            ids = [m["id"] for m in models.get("data", [])]
+            self.assertNotIn(
+                public_name,
+                ids,
+                "Clearing the runtime key must evict the provider's models",
+            )
 
-    def test_012f_pin_rejects_idle_unloaded_model(self):
-        """POST /pins rejects models that are neither loaded nor loading."""
-        requests.post(
-            f"{self.base_url}/unload",
-            json={"model_name": ENDPOINT_TEST_MODEL},
+            # (7) /uninstall removes the provider record from the registry.
+            resp = requests.post(
+                f"{self.base_url}/uninstall",
+                json={"backend": "cloud", "provider": provider},
+                timeout=TIMEOUT_DEFAULT,
+            )
+            self.assertEqual(resp.status_code, 200, resp.text)
+            info = requests.get(
+                f"{self.base_url}/system-info",
+                timeout=TIMEOUT_DEFAULT,
+            ).json()
+            entries = [
+                p
+                for p in info.get("cloud", {}).get("providers", [])
+                if p["name"] == provider
+            ]
+            self.assertEqual(
+                len(entries), 0, "Uninstalled provider must disappear from system-info"
+            )
+        finally:
+            stop_provider()
+
+        print("[OK] Cloud install -> auth -> chat -> clear -> uninstall round-trip")
+
+    def test_012e_cloud_auth_unknown_provider_returns_404(self):
+        """/cloud/auth refuses to set a key for an unknown provider — keeps
+        the registry honest (no implicit-install) and gives the CLI/UI a
+        precise error to surface."""
+        resp = requests.post(
+            f"{self.base_url}/cloud/auth",
+            json={"provider": "never-installed", "api_key": "k"},
             timeout=TIMEOUT_DEFAULT,
         )
+        self.assertEqual(resp.status_code, 404, resp.text)
+        body = resp.json()
+        self.assertEqual(body["error"]["type"], "invalid_request_error")
+        print("[OK] /cloud/auth on unknown provider returns 404")
 
+    def test_012f_chat_against_evicted_cloud_model_returns_404(self):
+        """When DELETE /cloud/auth/{provider} clears the runtime key it also
+        evicts that provider's discovered models from the cache. A chat call
+        referring to one of those models must surface the standard model
+        not-found 404, not a stack-trace 500 — eviction has to be visible
+        to the chat endpoint."""
+        provider = "testevicted"
+        upstream_id = "vendor/evicted-model"
+        public_name = f"{provider}.{upstream_id}"
+        base_url, stop_provider = self._start_mock_cloud_provider([upstream_id])
         try:
-            response = requests.post(
-                f"{self.base_url}/pins",
-                json={"model_name": ENDPOINT_TEST_MODEL},
+            requests.post(
+                f"{self.base_url}/install",
+                json={"backend": "cloud", "provider": provider, "base_url": base_url},
                 timeout=TIMEOUT_DEFAULT,
             )
-            self.assertEqual(response.status_code, 400)
-        finally:
+            requests.post(
+                f"{self.base_url}/cloud/auth",
+                json={"provider": provider, "api_key": "k"},
+                timeout=TIMEOUT_DEFAULT,
+            )
             requests.delete(
-                f"{self.base_url}/pins/{quote(ENDPOINT_TEST_MODEL, safe='')}",
+                f"{self.base_url}/cloud/auth/{provider}",
                 timeout=TIMEOUT_DEFAULT,
             )
+            resp = requests.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": public_name,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 1,
+                },
+                timeout=TIMEOUT_DEFAULT,
+            )
+            self.assertEqual(resp.status_code, 404, resp.text)
+            requests.post(
+                f"{self.base_url}/uninstall",
+                json={"backend": "cloud", "provider": provider},
+                timeout=TIMEOUT_DEFAULT,
+            )
+        finally:
+            stop_provider()
+        print("[OK] Chat against an evicted cloud model returns a clean 404")
+
+    def test_012j_chat_with_loaded_model_but_cleared_key_returns_missing_creds(self):
+        """The real missing-creds path: load a cloud model (router holds an
+        active CloudServer instance), then clear the runtime key. Subsequent
+        chat calls reuse the already-loaded server — they bypass model-not-
+        found and hit resolve_creds() at request time, which must return
+        the structured missing_creds_error() instead of crashing or 500."""
+        provider = "testmissingkey"
+        upstream_id = "vendor/needs-creds"
+        public_name = f"{provider}.{upstream_id}"
+
+        def chat_response(req):
+            # Should never be called — creds are cleared before chat.
+            return {"error": "mock should not have been reached"}
+
+        base_url, stop_provider = self._start_mock_cloud_provider(
+            [upstream_id],
+            chat_handler=chat_response,
+        )
+        try:
+            requests.post(
+                f"{self.base_url}/install",
+                json={"backend": "cloud", "provider": provider, "base_url": base_url},
+                timeout=TIMEOUT_DEFAULT,
+            )
+            requests.post(
+                f"{self.base_url}/cloud/auth",
+                json={"provider": provider, "api_key": "k"},
+                timeout=TIMEOUT_DEFAULT,
+            )
+            # Load the model so the router holds a live CloudServer instance.
+            load_resp = requests.post(
+                f"{self.base_url}/load",
+                json={"model_name": public_name},
+                timeout=TIMEOUT_MODEL_OPERATION,
+            )
+            self.assertEqual(load_resp.status_code, 200, load_resp.text)
+
+            # Clear the runtime key. evict_cloud_models drops the cache entry
+            # but the router's loaded CloudServer instance keeps loaded_=true,
+            # which is exactly the state that exercises missing_creds_error().
+            clear_resp = requests.delete(
+                f"{self.base_url}/cloud/auth/{provider}",
+                timeout=TIMEOUT_DEFAULT,
+            )
+            self.assertEqual(clear_resp.status_code, 200, clear_resp.text)
+
+            chat_resp = requests.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": public_name,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 1,
+                },
+                timeout=TIMEOUT_DEFAULT,
+            )
+            # Whichever specific status the structured error uses, the
+            # contract is: it must not be 200 (mock should never run) and
+            # the body must be JSON with an `error` envelope that names
+            # the missing-credentials condition — never an HTML stack-trace
+            # or empty body — so a UI/CLI can route the user to /cloud/auth.
+            self.assertNotEqual(
+                chat_resp.status_code, 200, "Chat must not succeed without creds"
+            )
+            body = chat_resp.json()
+            self.assertIn(
+                "error", body, f"Missing structured error envelope: {chat_resp.text}"
+            )
+            err = body["error"]
+            self.assertIn("message", err, f"Error envelope missing message: {body}")
+            self.assertIn("type", err, f"Error envelope missing type: {body}")
+            msg = err["message"].lower()
+            self.assertTrue(
+                "api key" in msg or "credential" in msg or "auth" in msg,
+                f"Error message should reference missing credentials: {err['message']}",
+            )
+            # The provider name should appear so multi-provider setups know
+            # which one to authenticate.
+            self.assertIn(
+                provider,
+                err.get("details", {}).get("provider", "") + err["message"],
+                f"Error should name the offending provider: {body}",
+            )
+        finally:
+            stop_provider()
+            requests.post(
+                f"{self.base_url}/unload",
+                json={"model_name": public_name},
+                timeout=TIMEOUT_DEFAULT,
+            )
+            requests.post(
+                f"{self.base_url}/uninstall",
+                json={"backend": "cloud", "provider": provider},
+                timeout=TIMEOUT_DEFAULT,
+            )
+        print("[OK] Loaded cloud model + cleared key returns missing_creds_error()")
+
+    def test_012k_streaming_chat_through_cloud_provider(self):
+        """End-to-end SSE through a cloud-routed model: the upstream provider
+        emits OpenAI-shape `data:` chunks, CloudServer streams them through to
+        the client unchanged, and the client sees `[DONE]` as the terminator."""
+        provider = "teststream"
+        upstream_id = "vendor/streamer"
+        public_name = f"{provider}.{upstream_id}"
+
+        sse_chunks = [
+            {
+                "id": "cmpl-stream-1",
+                "object": "chat.completion.chunk",
+                "choices": [{"index": 0, "delta": {"content": "Hel"}}],
+            },
+            {
+                "id": "cmpl-stream-1",
+                "object": "chat.completion.chunk",
+                "choices": [{"index": 0, "delta": {"content": "lo"}}],
+            },
+            {
+                "id": "cmpl-stream-1",
+                "object": "chat.completion.chunk",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            },
+        ]
+        base_url, stop_provider = self._start_mock_cloud_provider(
+            [upstream_id],
+            sse_chunks=sse_chunks,
+        )
+        try:
+            requests.post(
+                f"{self.base_url}/install",
+                json={"backend": "cloud", "provider": provider, "base_url": base_url},
+                timeout=TIMEOUT_DEFAULT,
+            )
+            requests.post(
+                f"{self.base_url}/cloud/auth",
+                json={"provider": provider, "api_key": "k"},
+                timeout=TIMEOUT_DEFAULT,
+            )
+
+            with requests.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": public_name,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream": True,
+                    "max_tokens": 5,
+                },
+                timeout=TIMEOUT_MODEL_OPERATION,
+                stream=True,
+            ) as resp:
+                self.assertEqual(resp.status_code, 200, resp.text)
+                deltas = []
+                saw_done = False
+                for raw in resp.iter_lines():
+                    if not raw:
+                        continue
+                    line = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[len("data:") :].strip()
+                    if payload == "[DONE]":
+                        saw_done = True
+                        break
+                    obj = json.loads(payload)
+                    delta = obj.get("choices", [{}])[0].get("delta", {})
+                    if "content" in delta:
+                        deltas.append(delta["content"])
+                self.assertTrue(saw_done, "Stream must end with data: [DONE]")
+                self.assertEqual(
+                    "".join(deltas),
+                    "Hello",
+                    f"Streamed chunks did not assemble correctly: {deltas}",
+                )
+        finally:
+            stop_provider()
+            requests.delete(
+                f"{self.base_url}/cloud/auth/{provider}",
+                timeout=TIMEOUT_DEFAULT,
+            )
+            requests.post(
+                f"{self.base_url}/uninstall",
+                json={"backend": "cloud", "provider": provider},
+                timeout=TIMEOUT_DEFAULT,
+            )
+        print("[OK] Streaming chat through cloud provider round-trips SSE")
+
+    def test_012g_install_rejects_bad_provider_name(self):
+        """Provider names must be [a-z0-9_-]+ lowercase. Uppercase ('Fireworks'
+        vs 'fireworks') would resolve the same env var but be distinct registry
+        records — registry-level confusion the install path now refuses."""
+        for bad_name in ["Fireworks", "with space", "vendor/x", "with.dot", ""]:
+            resp = requests.post(
+                f"{self.base_url}/install",
+                json={
+                    "backend": "cloud",
+                    "provider": bad_name,
+                    "base_url": "https://example.com/v1",
+                },
+                timeout=TIMEOUT_DEFAULT,
+            )
+            self.assertEqual(
+                resp.status_code,
+                400,
+                f"Install accepted bad provider name {bad_name!r}: {resp.text}",
+            )
+            body = resp.json()
+            self.assertEqual(body["error"]["type"], "invalid_request_error")
+        print("[OK] /install rejects non-[a-z0-9_-]+ provider names with 400")
+
+    def test_012h_install_rejects_insecure_http_base_url(self):
+        """An http:// base URL to a non-loopback host would leak the Bearer
+        API key in plaintext on every forwarded request. Refuse those at
+        install time. https:// and http://localhost are both allowed."""
+        # http:// to a non-loopback host: rejected.
+        resp = requests.post(
+            f"{self.base_url}/install",
+            json={
+                "backend": "cloud",
+                "provider": "httpguard",
+                "base_url": "http://api.example.com/v1",
+            },
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(resp.status_code, 400, resp.text)
+        body = resp.json()
+        self.assertEqual(body["error"]["type"], "invalid_request_error")
+        self.assertIn("plaintext", body["error"]["message"].lower())
+
+        # gopher:// (any non-http(s) scheme): rejected.
+        resp = requests.post(
+            f"{self.base_url}/install",
+            json={
+                "backend": "cloud",
+                "provider": "schemeguard",
+                "base_url": "gopher://example.com/v1",
+            },
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(resp.status_code, 400, resp.text)
+
+        # http://localhost: allowed (mock-provider tests need this).
+        resp = requests.post(
+            f"{self.base_url}/install",
+            json={
+                "backend": "cloud",
+                "provider": "localhttpguard",
+                "base_url": "http://localhost:1/v1",
+            },
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        # Clean up the test provider so the registry doesn't accumulate state.
+        requests.post(
+            f"{self.base_url}/uninstall",
+            json={"backend": "cloud", "provider": "localhttpguard"},
+            timeout=TIMEOUT_DEFAULT,
+        )
+        print(
+            "[OK] /install rejects http:// to non-loopback hosts, allows http://localhost"
+        )
+
+    def test_012i_cloud_refresh_is_idempotent_no_duplicates(self):
+        """refresh_cloud_models must evict-then-emplace this provider's prior
+        entries on every call. Asymmetry with build_cache() (overwrite instead
+        of emplace) would not be visible on a clean cache, but would surface
+        as duplicate or stale entries after a second /cloud/auth — so we
+        re-auth the same provider with the same key twice and verify the
+        same set of models is present, exactly once each."""
+        provider = "idempotent"
+        upstream_ids = ["vendor/a", "vendor/b"]
+        base_url, stop_provider = self._start_mock_cloud_provider(upstream_ids)
+        try:
+            requests.post(
+                f"{self.base_url}/install",
+                json={"backend": "cloud", "provider": provider, "base_url": base_url},
+                timeout=TIMEOUT_DEFAULT,
+            )
+
+            # First auth: discover both upstream ids.
+            resp = requests.post(
+                f"{self.base_url}/cloud/auth",
+                json={"provider": provider, "api_key": "k1"},
+                timeout=TIMEOUT_DEFAULT,
+            )
+            self.assertEqual(resp.status_code, 200, resp.text)
+            self.assertEqual(resp.json()["models_discovered"], 2)
+
+            # Second auth with the same key: must still report exactly 2 — the
+            # eviction step removes the previous entries before re-emplacing.
+            resp = requests.post(
+                f"{self.base_url}/cloud/auth",
+                json={"provider": provider, "api_key": "k1"},
+                timeout=TIMEOUT_DEFAULT,
+            )
+            self.assertEqual(resp.status_code, 200, resp.text)
+            self.assertEqual(
+                resp.json()["models_discovered"],
+                2,
+                "Re-auth must report the same count — refresh is supposed to "
+                "evict the provider's prior entries before re-emplacing",
+            )
+
+            # /models lists each discovered id exactly once.
+            models = requests.get(
+                f"{self.base_url}/models", timeout=TIMEOUT_DEFAULT
+            ).json()
+            ids = [m["id"] for m in models.get("data", [])]
+            for uid in upstream_ids:
+                expected = f"{provider}.{uid}"
+                self.assertEqual(
+                    ids.count(expected),
+                    1,
+                    f"Expected {expected} exactly once in /models, ids={ids}",
+                )
+        finally:
+            stop_provider()
+            requests.delete(
+                f"{self.base_url}/cloud/auth/{provider}",
+                timeout=TIMEOUT_DEFAULT,
+            )
+            requests.post(
+                f"{self.base_url}/uninstall",
+                json={"backend": "cloud", "provider": provider},
+                timeout=TIMEOUT_DEFAULT,
+            )
+        print("[OK] Cloud refresh is idempotent — re-auth produces no duplicates")
 
     def test_013_unload_specific_model(self):
         """Test unloading a specific model by name."""
@@ -1351,19 +1828,23 @@ class EndpointTests(ServerTestBase):
                 f"[OK] Pull preserved merged image_defaults + recipe_options for {model_name}"
             )
         finally:
-            self._delete_registered_model(model_name)
+            try:
+                requests.post(
+                    f"{self.base_url}/delete",
+                    json={"model_name": model_name},
+                    timeout=TIMEOUT_DEFAULT,
+                )
+            except Exception:
+                pass
 
     def test_021c_naming_spec_pull_rejects_reserved_prefixes(self):
-        """Naming spec: /pull rejects canonical source prefixes in registrations."""
+        """Naming spec: /pull rejects extra.* / builtin.* model names, including
+        as the bare-name part of a user.* alias (e.g. user.builtin.Foo)."""
         for reserved in [
-            "user.",
-            "extra.",
-            "builtin.",
             f"extra.Rejected-{uuid.uuid4().hex[:6]}",
             f"builtin.Rejected-{uuid.uuid4().hex[:6]}",
-            # user.<source>.<bare> must also be rejected, otherwise it can
-            # hijack a canonical alias slot.
-            f"user.user.Hijack-{uuid.uuid4().hex[:6]}",
+            # user.<reserved>.<bare> must also be rejected — otherwise it would
+            # hijack the builtin.<bare> / extra.<bare> alias slot.
             f"user.builtin.Hijack-{uuid.uuid4().hex[:6]}",
             f"user.extra.Hijack-{uuid.uuid4().hex[:6]}",
         ]:
@@ -1384,7 +1865,9 @@ class EndpointTests(ServerTestBase):
                 f"{response.status_code}: {response.text}",
             )
             self.assertIn("reserved", response.text.lower())
-        print("[OK] /pull rejects canonical source prefixes in registration names")
+        print(
+            "[OK] /pull rejects extra.*/builtin.* and user.extra.*/user.builtin.* names"
+        )
 
     def test_021d_naming_spec_builtin_canonical_alias(self):
         """Naming spec: builtin.<name> resolves to the same model as the bare name."""
@@ -1484,7 +1967,14 @@ class EndpointTests(ServerTestBase):
 
             print(f"[OK] user.{ENDPOINT_TEST_MODEL} shadows built-in cleanly")
         finally:
-            self._delete_registered_model(user_canonical)
+            try:
+                requests.post(
+                    f"{self.base_url}/delete",
+                    json={"model_name": user_canonical},
+                    timeout=TIMEOUT_DEFAULT,
+                )
+            except Exception:
+                pass
 
     def test_021j_register_user_collection(self):
         """Register a user-defined collection via POST /pull."""
@@ -1671,6 +2161,368 @@ class EndpointTests(ServerTestBase):
                 except Exception:
                     pass
 
+    def test_021t_inline_collection_missing_def_rejected(self):
+        """Inline collection imports fail closed: a component with no matching
+        definition in `models` (and not already registered) must be rejected,
+        not silently dropped into a smaller, different collection."""
+        suffix = uuid.uuid4().hex[:8]
+        collection_name = f"user.InlineColl-{suffix}"
+        defined = f"InlineComp-{suffix}"
+        missing = f"MissingComp-{suffix}"
+        response = requests.post(
+            f"{self.base_url}/pull",
+            json={
+                "model_name": collection_name,
+                "recipe": "collection.omni",
+                # `components` lists two, but `models` defines only one and the
+                # other is not a registered model -> the import must be rejected.
+                "components": [defined, missing],
+                "models": [
+                    {
+                        "model_name": defined,
+                        "recipe": "llamacpp",
+                        "checkpoints": {"main": USER_MODEL_MAIN_CHECKPOINT},
+                    }
+                ],
+                "stream": False,
+            },
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("matching definition", response.json().get("error", "").lower())
+
+        # Fail-closed: the rejected collection must not have been persisted.
+        models_response = requests.get(
+            f"{self.base_url}/models?show_all=true",
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(models_response.status_code, 200)
+        ids = {m["id"] for m in models_response.json()["data"]}
+        self.assertNotIn(
+            collection_name[5:],
+            ids,
+            "Rejected inline collection must not be persisted",
+        )
+        print("[OK] Inline collection with missing component def rejected with 400")
+
+    def test_021u_inline_collection_invalid_def_rejected(self):
+        """Inline collection imports fail closed on a *malformed* component def:
+        a `models` entry whose name matches but is missing the minimum a real
+        registration needs (recipe + checkpoint) must be rejected up front, not
+        registered as a half-defined user.* model that fails later mid-download."""
+        suffix = uuid.uuid4().hex[:8]
+        collection_name = f"user.InvalidColl-{suffix}"
+        comp = f"InvalidComp-{suffix}"
+        response = requests.post(
+            f"{self.base_url}/pull",
+            json={
+                "model_name": collection_name,
+                "recipe": "collection.omni",
+                "components": [comp],
+                # Name matches `components`, but the def has no recipe and no
+                # checkpoint -> not a usable registration -> must be rejected.
+                "models": [{"model_name": comp}],
+                "stream": False,
+            },
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("incomplete definition", response.json().get("error", "").lower())
+
+        # Fail-closed: neither the collection nor the half-defined component
+        # may have been persisted as a side effect.
+        models_response = requests.get(
+            f"{self.base_url}/models?show_all=true",
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(models_response.status_code, 200)
+        ids = {m["id"] for m in models_response.json()["data"]}
+        self.assertNotIn(
+            collection_name[5:], ids, "Rejected collection must not persist"
+        )
+        self.assertNotIn(comp, ids, "Half-defined component must not be registered")
+        print("[OK] Inline collection with invalid component def rejected with 400")
+
+    def test_021v_collection_self_reference_bare_name_rejected(self):
+        """A collection that lists itself as a component by its *bare* name (e.g.
+        `user.MyCol` with components ["MyCol"]) must be rejected, not just the
+        exact `user.`-qualified spelling — otherwise it resolves back to itself."""
+        suffix = uuid.uuid4().hex[:8]
+        bare = f"SelfRefColl-{suffix}"
+        collection_name = f"user.{bare}"
+        response = requests.post(
+            f"{self.base_url}/pull",
+            json={
+                "model_name": collection_name,
+                "recipe": "collection.omni",
+                # Bare self-reference: must be caught by the bare-form comparison.
+                "components": [bare],
+                "models": [
+                    {
+                        "model_name": bare,
+                        "recipe": "collection.omni",
+                        "components": [ENDPOINT_TEST_MODEL],
+                    }
+                ],
+                "stream": False,
+            },
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("reference itself", response.json().get("error", "").lower())
+
+        models_response = requests.get(
+            f"{self.base_url}/models?show_all=true",
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(models_response.status_code, 200)
+        ids = {m["id"] for m in models_response.json()["data"]}
+        self.assertNotIn(bare, ids, "Self-referential collection must not persist")
+        print("[OK] Bare-name self-referential collection rejected with 400")
+
+    def _server_hf_cache_root(self, probe_repo_dir):
+        """Return the HF cache root the *server* actually uses, verified by
+        locating a repo dir the server already downloaded (`probe_repo_dir`), or
+        None if it can't be located from this process.
+
+        The server's cache may live somewhere the test process can't compute or
+        read — e.g. a config.json `models_dir` override, or a packaged server
+        (macOS .pkg) running under a different user/HOME. We probe candidates
+        (config models_dir, then env/platform defaults) for a known-downloaded
+        repo; if none match, the test can't stage a manifest where the server
+        will read it, so the caller should skip."""
+        candidates = []
+        try:
+            cfg = requests.get(
+                f"http://localhost:{PORT}/internal/config", timeout=TIMEOUT_DEFAULT
+            ).json()
+            models_dir = cfg.get("models_dir", "") or ""
+            if models_dir and models_dir != "auto" and os.path.isabs(models_dir):
+                candidates.append(models_dir)
+        except Exception:
+            pass
+        candidates.extend(get_hf_cache_dir_candidates())
+        for root in candidates:
+            if os.path.isdir(os.path.join(root, probe_repo_dir)):
+                return root
+        return None
+
+    def _write_collection_manifest(self, cache_root, repo_id, components, models):
+        """Write a fake HF-cached collection manifest for `repo_id` into the HF
+        cache (refs/main + a snapshot dir), mimicking a repo pulled by
+        `lemonade pull <org>/<repo>`. Returns the repo cache dir path."""
+        repo_dir = os.path.join(cache_root, "models--" + repo_id.replace("/", "--"))
+        snapshot = os.path.join(repo_dir, "snapshots", "rev1")
+        os.makedirs(snapshot, exist_ok=True)
+        os.makedirs(os.path.join(repo_dir, "refs"), exist_ok=True)
+        with open(os.path.join(repo_dir, "refs", "main"), "w", encoding="utf-8") as f:
+            f.write("rev1")
+        manifest = {
+            "model_name": repo_id.split("/")[-1],
+            "recipe": "collection.omni",
+            "checkpoints": {"main": ""},
+            "components": components,
+            "models": models,
+        }
+        # Content-based discovery: the filename is not load-bearing for the cache
+        # reader, but use the documented <RepoName>.json convention anyway.
+        with open(
+            os.path.join(snapshot, repo_id.split("/")[-1] + ".json"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(manifest, f)
+        return repo_dir
+
+    def _collection_components(self, model_id):
+        r = requests.get(f"{self.base_url}/models/{model_id}", timeout=TIMEOUT_DEFAULT)
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json().get("components", [])
+
+    def test_021w_hf_backed_collection_refresh_is_pointer_only(self):
+        """HF-backed collections are pointer-only: the pull body is just a repo
+        pointer (the real `lemonade pull <org>/<repo>` shape — no inline
+        components/models), /pull resolves components from the manifest on disk,
+        nothing is persisted in user_models.json, and a changed manifest is
+        reflected on re-pull (the Codex/fl0rianr staleness scenario). The staged
+        manifest stands in for what /pull's own download step writes to disk;
+        the real network download of the manifest is exercised by server_omni.py.
+        Uses already-downloaded components so the refresh needs no network."""
+        suffix = uuid.uuid4().hex[:8]
+        repo_id = f"lemontest/RefreshKit-{suffix}"
+        collection = f"user.RefreshKit-{suffix}"
+        # Component A: the always-present built-in test model.
+        comp_a = ENDPOINT_TEST_MODEL
+        a_def = {
+            "model_name": comp_a,
+            "recipe": "llamacpp",
+            "checkpoints": {"main": USER_MODEL_MAIN_CHECKPOINT},
+        }
+        # Component B: a user model we pre-pull so it is already downloaded; the
+        # refresh that adds it must not require a network fetch.
+        comp_b = f"RefreshB-{suffix}"
+        b_def = {
+            "model_name": comp_b,
+            "recipe": "llamacpp",
+            "checkpoints": {"main": USER_MODEL_MAIN_CHECKPOINT},
+        }
+        repo_dir = None
+        try:
+            # Pre-download component B as a standalone user model.
+            pull_b = requests.post(
+                f"{self.base_url}/pull",
+                json={
+                    "model_name": f"user.{comp_b}",
+                    "recipe": b_def["recipe"],
+                    "checkpoints": b_def["checkpoints"],
+                    "stream": False,
+                },
+                timeout=TIMEOUT_MODEL_OPERATION,
+            )
+            self.assertEqual(pull_b.status_code, 200, pull_b.text)
+
+            # Discover the server's real HF cache root by locating the repo it
+            # just downloaded for component B (config models_dir overrides can put
+            # it where the test side wouldn't compute, e.g. macOS .pkg installs).
+            b_repo_dir = "models--" + USER_MODEL_MAIN_CHECKPOINT.split(":")[0].replace(
+                "/", "--"
+            )
+            cache_root = self._server_hf_cache_root(b_repo_dir)
+            if cache_root is None:
+                self.skipTest(
+                    "Cannot locate the server's HF cache from the test process "
+                    "(e.g. packaged server under a different user); the HF-backed "
+                    "refresh path is covered end-to-end by server_omni.py."
+                )
+
+            # Manifest v1 on disk (stands in for /pull's own manifest download).
+            repo_dir = self._write_collection_manifest(
+                cache_root, repo_id, [comp_a], [a_def]
+            )
+
+            # Register the HF-backed collection with the real hf_pull POINTER body:
+            # model name + recipe + the repo as the checkpoint. No inline
+            # components/models — /pull resolves them from the manifest on disk.
+            reg = requests.post(
+                f"{self.base_url}/pull",
+                json={
+                    "model_name": collection,
+                    "recipe": "collection.omni",
+                    "checkpoints": {"main": repo_id},
+                    "stream": False,
+                },
+                timeout=TIMEOUT_MODEL_OPERATION,
+            )
+            self.assertEqual(reg.status_code, 200, reg.text)
+
+            # Pointer-only: components must NOT be persisted in the registry.
+            self.assertEqual(
+                sorted(self._collection_components(collection)),
+                sorted([comp_a]),
+                "Collection should expose the manifest's single component",
+            )
+
+            # Manifest v2: add component B upstream, then refresh via re-pull.
+            self._write_collection_manifest(
+                cache_root, repo_id, [comp_a, comp_b], [a_def, b_def]
+            )
+            refresh = requests.post(
+                f"{self.base_url}/pull",
+                json={"model_name": collection, "stream": False},
+                timeout=TIMEOUT_MODEL_OPERATION,
+            )
+            self.assertEqual(refresh.status_code, 200, refresh.text)
+
+            # The new component must now be reflected — proving the registry did
+            # not shadow the refreshed manifest with a stale persisted list. A
+            # unique user.* component surfaces under its bare public name.
+            components = self._collection_components(collection)
+            self.assertIn(comp_a, components)
+            self.assertIn(
+                comp_b,
+                components,
+                "Refreshed manifest's added component must appear after re-pull",
+            )
+            print("[OK] HF-backed collection refresh reflects changed manifest")
+        finally:
+            for name in (collection, f"user.{comp_b}"):
+                try:
+                    requests.post(
+                        f"{self.base_url}/delete",
+                        json={"model_name": name},
+                        timeout=TIMEOUT_DEFAULT,
+                    )
+                except Exception:
+                    pass
+            if repo_dir and os.path.isdir(repo_dir):
+                shutil.rmtree(repo_dir, ignore_errors=True)
+
+    def test_021x_reject_nested_collection_by_name(self):
+        """Nested collections are not supported: a collection whose component
+        names an already-registered collection (here the built-in
+        LMX-Omni-5.5B-Lite) must be rejected — components must be leaf models."""
+        collection_name = f"user.NestByName-{uuid.uuid4().hex[:8]}"
+        response = requests.post(
+            f"{self.base_url}/pull",
+            json={
+                "model_name": collection_name,
+                "recipe": "collection.omni",
+                "components": ["LMX-Omni-5.5B-Lite"],  # a built-in collection
+                "stream": False,
+            },
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("not collections", response.json().get("error", "").lower())
+        ids = {
+            m["id"]
+            for m in requests.get(
+                f"{self.base_url}/models?show_all=true", timeout=TIMEOUT_DEFAULT
+            ).json()["data"]
+        }
+        self.assertNotIn(
+            collection_name[5:], ids, "Rejected collection must not persist"
+        )
+        print("[OK] Nested collection (component is a registered collection) rejected")
+
+    def test_021y_reject_nested_collection_inline_def(self):
+        """Nested collections are not supported: a component whose inline `models`
+        definition is itself a collection (recipe collection.omni) must be
+        rejected, not registered."""
+        suffix = uuid.uuid4().hex[:8]
+        collection_name = f"user.NestInline-{suffix}"
+        child = f"NestChild-{suffix}"
+        response = requests.post(
+            f"{self.base_url}/pull",
+            json={
+                "model_name": collection_name,
+                "recipe": "collection.omni",
+                "components": [child],
+                "models": [
+                    {
+                        "model_name": child,
+                        "recipe": "collection.omni",  # nested → must be rejected
+                        "components": [ENDPOINT_TEST_MODEL],
+                    }
+                ],
+                "stream": False,
+            },
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("not collections", response.json().get("error", "").lower())
+        ids = {
+            m["id"]
+            for m in requests.get(
+                f"{self.base_url}/models?show_all=true", timeout=TIMEOUT_DEFAULT
+            ).json()["data"]
+        }
+        self.assertNotIn(
+            collection_name[5:], ids, "Rejected collection must not persist"
+        )
+        self.assertNotIn(child, ids, "Nested child collection must not be registered")
+        print("[OK] Nested collection (inline collection component def) rejected")
+
     def test_021o_load_collection_routes_through_component_branch(self):
         """POST /load on a collection must not route the collection itself
         through the generic HF download path (collections have no checkpoint).
@@ -1833,7 +2685,14 @@ class EndpointTests(ServerTestBase):
 
             print(f"[OK] unique user.{bare} emits as bare id with no collision")
         finally:
-            self._delete_registered_model(canonical)
+            try:
+                requests.post(
+                    f"{self.base_url}/delete",
+                    json={"model_name": canonical},
+                    timeout=TIMEOUT_DEFAULT,
+                )
+            except Exception:
+                pass
 
     def _set_extra_models_dir(self, value):
         """Swap extra_models_dir via /internal/set; returns the prior value."""
@@ -1938,7 +2797,14 @@ class EndpointTests(ServerTestBase):
                 f"[OK] three-way collision: bare/{bare}, extra.{bare}, builtin.{bare}"
             )
         finally:
-            self._delete_registered_model(user_canonical)
+            try:
+                requests.post(
+                    f"{self.base_url}/delete",
+                    json={"model_name": user_canonical},
+                    timeout=TIMEOUT_DEFAULT,
+                )
+            except Exception:
+                pass
             self._set_extra_models_dir(prior_dir)
             shutil.rmtree(extra_dir, ignore_errors=True)
 
@@ -1986,12 +2852,11 @@ class EndpointTests(ServerTestBase):
             self._set_extra_models_dir(prior_dir)
             shutil.rmtree(extra_dir, ignore_errors=True)
 
-    def test_021i_extra_root_gguf_emits_filename(self):
-        """Root-level extra_models_dir GGUF files emit the full filename."""
+    def test_021i_extra_root_gguf_emits_stem_name(self):
+        """Root-level extra_models_dir GGUF files emit the filename stem."""
         bare = "Qwen3.5-4B-UD-Q4_K_XL"
-        filename = f"{bare}.gguf"
         extra_dir = tempfile.mkdtemp(prefix="lemon_extra_root_")
-        self._write_root_stub_gguf(extra_dir, filename)
+        self._write_root_stub_gguf(extra_dir, f"{bare}.gguf")
 
         prior_dir = self._set_extra_models_dir(extra_dir)
         try:
@@ -2001,91 +2866,20 @@ class EndpointTests(ServerTestBase):
             self.assertEqual(models_response.status_code, 200)
             ids = {m["id"] for m in models_response.json()["data"]}
 
-            self.assertIn(filename, ids)
-            self.assertNotIn(bare, ids)
-
-            filename_resp = requests.get(
-                f"{self.base_url}/models/{filename}", timeout=TIMEOUT_DEFAULT
-            )
-            self.assertEqual(filename_resp.status_code, 200)
-            self.assertEqual(filename_resp.json()["id"], filename)
-            self.assertEqual(
-                filename_resp.json()["checkpoint"],
-                os.path.join(extra_dir, filename),
-            )
-
-            print(f"[OK] root GGUF emits filename: {filename}")
-        finally:
-            self._set_extra_models_dir(prior_dir)
-            shutil.rmtree(extra_dir, ignore_errors=True)
-
-    def test_021j_extra_root_gguf_does_not_collide_with_directory(self):
-        """Extra root files and directory models with the same stem both load."""
-        bare = f"Collision-{uuid.uuid4().hex[:6]}"
-        filename = f"{bare}.gguf"
-        extra_dir = tempfile.mkdtemp(prefix="lemon_extra_collision_")
-        self._write_root_stub_gguf(extra_dir, filename)
-        self._write_stub_gguf(extra_dir, bare)
-
-        prior_dir = self._set_extra_models_dir(extra_dir)
-        try:
-            models_response = requests.get(
-                f"{self.base_url}/models?show_all=true", timeout=TIMEOUT_DEFAULT
-            )
-            self.assertEqual(models_response.status_code, 200)
-            ids = {m["id"] for m in models_response.json()["data"]}
-            self.assertIn(filename, ids)
             self.assertIn(bare, ids)
+            self.assertNotIn(f"{bare}.gguf", ids)
 
-            file_resp = requests.get(
-                f"{self.base_url}/models/{filename}", timeout=TIMEOUT_DEFAULT
-            )
-            self.assertEqual(file_resp.status_code, 200)
-            self.assertEqual(
-                file_resp.json()["checkpoint"],
-                os.path.join(extra_dir, filename),
-            )
-
-            dir_resp = requests.get(
+            bare_resp = requests.get(
                 f"{self.base_url}/models/{bare}", timeout=TIMEOUT_DEFAULT
             )
-            self.assertEqual(dir_resp.status_code, 200)
+            self.assertEqual(bare_resp.status_code, 200)
+            self.assertEqual(bare_resp.json()["id"], bare)
             self.assertEqual(
-                dir_resp.json()["checkpoint"],
-                os.path.join(extra_dir, bare),
+                bare_resp.json()["checkpoint"],
+                os.path.join(extra_dir, f"{bare}.gguf"),
             )
 
-            print("[OK] root GGUF and directory names do not collide")
-        finally:
-            self._set_extra_models_dir(prior_dir)
-            shutil.rmtree(extra_dir, ignore_errors=True)
-
-    def test_021k_extra_models_skip_reserved_source_prefix_stems(self):
-        """Extra model discovery skips names that would form nested canonical IDs."""
-        extra_dir = tempfile.mkdtemp(prefix="lemon_extra_reserved_")
-        reserved_root = f"builtin.ReservedRoot-{uuid.uuid4().hex[:6]}"
-        reserved_dir = f"user.ReservedDir-{uuid.uuid4().hex[:6]}"
-        self._write_root_stub_gguf(extra_dir, f"{reserved_root}.gguf")
-        self._write_stub_gguf(extra_dir, reserved_dir)
-
-        prior_dir = self._set_extra_models_dir(extra_dir)
-        try:
-            models_response = requests.get(
-                f"{self.base_url}/models?show_all=true", timeout=TIMEOUT_DEFAULT
-            )
-            self.assertEqual(models_response.status_code, 200)
-            ids = {m["id"] for m in models_response.json()["data"]}
-
-            for reserved in [f"{reserved_root}.gguf", reserved_dir]:
-                self.assertNotIn(reserved, ids)
-                self.assertNotIn(f"extra.{reserved}", ids)
-                response = requests.get(
-                    f"{self.base_url}/models/{reserved}",
-                    timeout=TIMEOUT_DEFAULT,
-                )
-                self.assertEqual(response.status_code, 404)
-
-            print("[OK] extra_models_dir skips nested canonical source prefixes")
+            print(f"[OK] root GGUF emits stem: {bare}")
         finally:
             self._set_extra_models_dir(prior_dir)
             shutil.rmtree(extra_dir, ignore_errors=True)
@@ -2095,10 +2889,7 @@ class EndpointTests(ServerTestBase):
         # Use a built-in model name to prove precedence and alias resolution simultaneously
         bare = ENDPOINT_TEST_MODEL
         extra_dir = tempfile.mkdtemp(prefix="lemon_extra_regression_")
-        shadow_dir = os.path.join(extra_dir, bare)
-        os.makedirs(shadow_dir, exist_ok=True)
-        with open(os.path.join(shadow_dir, "model.gguf"), "wb") as f:
-            f.write(b"not a valid gguf")
+        self._write_root_stub_gguf(extra_dir, f"{bare}.gguf")
 
         prior_dir = self._set_extra_models_dir(extra_dir)
         try:
