@@ -190,7 +190,7 @@ Test utilities in `test/utils/` with `server_base.py` as the base class. Test de
 These MUST be maintained in all changes:
 
 1. **Quad-prefix registration** — Every new endpoint MUST be registered under `/api/v0/`, `/api/v1/`, `/v0/`, AND `/v1/`.
-2. **NPU exclusivity** — Exclusive-NPU recipes (`ryzenai-llm`, `whispercpp` on NPU) evict ALL other NPU models before loading. FastFlowLM (`flm`) can coexist with other FLM types (max 1 per FLM type) but not with exclusive-NPU recipes.
+2. **NPU exclusivity** — Exclusive-NPU recipes (`ryzenai-llm`, `whispercpp` on NPU) cannot coexist with conflicting NPU residents. FastFlowLM (`flm`) can coexist with other FLM types (max 1 per FLM type) but not with exclusive-NPU recipes. Exclusivity must not bypass model protection: automatic admission may evict only conflicting residents that are unpinned and idle; a pinned or in-use conflict rejects the incoming load without changing residency.
 3. **WrappedServer contract** — New backends MUST implement all core virtual methods: `load()`, `unload()`, `chat_completion()`, `completion()`, `responses()`.
 4. **Subprocess model** — Backends run as subprocesses (llama-server, whisper-server, sd-server, koko, flm, ryzenai-server). They must NOT run in-process.
 5. **Recipe integrity** — Changes to `server_models.json` must have valid recipes referencing backends in `backend_versions.json`.
