@@ -134,12 +134,44 @@ Per-model or global runtime settings that shape how a recipe launches and runs.
 _Avoid_: Treating recipe options as model registry identity.
 
 **Model pin**:
-A server-owned model lifecycle preference that asks `lemond` to keep a model resident across startup and automatic eviction pressure.
-_Avoid_: Treating it as a desktop-app-local preference or as a backend version pin.
+In the accepted fork residency model, a runtime property of a loaded model that vetoes automatic hard reclamation of its weights and backend process.
+_Avoid_: Treating a runtime pin as durable configuration, startup loading, or a backend version pin.
+
+**Saved pin preference**:
+A durable per-model recipe option that asks `lemond` to apply a model pin whenever that model is loaded.
+_Avoid_: Treating the saved preference as proof that the model is currently loaded or pinned.
+
+**Pinned-model startup loading**:
+A server startup policy that loads models with a saved pin preference when enabled.
+_Avoid_: Folding startup loading into the definition of a model pin or enabling it implicitly for every user.
+
+**Model residency**:
+The current presence of model weights and backend state in the device-specific memory and process resources used for inference.
+_Avoid_: Inferring residency from a saved pin preference or downloaded model files.
+
+**In-use model**:
+A resident model that is actively serving a request or an owned inference operation.
+_Avoid_: Treating an in-use model as eligible for automatic reclamation.
+
+**Admission reclamation**:
+Reclaiming eligible resident model resources before a new load would exceed the configured capacity envelope.
+_Avoid_: Waiting for a failed or destabilizing load before considering predictable capacity pressure.
+
+**Pressure reclamation**:
+Reclaiming eligible resident model resources in response to measured memory pressure, including pressure created by other applications.
+_Avoid_: Treating pressure reclamation and admission reclamation as interchangeable triggers.
+
+**Soft reclamation**:
+Releasing reconstructible idle state, such as a KV cache, while preserving model weights, the backend process, and any model pin.
+_Avoid_: Reporting soft reclamation as a model eviction.
+
+**Hard reclamation**:
+Unloading model weights and its backend process to recover capacity.
+_Avoid_: Automatically applying hard reclamation to a pinned or in-use model.
 
 **NPU exclusivity**:
-The rule that exclusive NPU recipes evict other NPU models before loading.
-_Avoid_: Assuming FLM coexistence rules apply to RyzenAI or whisper.cpp NPU models.
+The rule that an exclusive NPU recipe cannot coexist with conflicting NPU residents. In the accepted fork residency model, automatic admission may displace only conflicts that are both unpinned and idle; a pinned or in-use conflict vetoes the load.
+_Avoid_: Giving an incoming pinned model precedence over a resident pin or assuming FLM coexistence rules apply to RyzenAI or whisper.cpp NPU models.
 
 ### Hardware and Engines
 
@@ -150,6 +182,14 @@ _Avoid_: Treating CPU support as a performance target for every model size.
 **GPU**:
 The graphics processor used through backends such as Vulkan, ROCm, Metal, vLLM ROCm, or sd-cpp ROCm.
 _Avoid_: Assuming all GPU backends support the same vendors or operating systems.
+
+**GTT/shared GPU memory**:
+System memory mapped into GPU address spaces for application allocations on unified-memory AMD systems. On Hatchery, model weights and KV caches are accounted in this pool.
+_Avoid_: Adding GTT usage to host-memory usage as if they were independent physical allocations, or using nominal dedicated VRAM as Hatchery's model-residency capacity.
+
+**Host-memory safety floor**:
+An independent system-health guard that preserves enough memory for the operating system and other applications on shared-memory systems.
+_Avoid_: Treating the safety floor as model-footprint accounting or as a second model-capacity pool.
 
 **NPU**:
 The neural processing unit targeted by RyzenAI and FastFlowLM paths.
@@ -258,8 +298,10 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - **lemond** delegates model lifecycle and inference work to backend subprocesses.
 - A **model name** resolves to model metadata, a **recipe**, **checkpoints**, labels, loaded-model category, and recipe options.
 - A **recipe** selects the execution family; a **backend** selects the concrete engine or device path inside that family.
-- A **Model pin** is stored in `lemond` configuration and edited by clients through server APIs.
-- Loaded-model categories control per-type LRU slots; **NPU exclusivity** controls cross-type NPU eviction.
+- In the accepted fork residency model, a **Model pin** protects current residency; a **saved pin preference** controls pinning on a future load; **pinned-model startup loading** decides whether those preferences cause startup admission.
+- In that target, **admission reclamation** and **pressure reclamation** use different triggers but share eligibility rules: an **in-use model** or **Model pin** vetoes automatic hard reclamation.
+- **Soft reclamation** may preserve a pin because model weights and the backend remain resident; **hard reclamation** removes residency.
+- Loaded-model categories control per-type LRU slots; **NPU exclusivity** controls cross-type NPU conflicts without overriding pins or in-use protection.
 - **OmniRouter** uses **Collections** and **tool definitions** to expose multi-modal endpoints through the standard tool-calling loop.
 - **Fork-local changes** target **fork origin** unless the user declares an **upstream contribution exception**.
 
@@ -278,3 +320,4 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - "App" may mean the Tauri desktop app, the browser web app, a tray client, or a third-party client. Name the client surface.
 - "Local" means local-first and user-controlled, not necessarily same-process or same-machine.
 - "Collection" is the current user-facing term for OmniRouter multi-model bundles; use older names only when reading internal identifiers or historical commits.
+- "Pin" may mean a current **Model pin** or a **saved pin preference**. Name the durable preference explicitly, and name **pinned-model startup loading** when startup behavior is meant.
