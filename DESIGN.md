@@ -1,357 +1,269 @@
 ---
 name: Lemonade
-description: Refreshing local AI runtime with citrus-bright brand surfaces and focused product modes.
+description: Calm, hardware-aware local AI controls with a restrained citrus identity.
 colors:
-  primary-yellow: "#FCD846"
-  primary-yellow-hover: "#F0C040"
-  accent-gold: "#5C4B00"
-  lemon-leaf: "#3C6531"
-  light-bg-primary: "#FDFBF6"
-  light-bg-secondary: "#F5F2EC"
-  light-panel: "#EFEBE1"
+  primary-citrus: "#FCD846"
+  primary-citrus-hover: "#F0C040"
+  light-canvas: "#FDFBF6"
+  light-surface: "#F5F2EC"
+  light-raised: "#FFFFFF"
   light-border: "#E2DDD1"
-  light-text-primary: "#000000"
-  light-text-muted: "#6b6b6b"
-  midnight-designed-lowest: "#0E0E0B"
-  midnight-shell-edge: "#0A0A0A"
-  midnight-bg-secondary: "#1A1A1A"
-  midnight-bg-tertiary: "#111111"
-  midnight-border: "#333333"
-  midnight-glass-bg: "rgba(45, 41, 33, 0.55)"
-  midnight-text-primary: "#FFFFFF"
-  midnight-text-muted: "#888888"
-  status-connected: "#4CAF50"
+  light-ink: "#000000"
+  light-muted: "#6B6B6B"
+  dark-canvas: "#0A0A0A"
+  dark-surface: "#1A1A1A"
+  dark-inset: "#111111"
+  dark-border: "#333333"
+  dark-ink: "#FFFFFF"
+  dark-muted: "#888888"
+  focus-light: "#1976D2"
+  focus-dark: "#75ABD7"
+  status-success: "#4CAF50"
   status-warning: "#FFB74D"
   status-info: "#2196F3"
   status-error: "#F44336"
 typography:
-  display:
-    fontFamily: "Plus Jakarta Sans, Manrope, system-ui, sans-serif"
-    fontWeight: 800
+  title:
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontSize: "1.25rem"
+    fontWeight: 650
+    lineHeight: 1.25
     letterSpacing: "normal"
   body:
-    fontFamily: "Manrope, system-ui, sans-serif"
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontSize: "1rem"
     fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "normal"
+  label:
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 600
+    lineHeight: 1.25
     letterSpacing: "normal"
   mono:
     fontFamily: "Consolas, Monaco, Courier New, monospace"
+    fontSize: "0.8125rem"
     fontWeight: 400
+    lineHeight: 1.45
     letterSpacing: "normal"
 rounded:
-  base: "1rem"
-  xl: "1.5rem"
-  card: "3rem"
+  control: "4px"
+  field: "6px"
+  panel: "8px"
+  card: "12px"
   pill: "9999px"
 spacing:
-  sm: "2rem"
-  md: "2.66rem"
-  lg: "3.55rem"
-  xl: "4.73rem"
-  xxl: "6.31rem"
+  xs: "4px"
+  sm: "8px"
+  md: "12px"
+  lg: "16px"
+  xl: "24px"
+  xxl: "32px"
 components:
   button-primary:
-    backgroundColor: "{colors.primary-yellow}"
-    textColor: "{colors.light-text-primary}"
-    rounded: "{rounded.pill}"
-  card-ice:
-    backgroundColor: "{colors.light-bg-primary}"
-    textColor: "{colors.light-text-primary}"
-    rounded: "{rounded.card}"
-  card-ice-midnight:
-    backgroundColor: "{colors.midnight-glass-bg}"
-    textColor: "{colors.midnight-text-primary}"
-    rounded: "{rounded.card}"
-  app-pane-light:
-    backgroundColor: "{colors.light-bg-primary}"
-    textColor: "{colors.light-text-primary}"
-    rounded: "{rounded.base}"
-  app-pane-midnight:
-    backgroundColor: "{colors.midnight-designed-lowest}"
-    textColor: "{colors.midnight-text-primary}"
-    rounded: "{rounded.base}"
-tokenScope:
-  purpose: "product-app register"
-  canonicalCssSource: "DESIGN.md body and docs/assets/website-styles.css"
-  note: "Frontmatter token names are role aliases for product surfaces; CSS --* tokens remain canonical for website implementation."
-  exactCssTokenMap:
-    light-text-muted: "--text-muted"
-    midnight-designed-lowest: "--surface-container-lowest"
-    midnight-glass-bg: "--glass-bg"
-  cssTokenNotes:
-    light-bg-primary: "Product-app warm off-white surface alias; no exact website CSS variable has the same value."
+    backgroundColor: "{colors.primary-citrus}"
+    textColor: "{colors.light-ink}"
+    typography: "{typography.label}"
+    rounded: "{rounded.field}"
+    padding: "8px 16px"
+  button-primary-hover:
+    backgroundColor: "{colors.primary-citrus-hover}"
+    textColor: "{colors.light-ink}"
+    typography: "{typography.label}"
+    rounded: "{rounded.field}"
+    padding: "8px 16px"
+  field-light:
+    backgroundColor: "{colors.light-raised}"
+    textColor: "{colors.light-ink}"
+    typography: "{typography.body}"
+    rounded: "{rounded.field}"
+    padding: "8px 12px"
+  field-dark:
+    backgroundColor: "{colors.dark-surface}"
+    textColor: "{colors.dark-ink}"
+    typography: "{typography.body}"
+    rounded: "{rounded.field}"
+    padding: "8px 12px"
+  panel-light:
+    backgroundColor: "{colors.light-surface}"
+    textColor: "{colors.light-ink}"
+    rounded: "{rounded.panel}"
+    padding: "16px"
+  panel-dark:
+    backgroundColor: "{colors.dark-surface}"
+    textColor: "{colors.dark-ink}"
+    rounded: "{rounded.panel}"
+    padding: "16px"
 ---
 
-# Design System Specification
+# Design System: Lemonade
 
-## 1. Overview: "The Crystalline Zest"
+## 1. Overview
 
-This design system is a sensory exploration of refreshment. It moves beyond standard functional UI to evoke the visceral feeling of a chilled glass of lemonade—crisp, translucent, and vibrant. The "Creative North Star" for this system is **Crystalline Zest**.
+**Creative North Star: "Crystalline Zest"**
 
-Unlike rigid, corporate grids, this system leverages **heavy glassmorphism** and a **tonal gradient architecture** to create depth. It rejects the "flat web" in favor of an editorial layout that feels like looking through ice and liquid. We use intentional asymmetry and a strict 4-column content structure to provide a high-end, curated feel that prioritizes readability against a luminous, shifting background.
+Crystalline Zest means clear state, controlled energy, and a citrus accent that makes important actions easy to find. It does not mean decorative glass. Lemonade is a product tool, so the interface must disappear into model management, inference, telemetry, and recovery work.
 
-### Product Surface Reconciliation
+The physical scene is a developer using Lemonade beside terminals and model workloads for a long session, sometimes in bright daylight and sometimes in a dim room. Both Light and Midnight modes must remain calm, dense, legible, and operationally trustworthy. The product uses a restrained color strategy: neutral surfaces carry the interface, while citrus occupies no more than roughly 10% of a working screen.
 
-Crystalline Zest remains the authoritative design expression across Lemonade. Product surfaces translate it into calm, exact, stateful UI: model lists, logs, chat, status bars, filters, and resource telemetry should feel refreshing and glass-lit without sacrificing density, scanability, or operational clarity.
+Lemonade must feel refreshing, pragmatic, and enabling. It must not resemble a cloud AI upsell, a vendor-locked hardware demo appliance, a GUI-only chat toy, a single-backend runner, an expert-only config maze, an enterprise control plane first, or a broad AI workspace that tries to replace partner applications.
 
-For the default product register captured in `PRODUCT.md`, use the upstream sensory language as the source of character and the product principles as the source of restraint. The app should feel like the same lemonade glass under different working conditions: bright and open in light mode, warm and focused in Midnight mode, and always precise enough for local runtime work.
+**Key Characteristics:**
 
----
+- Familiar desktop-tool structure with compact, consistent controls.
+- Literal model, backend, server, and hardware state.
+- Restrained citrus for primary actions and current selection.
+- Tonal hierarchy before borders, shadows, blur, or decoration.
+- Equal-quality Light and Midnight modes.
+- Accessible feedback that never depends on color alone.
 
-## 2. Colors: Tonal Architecture
+## 2. Colors
 
-The palette is a celebration of citrus. We strictly avoid dark "muddy" yellows or browns to maintain the "chilled" aesthetic.
+Neutral surfaces do the work. Citrus identifies the primary action or current selection. Semantic colors communicate health and risk only when paired with text, an icon, or a stable location.
 
-### The Background Gradient
+### Primary
 
-The primary canvas is not a flat color. It is a vertical gradient:
-- **Top (Ice):** `--surface-container-lowest` (#FFFFFF)
-- **Bottom (Settled Juice):** Transitioning toward #FFF9C4 (pale lemon).
+- **Citrus Action** (#FCD846): The `primary-citrus` token marks the strongest available action and current selection.
+- **Pressed Citrus** (#F0C040): The `primary-citrus-hover` token is reserved for hover and active feedback on citrus controls.
 
-### Key Tokens
+### Secondary
 
-- **Primary (Vibrant Citrus):** `--primary-yellow` (#FCD846). The signature accent for buttons, highlights, and energy.
-- **On Primary:** `--on-primary` (#000000). Black text and icons on yellow surfaces for maximum contrast.
-- **On Primary Muted:** `--on-primary-muted` (#3a3000). For text on light-yellow tinted surfaces (e.g. chat bubbles).
-- **Accent Gold:** `--accent-gold` (#5C4B00). Used for icon tints and value-link text on white surfaces.
-- **Natural Accent (Lemon Leaf):** `--tertiary` (#3C6531). Used sparingly for success states.
-- **Neutral Surface:** `--surface` (#F6F6F6) provides the "chilled glass" base.
-- **Semantic Status:** `--status-connected`, `--status-warning`, `--status-info`, and `--status-error` are operational state tokens. They may sit near Lemon Leaf and citrus hues, but they are not decorative accents; pair them with labels, icons, or placement when they affect user action.
+- **Light Focus** (#1976D2): The `focus-light` token provides a contrast-safe focus boundary on Light surfaces.
+- **Midnight Focus** (#75ABD7): The `focus-dark` token provides a contrast-safe focus boundary on Midnight surfaces.
 
-### Text Hierarchy
+### Tertiary
 
-From darkest to lightest:
-- `--text-on-light` (#000000) — Maximum contrast on light backgrounds.
-- `--text-primary` (#2D2F2F) — Body text and headings.
-- `--text-secondary` (#474747) — Descriptions and supporting text.
-- `--text-nav` (#52525b) — Navigation links.
-- `--text-muted` (#6b6b6b) — Labels and metadata.
-- `--text-light` (#999) — Disabled or decorative text.
+- **Success Green** (#4CAF50): The `status-success` token communicates a healthy or completed state.
+- **Warning Amber** (#FFB74D): The `status-warning` token communicates degraded or attention-needed state.
+- **Information Blue** (#2196F3): The `status-info` token communicates neutral operational information.
+- **Error Red** (#F44336): The `status-error` token communicates failure and destructive consequences. Small text uses the theme's darker error-ink token; controls on this red use dark text.
 
-### Core Rules
+### Neutral
 
-- **The "No-Line" Rule:** On brand and editorial surfaces, 1px solid borders are prohibited for sectioning. Use surface-container shifts to define boundaries.
-- **Product Pane Exception:** Dense operational surfaces may use subtle borders, splitters, and resizable dividers when they clarify panes, logs, model lists, chat regions, or status bars. These lines should feel like quiet glass edges, not heavy boxes.
-- **Surface Nesting:** Hierarchy is achieved by layering. A `--surface-container-low` card should sit atop a `--surface` background.
-- **Glassmorphism Rule:** Floating navigation and headers on brand surfaces must use `--surface` with 60-80% opacity and `--glass-blur` (24px) backdrop-blur. Product panes may use more opaque tonal layers when blur would reduce legibility.
+- **Light Canvas** (#FDFBF6): The application background in bright environments.
+- **Light Surface** (#F5F2EC): The primary pane and grouped-control surface.
+- **Light Raised Surface** (#FFFFFF): Inputs and transient elements that need one tonal step of separation.
+- **Light Structure** (#E2DDD1): Necessary dividers and control boundaries.
+- **Light Ink** (#000000): Primary content on Light surfaces.
+- **Light Muted Ink** (#6B6B6B): Secondary metadata that still meets readable contrast.
+- **Midnight Canvas** (#0A0A0A): The application background in dim environments.
+- **Midnight Surface** (#1A1A1A): The primary pane and grouped-control surface.
+- **Midnight Inset** (#111111): Logs, code, and recessed operational regions.
+- **Midnight Structure** (#333333): Necessary dividers and control boundaries.
+- **Midnight Ink** (#FFFFFF): Primary content on Midnight surfaces.
+- **Midnight Muted Ink** (#888888): Secondary metadata on Midnight surfaces.
 
-### Product Theme Reconciliation
+**The Restrained Citrus Rule.** Citrus identifies actions and selection. It is never a decorative wash, page background, or generic status color.
 
-Light and Midnight are equal product modes. Light carries the public-site brightness into a warm desktop utility surface. Midnight carries the same citrus accent into a focused local runtime console. Do not treat one as decorative and the other as secondary.
+**The State Has Words Rule.** Every actionable success, warning, information, error, pinned, loading, or pressure state has a text label or accessible name in addition to color.
 
-Yellow is the identity and action accent. Status, model capability icons, telemetry, logs, errors, and disabled states need their own readable semantic treatment and must not depend on yellow or color alone.
+**The Two Real Themes Rule.** Light and Midnight are complete working modes. Neither is a decorative inversion of the other.
 
----
+## 3. Typography
 
-### 2.1. Midnight Palette (Dark Mode)
+**Body Font:** The native system sans stack.
 
-The Midnight variant transposes Crystalline Zest into a **warm-dark** register. We avoid cold blue-blacks and pure `#000`; the canvas instead reads as a darkened citrus liqueur — deep, slightly warm, with the same yellow accent punching through.
+**Label/Mono Font:** The same system sans for controls and a platform monospace stack for logs, commands, identifiers, and telemetry.
 
-### The Background Gradient (Dark)
+**Character:** Familiar, compact, and quiet. Typography creates hierarchy through fixed size and weight, not through display faces or fluid scale inside the application.
 
-- **Top (Night Ice):** `--surface-container-lowest` (#0E0E0B)
-- **Bottom (Steeped Juice):** Transitioning toward `#1F1A0E` (warm dark amber).
+### Hierarchy
 
-### Surface Scale (Dark)
+- **Title** (650, 1.25rem, 1.25): Page, panel, and dialog titles.
+- **Body** (400, 1rem, 1.5): Explanations and conversational content, limited to 65 to 75 characters per line when prose is the task.
+- **Compact body** (400, 0.8125rem to 0.875rem, 1.4): Model rows, settings, metadata, and dense operational content.
+- **Label** (600, 0.75rem, 1.25): Short control labels and status keys. Sentence case is the default.
+- **Mono** (400, 0.8125rem, 1.45): Logs, code, model identifiers, resource values, and commands.
 
-Mirrors the light scale but inverted in luminance with a faint yellow undertone. These values override the base tokens inside `[data-md-color-scheme="zest-dark"]`:
-- `--surface-container-lowest` (#0E0E0B) — deepest layer.
-- `--surface` (#1A1813)
-- `--surface-container-low` (#1F1D17)
-- `--surface-container` (#25221B)
-- `--surface-container-high` (#2D2922)
-- `--outline-variant`: rgba(255, 255, 255, 0.10)
+**The Product Type Rule.** Application headings, labels, buttons, and data use fixed sizes from the product scale. Fluid display typography belongs only on distinct public brand surfaces.
 
-### Glass Tokens (Dark)
+**The Sentence Case Rule.** Uppercase is limited to established short telemetry abbreviations such as GPU, NPU, TPS, and TTFT. Buttons and prose use sentence case.
 
-**Pure backdrop-blur over dark loses contrast.** Dark glass uses a tinted-dark fill (so the surface is visible even without a busy backdrop) and a faint **yellow-tinted border** to retain Crystalline Zest's signature:
-- `--glass-bg`: rgba(45, 41, 33, 0.55)
-- `--glass-bg-dense`: rgba(45, 41, 33, 0.85)
-- `--glass-bg-hover`: rgba(60, 54, 42, 0.75)
-- `--glass-border`: rgba(252, 216, 70, 0.18) — yellow at low alpha
-- `--glass-blur`: 24px (unchanged; layered over the tinted fill it still adds depth without losing readability)
+## 4. Elevation
 
-### Text Hierarchy (Dark)
+Lemonade is tonal and flat by default. Canvas, pane, inset, and raised surfaces establish depth. A one-pixel divider is valid when it clarifies a resizable pane, menu, table boundary, or status bar. Shadows appear only when an element physically floats, such as a menu, popover, dialog, or toast.
 
-Inverted scale, warm-leaning whites (avoid cool cyan-whites):
-- `--text-on-light` (#FFFFFF)
-- `--text-primary` (#F2EFE5) — body text and headings.
-- `--text-secondary` (#C7C2B5)
-- `--text-nav` (#A8A39A)
-- `--text-muted` (#837F75)
-- `--text-light` (#5C594F)
+### Shadow Vocabulary
 
-Body text should maintain at least 4.5:1 contrast against the gradient. Aim for 7:1 on critical controls, dense logs, status indicators, and other text users depend on for operational decisions.
+- **Floating control** (`0 4px 8px rgba(0, 0, 0, 0.20)`): Menus, popovers, and toasts that must separate from content.
+- **Dialog** (`0 8px 8px rgba(0, 0, 0, 0.28)`): Modal dialogs after inline and progressive alternatives have been exhausted.
+- **Light Focus** (`0 0 0 2px #1976D2`): Contrast-safe keyboard focus around the control boundary on Light surfaces, never a decorative glow.
+- **Midnight Focus** (`0 0 0 2px #75ABD7`): Contrast-safe keyboard focus around the control boundary on Midnight surfaces, never a decorative glow.
 
-### Shadows (Dark)
+**The Tonal First Rule.** Use a surface change before adding a border, and use a border before adding a shadow.
 
-Light-mode shadows are tuned to the on-surface color (`rgba(45, 47, 47, ...)`) and disappear on dark. Dark shadows use **plain black at higher alpha** plus the existing yellow-glow tokens for primary buttons:
-- `--shadow-light`: 0 4px 16px rgba(0, 0, 0, 0.35)
-- `--shadow-medium`: 0 8px 32px rgba(0, 0, 0, 0.45)
-- `--shadow-heavy`: 0 14px 52px rgba(0, 0, 0, 0.60)
-- `--shadow-ambient`: 0 12px 48px rgba(0, 0, 0, 0.40)
-- `--shadow-yellow` and `--shadow-yellow-hover` — **unchanged**. The yellow glow is part of the brand and reads beautifully on dark.
+**The No Ghost Card Rule.** Never combine a one-pixel border with a wide soft shadow. Resting panels use one structural treatment.
 
-### Accent Invariants
-
-These are deliberately unchanged across light and dark — they are the "citrus" of the brand and pop equally well on both surfaces:
-- `--primary-yellow` (#FCD846)
-- `--primary-yellow-dark` (#FAF972) — used for hover/highlights
-- `--tertiary` (#3C6531) — lemon-leaf green
-- `--on-primary` (#000) — black text on yellow buttons stays black even in Midnight mode
-
-### `.ice-card` — Midnight Recipe
-
-```css
-[data-md-color-scheme="zest-dark"] .ice-card {
-  background: var(--glass-bg);                  /* tinted dark, not white-on-dark */
-  backdrop-filter: blur(var(--glass-blur));     /* 24px */
-  border: 1px solid var(--glass-border);        /* yellow at 18% alpha */
-  box-shadow: var(--shadow-ambient);
-}
-```
-The yellow-tinted border is the dark-mode analogue of the light-mode "felt, not seen" ghost border — it gives ice cards a warm halo on dark surfaces without being literal.
-
-### Do's and Don'ts (Dark)
-
-- **Do** keep `--on-primary` as `#000` on yellow surfaces in dark mode — the contrast ratio against `#FCD846` is unchanged.
-- **Do** prefer tinted-dark fills over white-at-low-alpha for glass surfaces. White glass on dark backdrops looks washed out and washes out the text on top.
-- **Do** prefer warm off-black content surfaces. Platform chrome or legacy shell edges may be darker when they improve perceived depth, but content panes should keep the warm Midnight register.
-- **Don't** use pure `#000` as the default content background. The lowest designed surface (`--surface-container-lowest`) is `#0E0E0B` — slightly warm, slightly off-black, to keep the citrus character.
-- **Don't** invert `--tertiary` (lemon leaf green). It already has enough luminance to read on dark; lightening it would push toward an unrelated mint hue.
-
----
-
-## 3. Typography: Editorial Authority
-
-We pair the geometric precision of **Plus Jakarta Sans** for impact with the high-legibility of **Manrope** for narrative, and **Consolas/Monaco** for code.
-
-- **Display & Headlines (`--font-display`):** Plus Jakarta Sans. Used for headings, buttons, and high-impact UI. Tight tracking, heavy weight (700-800).
-- **Body & Labels (`--font-body`):** Manrope. Set in `--text-primary` (#2D2F2F) for maximum contrast.
-- **Code (`--font-mono`):** Consolas, Monaco, Courier New. Used in code blocks, terminal cards, and API samples.
-- **The Hierarchy Strategy:** Use extreme scale differences. Section headings use `clamp(1.35rem, 2.4vw, 2.1rem)` while body stays at ~0.88-1rem.
-
----
-
-## 4. Elevation: Tonal Layering
-
-We do not use structural lines. We use physics.
-
-In product surfaces, that physics is restrained. The app can express depth through stable pane hierarchy, subtle tonal steps, quiet dividers, and focused elevation instead of placing every operational region inside a large glass card. Dense UI should feel like polished glass equipment, not a stack of decorative panels.
-
-### The Layering Principle
-
-Depth is achieved by "stacking" tones:
-- *Level 0:* Background Gradient.
-- *Level 1:* `--glass-bg` rgba(255,255,255,0.4) — The "Glass" layer (ice cards, panels).
-- *Level 2:* `--glass-bg-hover` rgba(255,255,255,0.65) — Active/hover states.
-- *Level 3:* `--surface-container-lowest` (#FFFFFF) — Solid "Ice" for maximum pop.
-
-### Shadows
-
-All shadows use the `on-surface` color (45, 47, 47), never pure black:
-- `--shadow-light`: 0 4px 16px at 4% opacity. Resting cards.
-- `--shadow-medium`: 0 8px 32px at 6% opacity. Hover states.
-- `--shadow-heavy`: 0 14px 52px at 8.5% opacity. Hero panels and elevated elements.
-- `--shadow-ambient`: 0 12px 48px at 5% opacity. Default ice-card shadow.
-- `--shadow-yellow`: 0 12px 48px rgba(252,216,70,0.3). Primary buttons.
-- `--shadow-yellow-hover`: 0 16px 56px rgba(252,216,70,0.38). Primary button hover.
-
-### Ghost Borders
-
-For essential accessibility on white-on-white elements, use `--outline-variant` (rgba(45,47,47,0.15)). It should be felt, not seen.
-
-For product panes, ghost borders and dividers are allowed when they preserve orientation across model managers, logs, chat regions, and status bars. Keep them low-contrast and aligned with the surface scale; avoid turning panes into boxed cards.
-
-### Roundedness
-
-- `--radius-card` (3rem): Ice cards, demo panels, value cards.
-- `--radius-xl` (1.5rem): Console panels, API sample blocks.
-- `--radius` (1rem): Buttons, interactive elements, inner containers.
-- `--radius-btn` (9999px): Pill-shaped CTA buttons and download links.
-
----
+**The No Decorative Glass Rule.** Backdrop blur and translucent glass are not default product materials. They are allowed only when the background relationship conveys useful context and contrast remains verified.
 
 ## 5. Components
 
-### The Ice Card (`.ice-card`)
-
-The foundational glassmorphic component. All card-like containers inherit from this:
-```css
-background: var(--glass-bg);           /* rgba(255,255,255,0.4) */
-backdrop-filter: blur(var(--glass-blur)); /* 24px */
-border: 1px solid var(--glass-border); /* rgba(255,255,255,0.6) */
-border-radius: var(--radius-card);     /* 3rem */
-box-shadow: var(--shadow-ambient);
-```
-Used by: value cards, tech spec cards, demo panel, dev button, release card, console cards.
+Components use familiar desktop affordances and expose complete default, hover, focus, active, disabled, loading, and error states where those states apply.
 
 ### Buttons
 
-- **Primary (Yellow):** `--primary-yellow` background, `--on-primary` (#000) text, `--shadow-yellow` glow. Pill-shaped (`--radius-btn`).
-- **Secondary (Glass):** Inherits `.ice-card` base. `--text-primary` text. Hover lifts to `--glass-bg-hover`.
-- **Section CTA:** Same as primary, with `min-width: 320px` and `open_in_new` icon for external links.
-- **Download Link:** Same as primary, used in the Getting Started section.
+- **Shape:** Compact corners (`field`, 6px). Pills are reserved for tags and compact filters.
+- **Primary:** Citrus surface, dark text, 8px by 16px padding, and no resting shadow.
+- **Hover / Focus:** A darker citrus hover and the shared focus ring. Active feedback may shift by one pixel but must not choreograph movement.
+- **Secondary:** Neutral surface with one quiet structural border. Destructive actions use explicit error language and color.
+- **Labels:** Verb plus object, such as “Save settings,” “Load model,” and “Unpin model.”
 
-### Console Card (`.gs-console`)
+### Chips
 
-Ice card with monospace content for terminal commands:
-- Inherits `.ice-card` for the glassmorphic shell.
-- `pre` uses `white-space: pre; overflow-x: auto` for horizontal scroll on long commands.
-- Copy button positioned absolutely, top-right. Turns yellow on hover/copied.
+- **Style:** Compact pill only when the content is genuinely categorical, such as a model capability or active filter.
+- **State:** Selected and unselected states differ through fill, label, and accessible state, not color alone.
 
-### Platform Selector
+### Cards / Containers
 
-Row of platform icon buttons:
-- Default: `opacity: 0.75`, transparent background.
-- Active: `opacity: 1`, `--glass-bg-hover` background, `--shadow-medium`, slight scale-up.
+- **Corner Style:** Panels use `panel` (8px); occasional independent cards use `card` (12px).
+- **Background:** Tonal surfaces are opaque enough for dense text and telemetry.
+- **Shadow Strategy:** No shadow at rest. Floating surfaces use the vocabulary in Elevation.
+- **Border:** Quiet structural borders are allowed for panes, lists, logs, status regions, and dialogs.
+- **Internal Padding:** Dense product panels use 12px to 16px; spacious empty states may use 24px.
 
-### Product Surface Layer
+### Inputs / Fields
 
-The app uses familiar desktop-tool components as product expressions of Crystalline Zest:
+- **Style:** Opaque neutral field, one-pixel structural border, `field` radius, and a persistent visible label.
+- **Focus:** Shared theme focus ring plus a border shift.
+- **Error / Disabled:** Error text names the recovery action. Disabled fields remain readable and explain why they are unavailable when the reason is not obvious.
 
-- **Side rail:** Compact, icon-led, and stable. The active rail item may use citrus accent or a tonal highlight, but the rail should not compete with the model and chat work areas.
-- **Model manager:** Searchable, dense, and scan-friendly. Active models, suggested models, backend groups, sizes, and capability icons should be readable at a glance. Use citrus and semantic colors to mark state, not to decorate every row.
-- **Logs and telemetry:** Monospace, high-contrast, and quiet. Logs are operational text; preserve line alignment, clear wrapping, and level filtering before applying atmospheric styling.
-- **Chat composer:** Elevated enough to be easy to find, restrained enough not to dominate an empty chat. The send action can carry the strongest local accent in the chat surface.
-- **Status bar:** Persistent, compact, and literal. Connection, token, TPS, TTFT, RAM, CPU, GPU, and VRAM state should remain visible without relying on color alone.
-- **Filters and metadata icons:** Small controls need tooltips or clear labels when meaning is not obvious. Capability color should be consistent across light and Midnight modes.
+### Navigation
 
-### Page Spacing Scale
+Navigation is stable, compact, and conventional. The current destination uses a tonal or citrus selection state. Icon-only controls require accessible names and visible tooltips. Mobile and narrow layouts collapse structure rather than shrinking typography.
 
-The homepage uses a perfect-fourth (1.333) ratio spacing scale:
-```
---page-space-base: 2rem
---page-space-sm:   base           ≈ 2rem
---page-space-md:   base × 1.333   ≈ 2.66rem
---page-space-lg:   base × 1.333²  ≈ 3.55rem
---page-space-xl:   base × 1.333³  ≈ 4.73rem
---page-space-xxl:  base × 1.333⁴  ≈ 6.31rem
-```
-Section top padding: `--page-space-xxl`. Heading margins: `--page-space-sm`. Internal gaps use fractional multiples of `--page-space-base`.
+### Model Residency Controls
 
----
+Runtime state and durable preference are distinct. A model row can show “Loaded,” “In use,” “Pinned,” “Remembered pin,” “Loading,” or a specific failure. The runtime pin action and the durable “Pin whenever loaded” preference must not look like the same control. The global startup setting explains that it loads remembered pins when the server starts; it does not redefine pinning itself.
+
+Automatic pressure and admission actions must remain observable. When Lemonade clears an idle KV cache, evicts a model, refuses admission, or cannot relieve pressure because every candidate is pinned or in use, the UI and logs state what happened and why.
+
+### Status and Feedback
+
+The status bar is compact, persistent, and literal. Resource labels use tabular values and preserve distinct GPU, GTT/shared GPU memory, host memory, and NPU concepts where the platform exposes them. Toasts confirm short-lived actions; persistent failures remain beside the affected model or setting.
+
+Motion lasts 150 to 250 milliseconds and communicates state only. Reduced-motion mode replaces spatial motion with an instant state change or a short crossfade. Loading content uses a stable skeleton or inline progress state rather than an isolated spinner in empty space.
 
 ## 6. Do's and Don'ts
 
 ### Do:
 
-- **Do** use large amounts of white space (vertical "breathing room") to simulate clarity.
-- **Do** treat 4.5:1 as the contrast floor for readable text. Aim for 7:1 on critical controls, dense logs, status indicators, and text on glassmorphic panels over the yellow gradient.
-- **Do** use the `--tertiary` green only as a "flavor" accent—like a mint leaf in a drink.
-- **Do** use `--on-primary` (#000) for text on yellow buttons. It must be high contrast.
-- **Do** use the `.ice-card` base class for all glassmorphic containers rather than duplicating properties.
-- **Do** reference CSS variables for colors, shadows, and fonts. Avoid hardcoding values that have tokens.
-- **Do** treat light and Midnight as equal product modes. Each mode should support real work, dense state, and readable telemetry.
-- **Do** translate Crystalline Zest into product restraint for panes, logs, status bars, and model lists.
-- **Do** pair color state with text, icons, labels, shape, or position when the state affects user action.
+- **Do** keep the interface calm, exact, and trustworthy while preserving a small amount of citrus personality.
+- **Do** prioritize the model, backend, server, and hardware state a user needs to make a decision.
+- **Do** use familiar controls, keyboard access, visible focus, reduced motion, and readable status text.
+- **Do** keep Light and Midnight modes equally complete and verify body text at 4.5:1 contrast or better.
+- **Do** use one consistent component vocabulary across model management, settings, chat, logs, and telemetry.
+- **Do** distinguish current residency, runtime pinning, durable pin preference, startup loading, and eviction eligibility in labels and help text.
 
 ### Don't:
 
-- **Don't** use any dark browns or muddy yellows (#695B00) as button text. Use `--on-primary` (#000) instead.
-- **Don't** use 100% opaque, hard-edged cards. Everything should feel like it has a degree of light transmission.
-- **Don't** use traditional "Drop Shadows" with pure black. Use the ambient shadow tokens defined in Section 4.
-- **Don't** use dividers to separate list items; use tonal shifts or vertical gaps.
-- **Don't** use section label "chips" on every section. Reserve them for sections that need categorical context.
-- **Don't** replace upstream design language with fork-local metaphors. Refine and reconcile Crystalline Zest rather than renaming the system.
-- **Don't** make the app feel like a broad AI workspace or decorative chat toy. It is a local runtime product surface first.
-- **Don't** apply heavy glassmorphism to dense operational regions when it harms legibility, contrast, or scan speed.
+- **Don't** make Lemonade feel like a cloud AI upsell or a vendor-locked hardware demo appliance.
+- **Don't** make Lemonade feel like a GUI-only chat toy, a single-backend runner, or an expert-only config maze.
+- **Don't** make Lemonade feel like an enterprise control plane first or a broad AI workspace that tries to replace Open WebUI, AnythingLLM, GAIA, or partner apps.
+- **Don't** use decorative glassmorphism, gradient text, side-stripe borders, striped backgrounds, or hand-drawn fallback illustrations.
+- **Don't** use identical card grids, nested cards, hero-metric templates, repeated uppercase eyebrows, or numbered-section scaffolding when order carries no meaning.
+- **Don't** place a wide shadow on a bordered card or exceed a 16px radius on a product panel or card.
+- **Don't** invent unusual scrollbars, dialogs, switches, or menus for brand flavor. Familiar behavior wins.
+- **Don't** use decorative motion, orchestrated page-load sequences, or content-hidden reveal animations.
+- **Don't** rely on color alone for connection, pressure, pin, loading, warning, or failure states.
+- **Don't** allow labels, headings, or translated copy to overflow at narrow widths.
