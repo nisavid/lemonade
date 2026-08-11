@@ -183,6 +183,10 @@ _Avoid_: Treating CPU support as a performance target for every model size.
 The graphics processor used through backends such as Vulkan, ROCm, Metal, vLLM ROCm, or sd-cpp ROCm.
 _Avoid_: Assuming all GPU backends support the same vendors or operating systems.
 
+**Residency memory domain**:
+A memory-accounting boundary within which resident model weights and caches compete for capacity and share pressure signals. A domain may be discrete VRAM, GTT-backed shared memory, or another unified-memory pool.
+_Avoid_: Using "VRAM" as a generic name for every domain or treating a host-memory safety floor as a second residency domain.
+
 **GTT/shared GPU memory**:
 System memory mapped into GPU address spaces for application allocations on unified-memory AMD systems. On Hatchery, model weights and KV caches are accounted in this pool.
 _Avoid_: Adding GTT usage to host-memory usage as if they were independent physical allocations, or using nominal dedicated VRAM as Hatchery's model-residency capacity.
@@ -192,7 +196,7 @@ An independent system-health guard that preserves enough memory for the operatin
 _Avoid_: Treating the safety floor as model-footprint accounting or as a second model-capacity pool.
 
 **Residency capability level**:
-The evidence-backed status of a platform and backend combination: validated, modeled, fallback-only, or unsupported.
+The evidence-backed status of a platform and backend combination. **Validated** means end-to-end physical admission and external-pressure tests; **modeled** means primary-evidence architecture and signals without full physical validation; **fallback-only** means an explicit safe fallback without full capacity automation; **unsupported** means no safe residency behavior.
 _Avoid_: Calling design coverage validation or implying that fallback-only behavior provides capacity-aware automation.
 
 **NPU**:
@@ -305,6 +309,7 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - In the accepted fork residency model, a **Model pin** protects current residency; a **saved pin preference** controls pinning on a future load; **pinned-model startup loading** decides whether those preferences cause startup admission.
 - In that target, **admission reclamation** and **pressure reclamation** use different triggers but share eligibility rules: an **in-use model** or **Model pin** vetoes automatic hard reclamation.
 - **Soft reclamation** may preserve a pin because model weights and the backend remain resident; **hard reclamation** removes residency.
+- A **residency memory domain** is the capacity and pressure boundary for model residency. Hatchery's **GTT/shared GPU memory** is one such domain; its **host-memory safety floor** constrains the same physical system memory without becoming model-footprint accounting or another capacity pool.
 - Loaded-model categories control per-type LRU slots; **NPU exclusivity** controls cross-type NPU conflicts without overriding pins or in-use protection.
 - **OmniRouter** uses **Collections** and **tool definitions** to expose multi-modal endpoints through the standard tool-calling loop.
 - **Fork-local changes** target **fork origin** unless the user declares an **upstream contribution exception**.

@@ -41,13 +41,16 @@ This file captures implementation landmarks that are useful before changing Lemo
 
 ## Accepted Model Residency Target
 
+- This accepted fork target is recorded in `docs/adr/0001-adopt-protected-memory-capacity-driven-model-residency.md`.
 - Continued fork maintenance is decided. Reconcile onto current stable upstream, then implement this target using upstream terminology and APIs where they fit.
+- One server-owned planner defines admission, pressure, protection, ordering, and refusal semantics. Platform and backend adapters describe residency-memory-domain topology, trustworthy capacity and pressure signals, footprint confidence, and available reclamation actions; adapters do not redefine common policy.
+- The portable specification covers every upstream-supported GPU platform and backend family conceptually and assigns each combination a validated, modeled, fallback-only, or unsupported capability level. GPU residency is in scope, current NPU coexistence remains in this route, and CPU residency is excluded.
 - Pins consume `max_loaded_models` slots and are never automatic LRU victims. Hatchery disables the count ceiling with `max_loaded_models=-1` and uses the capacity policy as its primary admission bound.
 - `recipe_options.json` is the source of durable per-model pin preference. A global `load_pinned_models_on_startup` policy, defaulting to false, controls best-effort startup admission of those models.
 - Startup failures are logged and surfaced without preventing `lemond` from starting. A saved pin preference remains visible even when its model is not resident.
 - Startup loading preflights the complete saved-pin set. It loads nonconflicting preferences but does not choose a winner from a mutually exclusive NPU/FLM set; every member of that set remains durable and receives a surfaced conflict.
-- Hatchery admission uses GTT/shared GPU memory as the model-residency capacity signal. Host `MemAvailable` is an independent system-health interlock and is never added to GTT usage.
-- Admission reclamation dry-runs the full candidate plan before changing residency. Estimate model and KV-cache GTT demand from measured or calibrated footprints, with an explicit fallback for unknown models.
+- Hatchery is the first behavioral reference profile, not an implementation freeze. Its residency memory domain is GTT/shared GPU memory, which accounts for resident model weights and caches; host `MemAvailable` is an independent system-health interlock and is never added to GTT usage.
+- Admission is predictive and plans the complete reclamation set before changing residency. Model and cache demand comes from measured or calibrated footprints, with confidence reported and an explicit safe fallback for unknown models.
 - Pressure reclamation and admission reclamation share eligibility rules. A pinned or in-use model vetoes automatic hard reclamation.
 - Soft reclamation may clear reconstructible idle state such as a KV cache while preserving weights, the backend process, and any pin.
 - Hard-reclamation order is largest cold unpinned idle model first, then largest warm unpinned idle model. Age alone does not trigger hard reclamation when there is no admission or measured pressure.
@@ -56,6 +59,13 @@ This file captures implementation landmarks that are useful before changing Lemo
 - Load-failure retry may reclaim only eligible unpinned idle models. It never performs an unconditional evict-all retry.
 - Manual unload, explicit force, service termination, dead-backend pruning, and owner-scoped job cleanup remain distinct explicit or lifecycle operations.
 - Runtime pinning follows upstream load and pin semantics. Durable pin persistence is a separate per-model recipe-options operation that patches only `pinned` and preserves every unrelated saved option.
+- All automatic residency decisions—admission, measured pressure, NPU conflict, and load-failure retry—share one planner mutation boundary. The planner reserves or versions incoming demand and candidate state, revalidates pin, in-use, and availability state immediately before each irreversible action, and abandons a stale plan before starting the incoming load.
+- Reclamation side effects remain fallible even when the decision is atomic. Execute victims one at a time; on the first failure, stop the remaining plan, do not start the incoming load, preserve untouched residents, report the successful and failed actions, and do not automatically reload already reclaimed models.
+- If admission cannot create a safe plan, or measured pressure remains after all eligible actions, refuse or stop and report the unresolved condition rather than reclaiming a protected model or making arbitrary extra changes.
+- `lemond` owns the operational explanation contract. Structured API state and logs report the capability level, residency memory domain and signals, incoming demand and footprint confidence, proposed actions, actual actions, refusals, fallbacks, partial outcomes, and reason codes; clients only render that server-owned truth.
+- Public server configuration stays small and intent-oriented. Sensor selection, calibration details, victim-planning internals, and similar mechanisms are derived unless an operator-facing need is demonstrated.
+- These behavioral guarantees are fixed for the portable specification; sensor sources, topology discovery, footprint estimation, thresholds, hysteresis, polling, cold/warm classification, adapter shapes, public names, and concrete validation scenarios remain implementation-design work.
+- The implementation handoff must include a platform/backend matrix that records each capability level, its primary evidence, its fallback or refusal behavior, and the tests required to advance it.
 
 ## Frontend Split
 
