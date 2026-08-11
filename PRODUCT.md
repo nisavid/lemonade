@@ -22,7 +22,7 @@ Lemonade should feel refreshing, pragmatic, and enabling.
 
 It can be friendly and a little playful at the threshold, especially in public brand and onboarding surfaces. Product surfaces should stay calm, exact, and trustworthy: clear state, clear actions, and enough personality to feel approachable without becoming toy-like.
 
-## Anti-References
+## Anti-references
 
 Lemonade should not feel like a cloud AI upsell, a vendor-locked hardware demo appliance, a GUI-only chat toy, a single-backend runner, an expert-only config maze, an enterprise control plane first, or a broad AI workspace that tries to replace Open WebUI, AnythingLLM, GAIA, or partner apps.
 

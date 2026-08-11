@@ -1,0 +1,314 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-11T22:16:17Z",
+  "title": "Design System: Lemonade",
+  "extensions": {
+    "colorMeta": {
+      "primary-citrus": {
+        "role": "primary",
+        "displayName": "Citrus Action",
+        "tonalRamp": ["#4A3D00", "#6B5900", "#8F7700", "#B99A00", "#DDBA17", "#FCD846", "#FFE98A", "#FFF8D8"]
+      },
+      "primary-citrus-hover": {
+        "role": "primary",
+        "displayName": "Pressed Citrus",
+        "tonalRamp": ["#463500", "#684F00", "#896900", "#AD8500", "#D1A51D", "#F0C040", "#FFE39A", "#FFF7DD"]
+      },
+      "light-canvas": {
+        "role": "neutral",
+        "displayName": "Light Canvas",
+        "tonalRamp": ["#26241F", "#45413A", "#655F56", "#878077", "#AAA49B", "#CEC9C0", "#E9E5DD", "#FDFBF6"]
+      },
+      "light-surface": {
+        "role": "neutral",
+        "displayName": "Light Surface",
+        "tonalRamp": ["#24221E", "#423F39", "#625E56", "#827D74", "#A49F96", "#C8C3BA", "#E5E1D9", "#F5F2EC"]
+      },
+      "light-raised": {
+        "role": "neutral",
+        "displayName": "Light Raised Surface",
+        "tonalRamp": ["#242424", "#444444", "#646464", "#858585", "#A6A6A6", "#C8C8C8", "#E7E7E7", "#FFFFFF"]
+      },
+      "light-border": {
+        "role": "neutral",
+        "displayName": "Light Structure",
+        "tonalRamp": ["#24221F", "#403D38", "#5D5953", "#7B766E", "#9B958C", "#BBB5AC", "#D5D0C7", "#E2DDD1"]
+      },
+      "light-ink": {
+        "role": "neutral",
+        "displayName": "Light Ink",
+        "tonalRamp": ["#000000", "#242424", "#484848", "#6D6D6D", "#929292", "#B7B7B7", "#DCDCDC", "#FFFFFF"]
+      },
+      "light-muted": {
+        "role": "neutral",
+        "displayName": "Light Muted Ink",
+        "tonalRamp": ["#171717", "#2C2C2C", "#434343", "#5A5A5A", "#6B6B6B", "#929292", "#C4C4C4", "#F2F2F2"]
+      },
+      "dark-canvas": {
+        "role": "neutral",
+        "displayName": "Midnight Canvas",
+        "tonalRamp": ["#0A0A0A", "#262626", "#444444", "#636363", "#838383", "#A5A5A5", "#CACACA", "#F3F3F3"]
+      },
+      "dark-surface": {
+        "role": "neutral",
+        "displayName": "Midnight Surface",
+        "tonalRamp": ["#0D0D0D", "#1A1A1A", "#393939", "#595959", "#7A7A7A", "#9D9D9D", "#C3C3C3", "#EEEEEE"]
+      },
+      "dark-inset": {
+        "role": "neutral",
+        "displayName": "Midnight Inset",
+        "tonalRamp": ["#080808", "#111111", "#313131", "#515151", "#727272", "#959595", "#BDBDBD", "#EBEBEB"]
+      },
+      "dark-border": {
+        "role": "neutral",
+        "displayName": "Midnight Structure",
+        "tonalRamp": ["#121212", "#333333", "#505050", "#6E6E6E", "#8D8D8D", "#ADADAD", "#CECECE", "#F0F0F0"]
+      },
+      "dark-ink": {
+        "role": "neutral",
+        "displayName": "Midnight Ink",
+        "tonalRamp": ["#242424", "#444444", "#646464", "#858585", "#A6A6A6", "#C8C8C8", "#E7E7E7", "#FFFFFF"]
+      },
+      "dark-muted": {
+        "role": "neutral",
+        "displayName": "Midnight Muted Ink",
+        "tonalRamp": ["#181818", "#303030", "#494949", "#626262", "#888888", "#AAAAAA", "#CDCDCD", "#F0F0F0"]
+      },
+      "focus-light": {
+        "role": "secondary",
+        "displayName": "Light Focus",
+        "tonalRamp": ["#061D2E", "#0A3553", "#0E4E79", "#13679F", "#1976D2", "#58A0DB", "#99C8EA", "#DBEEF8"]
+      },
+      "focus-dark": {
+        "role": "secondary",
+        "displayName": "Midnight Focus",
+        "tonalRamp": ["#102635", "#1D425B", "#2A5E81", "#3B7BA6", "#5695C1", "#75ABD7", "#AED0E8", "#E5F2FA"]
+      },
+      "status-success": {
+        "role": "tertiary",
+        "displayName": "Success Green",
+        "tonalRamp": ["#102612", "#1C431F", "#28602D", "#357D3B", "#419A49", "#4CAF50", "#9ED6A1", "#E0F2E1"]
+      },
+      "status-warning": {
+        "role": "tertiary",
+        "displayName": "Warning Amber",
+        "tonalRamp": ["#3B2600", "#674300", "#916000", "#B97E11", "#DD9B2E", "#FFB74D", "#FFD394", "#FFF0D4"]
+      },
+      "status-info": {
+        "role": "tertiary",
+        "displayName": "Information Blue",
+        "tonalRamp": ["#071F33", "#0B385C", "#105286", "#166DB0", "#1C88DA", "#2196F3", "#86C7F8", "#D8EEFD"]
+      },
+      "status-error": {
+        "role": "tertiary",
+        "displayName": "Error Red",
+        "tonalRamp": ["#3C0E0B", "#6B1914", "#98231D", "#C62E26", "#E43A32", "#F44336", "#FA9B94", "#FDE0DE"]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Product Title",
+        "purpose": "Panel and dialog titles at a fixed product scale."
+      },
+      "body": {
+        "displayName": "Product Body",
+        "purpose": "Explanations, messages, settings, and conversational content."
+      },
+      "label": {
+        "displayName": "Control Label",
+        "purpose": "Compact controls, status keys, and metadata in sentence case."
+      },
+      "mono": {
+        "displayName": "Operational Mono",
+        "purpose": "Logs, commands, model identifiers, and resource values."
+      }
+    },
+    "shadows": [
+      {
+        "name": "floating-control",
+        "value": "0 4px 8px rgba(0, 0, 0, 0.20)",
+        "purpose": "Menus, popovers, and toasts that physically float above content."
+      },
+      {
+        "name": "dialog",
+        "value": "0 8px 8px rgba(0, 0, 0, 0.28)",
+        "purpose": "Dialogs used only after inline and progressive alternatives are exhausted."
+      },
+      {
+        "name": "focus-ring",
+        "value": "0 0 0 2px var(--text-link, #1976D2)",
+        "purpose": "Visible keyboard focus at the control boundary, using the theme's contrast-safe focus color."
+      }
+    ],
+    "motion": [
+      {
+        "name": "feedback-fast",
+        "value": "150ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Hover, press, and compact selection feedback."
+      },
+      {
+        "name": "state-standard",
+        "value": "200ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "State changes, inline disclosure, and transient feedback."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "520px"
+      },
+      {
+        "name": "status-collapse",
+        "value": "1000px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The strongest available action, used once per local decision area.",
+      "html": "<button class=\"ds-btn-primary\">Load model</button>",
+      "css": ".ds-btn-primary { appearance: none; border: 0; border-radius: 6px; background: #FCD846; color: var(--btn-color, #000); padding: 8px 16px; font: 600 12px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; transition: background-color 150ms cubic-bezier(0.16,1,0.3,1), transform 150ms cubic-bezier(0.16,1,0.3,1); } .ds-btn-primary:hover { background: #F0C040; } .ds-btn-primary:focus-visible { outline: 2px solid var(--text-link, #1976D2); outline-offset: 2px; } .ds-btn-primary:active { transform: translateY(1px); } .ds-btn-primary:disabled { cursor: not-allowed; opacity: 0.55; } @media (prefers-reduced-motion: reduce) { .ds-btn-primary { transition: none; } }"
+    },
+    {
+      "name": "Secondary Action",
+      "kind": "button",
+      "description": "A neutral action that supports, dismisses, or reverses a local operation.",
+      "html": "<button class=\"ds-btn-secondary\">Cancel changes</button>",
+      "css": ".ds-btn-secondary { appearance: none; border: 1px solid var(--border-primary, #E2DDD1); border-radius: 6px; background: var(--bg-primary, #FFFFFF); color: var(--text-primary, #000); padding: 8px 16px; font: 600 12px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; transition: background-color 150ms cubic-bezier(0.16,1,0.3,1), border-color 150ms cubic-bezier(0.16,1,0.3,1); } .ds-btn-secondary:hover { background: var(--bg-secondary, #F5F2EC); border-color: var(--text-secondary, #6B6B6B); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--text-link, #1976D2); outline-offset: 2px; } .ds-btn-secondary:active { background: var(--bg-tertiary, #EFEBE1); } .ds-btn-secondary:disabled { cursor: not-allowed; opacity: 0.55; } @media (prefers-reduced-motion: reduce) { .ds-btn-secondary { transition: none; } }"
+    },
+    {
+      "name": "Labeled Text Field",
+      "kind": "input",
+      "refersTo": "field-light",
+      "description": "A persistent label and recovery-oriented error state for model and server settings.",
+      "html": "<label class=\"ds-field\"><span>Model name</span><input aria-describedby=\"ds-model-error\" aria-invalid=\"true\" value=\"builtin.Qwen3-0.6B-GGUF\"><small id=\"ds-model-error\">Use a registered model name.</small></label>",
+      "css": ".ds-field { display: grid; gap: 6px; color: var(--text-primary, #000); font: 600 12px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; } .ds-field input { border: 1px solid var(--border-primary, #E2DDD1); border-radius: 6px; background: var(--bg-primary, #FFF); color: var(--text-primary, #000); padding: 8px 12px; font: 400 14px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; transition: border-color 150ms cubic-bezier(0.16,1,0.3,1), box-shadow 150ms cubic-bezier(0.16,1,0.3,1); } .ds-field input:focus-visible { border-color: var(--text-link, #1976D2); box-shadow: 0 0 0 2px var(--text-link, #1976D2); outline: 0; } .ds-field small { color: var(--text-secondary, #6B6B6B); font-weight: 400; } .ds-field input[aria-invalid='true'] + small { color: var(--toast-error-text, #B91C1C); } .ds-field input:disabled { cursor: not-allowed; opacity: .6; } @media (prefers-reduced-motion: reduce) { .ds-field input { transition: none; } }"
+    },
+    {
+      "name": "Mode Rail Item",
+      "kind": "nav",
+      "description": "Stable product navigation with an explicit current destination.",
+      "html": "<nav class=\"ds-rail\" aria-label=\"Lemonade modes\"><button aria-current=\"page\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 5h16v14H4zM8 9h8M8 13h5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/></svg><span>Models</span></button></nav>",
+      "css": ".ds-rail { display: inline-flex; background: var(--bg-secondary, #F5F2EC); padding: 4px; border-radius: 8px; } .ds-rail button { display: inline-flex; align-items: center; gap: 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary, #6B6B6B); padding: 8px 10px; font: 600 12px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; transition: background-color 150ms cubic-bezier(0.16,1,0.3,1), color 150ms cubic-bezier(0.16,1,0.3,1); } .ds-rail svg { width: 16px; height: 16px; } .ds-rail button[aria-current='page'] { background: var(--bg-primary, #FFF); color: var(--text-primary, #000); } .ds-rail button:hover { color: var(--text-primary, #000); } .ds-rail button:focus-visible { outline: 2px solid var(--text-link, #1976D2); outline-offset: 2px; } @media (prefers-reduced-motion: reduce) { .ds-rail button { transition: none; } }"
+    },
+    {
+      "name": "Model Residency Row",
+      "kind": "custom",
+      "description": "A dense row that distinguishes residency, use, and durable pin preference without color-only state.",
+      "html": "<div class=\"ds-model-row\"><div><strong>Qwen3 0.6B</strong><span>Loaded · Pinned</span></div><button aria-pressed=\"true\" aria-label=\"Unpin Qwen3 0.6B\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m14 4 6 6-3 1-4 4-1 5-2-2 1-5 4-4zM4 20l6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/></svg></button></div>",
+      "css": ".ds-model-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 320px; padding: 8px 12px; border-radius: 6px; background: var(--bg-secondary, #F5F2EC); color: var(--text-primary, #000); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; } .ds-model-row div { display: grid; gap: 2px; min-width: 0; } .ds-model-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; } .ds-model-row span { color: var(--text-secondary, #6B6B6B); font-size: 12px; } .ds-model-row button { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 6px; background: #FCD846; color: var(--btn-color, #000); cursor: pointer; transition: background-color 150ms cubic-bezier(0.16,1,0.3,1); } .ds-model-row svg { width: 16px; height: 16px; } .ds-model-row button:hover { background: #F0C040; } .ds-model-row button:focus-visible { outline: 2px solid var(--text-link, #1976D2); outline-offset: 2px; } .ds-model-row button:disabled { cursor: wait; opacity: .55; } @media (prefers-reduced-motion: reduce) { .ds-model-row button { transition: none; } }"
+    },
+    {
+      "name": "Startup Pin Policy",
+      "kind": "custom",
+      "description": "A familiar checkbox for the global policy that loads remembered pins at server startup.",
+      "html": "<label class=\"ds-policy\"><input type=\"checkbox\" checked><span><strong>Load remembered pins at startup</strong><small>Loads models whose saved recipe options include a pin preference.</small></span></label>",
+      "css": ".ds-policy { display: flex; align-items: flex-start; gap: 10px; max-width: 420px; padding: 12px; border-radius: 8px; background: var(--bg-secondary, #F5F2EC); color: var(--text-primary, #000); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; } .ds-policy input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: #FCD846; } .ds-policy span { display: grid; gap: 4px; } .ds-policy strong { font-size: 13px; } .ds-policy small { color: var(--text-secondary, #6B6B6B); font-size: 12px; line-height: 1.4; } .ds-policy:focus-within { box-shadow: 0 0 0 2px var(--text-link, #1976D2); } .ds-policy:has(input:disabled) { cursor: not-allowed; opacity: .6; }"
+    },
+    {
+      "name": "Operational Status",
+      "kind": "custom",
+      "description": "A compact status item with a label, tabular value, and non-color connection state.",
+      "html": "<div class=\"ds-status\" role=\"status\"><span class=\"ds-status-dot\" aria-hidden=\"true\"></span><strong>Connected</strong><span>GTT 83.5%</span></div>",
+      "css": ".ds-status { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 10px; border-top: 1px solid var(--border-primary, #333); background: var(--bg-primary, #0A0A0A); color: var(--text-primary, #FFF); font: 600 12px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; } .ds-status-dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--success-color, #4CAF50); } .ds-status > span:last-child { color: var(--text-secondary, #888); font-family: Consolas, Monaco, monospace; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Persistent Model Error",
+      "kind": "custom",
+      "description": "An inline recovery message that remains beside the affected model until resolved.",
+      "html": "<div class=\"ds-error\" role=\"alert\"><strong>Could not load remembered pin</strong><span>Free GTT capacity or unpin another model, then retry.</span><button>Retry load</button></div>",
+      "css": ".ds-error { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; max-width: 520px; padding: 12px 16px; border: 1px solid var(--error-color, #F44336); border-radius: 8px; background: var(--bg-primary, #FFF); color: var(--text-primary, #000); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; } .ds-error strong { font-size: 13px; } .ds-error span { grid-column: 1; color: var(--toast-error-text, #B91C1C); font-size: 12px; line-height: 1.4; } .ds-error button { grid-column: 2; grid-row: 1 / span 2; align-self: center; border: 0; border-radius: 6px; background: var(--error-color, #F44336); color: #000; padding: 8px 12px; font-weight: 600; cursor: pointer; } .ds-error button:hover { background: #E43A32; } .ds-error button:focus-visible { outline: 2px solid var(--text-link, #1976D2); outline-offset: 2px; } .ds-error button:disabled { cursor: wait; opacity: .55; }"
+    },
+    {
+      "name": "Capability Chip",
+      "kind": "chip",
+      "description": "A compact categorical label or filter with text-visible selected state.",
+      "html": "<button class=\"ds-chip\" aria-pressed=\"true\">GPU · Selected</button>",
+      "css": ".ds-chip { appearance: none; border: 1px solid var(--border-primary, #E2DDD1); border-radius: 9999px; background: var(--bg-primary, #FFF); color: var(--text-primary, #000); padding: 4px 10px; font: 600 12px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; transition: background-color 150ms cubic-bezier(0.16,1,0.3,1), border-color 150ms cubic-bezier(0.16,1,0.3,1); } .ds-chip[aria-pressed='true'] { border-color: #FCD846; background: #FCD846; color: var(--btn-color, #000); } .ds-chip:hover { border-color: var(--text-secondary, #6B6B6B); } .ds-chip:focus-visible { outline: 2px solid var(--text-link, #1976D2); outline-offset: 2px; } .ds-chip:disabled { cursor: not-allowed; opacity: .55; } @media (prefers-reduced-motion: reduce) { .ds-chip { transition: none; } }"
+    },
+    {
+      "name": "Product Panel",
+      "kind": "card",
+      "description": "An opaque, tonal container for a coherent set of model controls without a resting shadow.",
+      "html": "<section class=\"ds-panel\" aria-labelledby=\"ds-panel-title\"><h2 id=\"ds-panel-title\">Model residency</h2><p>Choose which models should remain available.</p></section>",
+      "css": ".ds-panel { display: grid; gap: 8px; max-width: 520px; padding: 16px; border: 1px solid var(--border-primary, #E2DDD1); border-radius: 8px; background: var(--bg-secondary, #F5F2EC); color: var(--text-primary, #000); box-shadow: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; } .ds-panel h2 { margin: 0; font-size: 20px; line-height: 1.25; } .ds-panel p { margin: 0; color: var(--text-secondary, #6B6B6B); font-size: 14px; line-height: 1.5; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Crystalline Zest",
+    "overview": "Crystalline Zest means clear state, controlled energy, and a citrus accent that makes important actions easy to find. It does not mean decorative glass. Lemonade is a product tool, so the interface must disappear into model management, inference, telemetry, and recovery work.\n\nThe physical scene is a developer using Lemonade beside terminals and model workloads for a long session, sometimes in bright daylight and sometimes in a dim room. Both Light and Midnight modes must remain calm, dense, legible, and operationally trustworthy. The product uses a restrained color strategy: neutral surfaces carry the interface, while citrus occupies no more than roughly 10% of a working screen.\n\nLemonade must feel refreshing, pragmatic, and enabling. It must not resemble a cloud AI upsell, a vendor-locked hardware demo appliance, a GUI-only chat toy, a single-backend runner, an expert-only config maze, an enterprise control plane first, or a broad AI workspace that tries to replace partner applications.",
+    "keyCharacteristics": [
+      "Familiar desktop-tool structure with compact, consistent controls.",
+      "Literal model, backend, server, and hardware state.",
+      "Restrained citrus for primary actions and current selection.",
+      "Tonal hierarchy before borders, shadows, blur, or decoration.",
+      "Equal-quality Light and Midnight modes.",
+      "Accessible feedback that never depends on color alone."
+    ],
+    "rules": [
+      {
+        "name": "The Restrained Citrus Rule",
+        "body": "Citrus identifies actions and selection. It is never a decorative wash, page background, or generic status color.",
+        "section": "colors"
+      },
+      {
+        "name": "The State Has Words Rule",
+        "body": "Every actionable success, warning, information, error, pinned, loading, or pressure state has a text label or accessible name in addition to color.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Real Themes Rule",
+        "body": "Light and Midnight are complete working modes. Neither is a decorative inversion of the other.",
+        "section": "colors"
+      },
+      {
+        "name": "The Product Type Rule",
+        "body": "Application headings, labels, buttons, and data use fixed sizes from the product scale. Fluid display typography belongs only on distinct public brand surfaces.",
+        "section": "typography"
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "body": "Uppercase is limited to established short telemetry abbreviations such as GPU, NPU, TPS, and TTFT. Buttons and prose use sentence case.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tonal First Rule",
+        "body": "Use a surface change before adding a border, and use a border before adding a shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "The No Ghost Card Rule",
+        "body": "Never combine a one-pixel border with a wide soft shadow. Resting panels use one structural treatment.",
+        "section": "elevation"
+      },
+      {
+        "name": "The No Decorative Glass Rule",
+        "body": "Backdrop blur and translucent glass are not default product materials. They are allowed only when the background relationship conveys useful context and contrast remains verified.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep the interface calm, exact, and trustworthy while preserving a small amount of citrus personality.",
+      "Do prioritize the model, backend, server, and hardware state a user needs to make a decision.",
+      "Do use familiar controls, keyboard access, visible focus, reduced motion, and readable status text.",
+      "Do keep Light and Midnight modes equally complete and verify body text at 4.5:1 contrast or better.",
+      "Do use one consistent component vocabulary across model management, settings, chat, logs, and telemetry.",
+      "Do distinguish current residency, runtime pinning, durable pin preference, startup loading, and eviction eligibility in labels and help text."
+    ],
+    "donts": [
+      "Don't make Lemonade feel like a cloud AI upsell or a vendor-locked hardware demo appliance.",
+      "Don't make Lemonade feel like a GUI-only chat toy, a single-backend runner, or an expert-only config maze.",
+      "Don't make Lemonade feel like an enterprise control plane first or a broad AI workspace that tries to replace Open WebUI, AnythingLLM, GAIA, or partner apps.",
+      "Don't use decorative glassmorphism, gradient text, side-stripe borders, striped backgrounds, or hand-drawn fallback illustrations.",
+      "Don't use identical card grids, nested cards, hero-metric templates, repeated uppercase eyebrows, or numbered-section scaffolding when order carries no meaning.",
+      "Don't place a wide shadow on a bordered card or exceed a 16px radius on a product panel or card.",
+      "Don't invent unusual scrollbars, dialogs, switches, or menus for brand flavor. Familiar behavior wins.",
+      "Don't use decorative motion, orchestrated page-load sequences, or content-hidden reveal animations.",
+      "Don't rely on color alone for connection, pressure, pin, loading, warning, or failure states.",
+      "Don't allow labels, headings, or translated copy to overflow at narrow widths."
+    ]
+  }
+}
