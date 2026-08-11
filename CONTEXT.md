@@ -195,13 +195,29 @@ _Avoid_: Adding GTT usage to host-memory usage as if they were independent physi
 An independent system-health guard that preserves enough memory for the operating system and other applications on shared-memory systems.
 _Avoid_: Treating the safety floor as model-footprint accounting or as a second model-capacity pool.
 
+**Residency constraint**:
+A safety condition that a residency plan must satisfy, such as headroom in a residency memory domain or the host-memory safety floor. A constraint need not be a distinct memory-accounting pool.
+_Avoid_: Adding aliased views of one physical allocation as if each constraint consumed separate bytes.
+
 **Residency capability level**:
-The evidence-backed status of a platform and backend combination. **Validated** means end-to-end physical admission and external-pressure tests; **modeled** means primary-evidence architecture and signals without full physical validation; **fallback-only** means an explicit safe fallback without full capacity automation; **unsupported** means no safe residency behavior.
+The evidence-backed status of one residency operation for a platform, backend, and affected domain set. **Validated** means end-to-end physical tests of that operation; **modeled** means primary-evidence architecture and signals without full physical validation; **fallback-only** means an explicit safe fallback without full capacity automation; **unsupported** means no safe residency behavior.
 _Avoid_: Calling design coverage validation or implying that fallback-only behavior provides capacity-aware automation.
 
+**Residency capability profile**:
+The collection of per-operation capability levels for a platform and backend, including at least admission and measured-pressure reclamation. A combination-wide label may summarize the profile for display but is not a policy input.
+_Avoid_: Assuming admission and external-pressure handling have the same signal availability or evidence.
+
 **Effective residency mode**:
-The behavior currently available from a platform and backend after combining its residency capability level with the live health and freshness of required signals: capacity-aware automation, the declared conservative fallback, or refusal.
+The behavior currently available for one residency operation and affected domain set after combining its capability level with the live health and freshness of required signals: capacity-aware automation, the declared conservative fallback, or refusal.
 _Avoid_: Treating a validated capability level as proof that its sensors are currently available, fresh, or trustworthy.
+
+**Residency plan**:
+The server-owned decision and outcome for one admission, measured-pressure, NPU-conflict, or load-retry trigger, including its constraint snapshot and complete ordered action set.
+_Avoid_: Treating a sequence of opportunistic per-model choices as one atomic plan.
+
+**Residency plan reservation**:
+An atomic server-owned claim on an operation's incoming resource effects, compatibility slots, and complete ordered action set before any irreversible action begins.
+_Avoid_: Treating a per-model lease or a read-only preflight as plan-wide protection from concurrent admissions and lifecycle changes.
 
 **NPU**:
 The neural processing unit targeted by RyzenAI and FastFlowLM paths.
@@ -314,7 +330,9 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - In that target, **admission reclamation** and **pressure reclamation** use different triggers but share eligibility rules: an **in-use model** or **Model pin** vetoes automatic hard reclamation.
 - **Soft reclamation** may preserve a pin because model weights and the backend remain resident; **hard reclamation** removes residency.
 - A **residency memory domain** is the capacity and pressure boundary for model residency. Hatchery's **GTT/shared GPU memory** is one such domain; its **host-memory safety floor** constrains the same physical system memory without becoming model-footprint accounting or another capacity pool.
-- A **residency capability level** records evidence for a platform and backend; its **effective residency mode** also depends on the current health of the signals that evidence requires.
+- A **residency plan** must satisfy every **residency constraint**. Reclaiming one shared allocation may improve both GTT headroom and the host floor without creating two independently reclaimable allocations.
+- A **residency capability profile** records evidence per operation and domain set; the **effective residency mode** for each cell also depends on the current health of that operation's required signals.
+- A **residency plan reservation** makes the complete decision boundary atomic; typed per-resident action leases protect each reserved side effect through completion.
 - Loaded-model categories control per-type LRU slots; **NPU exclusivity** controls cross-type NPU conflicts without overriding pins or in-use protection.
 - **OmniRouter** uses **Collections** and **tool definitions** to expose multi-modal endpoints through the standard tool-calling loop.
 - **Fork-local changes** target **fork origin** unless the user declares an **upstream contribution exception**.
