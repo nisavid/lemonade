@@ -191,6 +191,10 @@ _Avoid_: Adding GTT usage to host-memory usage as if they were independent physi
 An independent system-health guard that preserves enough memory for the operating system and other applications on shared-memory systems.
 _Avoid_: Treating the safety floor as model-footprint accounting or as a second model-capacity pool.
 
+**Residency capability level**:
+The evidence-backed status of a platform and backend combination: validated, modeled, fallback-only, or unsupported.
+_Avoid_: Calling design coverage validation or implying that fallback-only behavior provides capacity-aware automation.
+
 **NPU**:
 The neural processing unit targeted by RyzenAI and FastFlowLM paths.
 _Avoid_: Assuming NPU behavior is cross-platform or unconstrained.
