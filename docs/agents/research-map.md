@@ -64,6 +64,9 @@ Use `.agents/skills/working-with-upstream-refs/SKILL.md` for current commands an
 
 - `src/cpp/server/server.cpp`: HTTP route registration, auth, web app serving, handlers.
 - `src/cpp/server/router.cpp` and `src/cpp/include/lemon/router.h`: model routing, LRU eviction, NPU exclusivity, busy protection.
+- `upstream/main:src/cpp/server/eviction_engine.cpp` and `upstream/main:src/cpp/include/lemon/eviction_engine.h`: upstream automatic idle, soft-reclamation, and memory-pressure policy. These paths are not present at the checked-out fork ref.
+- `upstream/main:src/cpp/server/system_info.cpp` and `upstream/main:src/cpp/include/lemon/system_info.h`: upstream platform memory and accelerator-pressure signals, including AMD APU GTT accounting.
+- `upstream/main:src/cpp/server/recipe_options.cpp` and `upstream/main:src/cpp/include/lemon/recipe_options.h`: upstream per-model load preferences, including the saved `pinned` option. The checked-out fork stores durable pins separately in `pinned_models`.
 - `src/cpp/server/model_manager.cpp` and `src/cpp/include/lemon/model_manager.h`: registry loading, user models, extra models, path resolution, downloads.
 - `src/cpp/include/lemon/wrapped_server.h`: backend subprocess abstraction.
 - `src/cpp/include/lemon/server_capabilities.h`: completion, embedding, reranking, audio, image, TTS, and slots capability interfaces.
@@ -74,10 +77,12 @@ Use `.agents/skills/working-with-upstream-refs/SKILL.md` for current commands an
 ### Frontend architecture
 
 - `src/app/src/renderer/`: shared React renderer for desktop and web.
+- `src/app/styles/variables-light.css`, `src/app/styles/variables-dark.css`, and `src/app/styles/styles.css`: canonical implemented product-app tokens and component styling.
 - `src/app/src/renderer/tauriShim.ts`: desktop `window.api` bridge.
 - `src/app/src/renderer/utils/toolDefinitions.json`: canonical OmniRouter tool definitions.
 - `src/app/src-tauri/`: Tauri Rust host, settings, beacon discovery, window and event plumbing.
 - `src/web-app/`: browser build wrapper around the shared renderer.
+- `PRODUCT.md`, `DESIGN.md`, and `.impeccable/design.json`: Impeccable v4 product context, Stitch-compatible design tokens and guidance, and the schema-version-2 extension sidecar. The documentation website is a separate brand surface, not the root product design-system source.
 
 For architecture relationships that should not live in the domain glossary, see `docs/agents/architecture-map.md`.
 
@@ -90,6 +95,9 @@ For architecture relationships that should not live in the domain glossary, see 
 - Do not assume `Lemonade Server`, `lemond`, `LemonadeServer.exe`, and backend subprocesses are interchangeable.
 - Do not treat `recipe` and `backend` as synonyms.
 - Do not assume all NPU recipes can coexist; read the router's recipe-aware NPU rules.
+- Do not assume a runtime model pin is a saved pin preference or a startup-loading instruction; these are separate lifecycle concepts.
+- Do not assume LRU and pressure-engine pin checks protect every automatic displacement path; inspect NPU/FLM conflict handling, live-model reconfiguration, and load-failure retry as one residency policy.
+- Do not use nominal dedicated VRAM as Hatchery's capacity signal; its model weights and KV caches are accounted in GTT/shared GPU memory.
 - Do not assume model names and Hugging Face checkpoint ids are the same identifier.
 - Do not assume `Collection` entries are real single models in OpenAI-compatible model listings.
 - Do not push, file, or describe work as upstream-bound unless the user explicitly asks for an upstream contribution.

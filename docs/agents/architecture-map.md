@@ -1,6 +1,6 @@
 # Architecture Map
 
-This file captures implementation landmarks that are useful before changing Lemonade, but too implementation-specific for `CONTEXT.md`.
+This file captures implementation landmarks that are useful before changing Lemonade, but too implementation-specific for `CONTEXT.md`. Sections describe the checked-out fork unless they are explicitly labelled as an accepted target.
 
 ## Process Topology
 
@@ -17,7 +17,7 @@ This file captures implementation landmarks that are useful before changing Lemo
 - Core API endpoints are registered under `/api/v0/`, `/api/v1/`, `/v0/`, and `/v1/`.
 - Ollama-compatible routes live under `/api/` without the Lemonade/OpenAI version prefix.
 - Internal endpoints live under `/internal/`: `shutdown`, `set`, `config`, and `cleanup-cache`. They are loopback-restricted admin/local lifecycle, configuration, and cache-management APIs, not OpenAI-compatible routes.
-- Model pin management belongs on narrow Lemonade API routes under the normal version prefixes, not on generic `/internal/set` config editing. The first route shape is `GET /pins`, `POST /pins`, and `DELETE /pins/{model_name}` under `/api/v0/`, `/api/v1/`, `/v0/`, and `/v1/`. `GET /pins` returns configured pins with loaded status and optional load error.
+- The checked-out fork exposes configured pin management as `GET /pins`, `POST /pins`, and `DELETE /pins/{model_name}` under `/api/v0/`, `/api/v1/`, `/v0/`, and `/v1/`.
 
 ## Model Lifecycle
 
@@ -28,25 +28,34 @@ This file captures implementation landmarks that are useful before changing Lemo
 - `backend_versions.json` pins downloadable backend artifact versions.
 - `recipe_options.json` stores per-model runtime options in the Lemonade cache.
 
-## Cache and Eviction
+## Current Cache and Eviction
 
 - Model type controls the LRU bucket: LLM, embedding, reranking, audio, image, or TTS.
 - `max_loaded_models` applies per model type, not globally.
 - `max_gpu_memory_occupancy_gb` applies across loaded GPU models. Router dry-runs largest-to-smallest GPU evictions and leaves existing models loaded when the requested model cannot fit.
-- Model pins are excluded from automatic eviction policies and from eviction-managed capacity counts. Their resident GPU usage still reduces physical memory available to unpinned loads.
-- Model pin loading is best-effort at `lemond` startup; failed pin loads should be logged and surfaced to clients without preventing the server from starting.
-- Pinning an already-loaded model is a live metadata/config transition; it should persist the server config and protect the current `WrappedServer` without unloading or reloading it.
-- `POST /pins` accepts loaded or loading non-collection models; it is idempotent for models that are already pinned.
-- `DELETE /pins/{model_name}` persists config and clears protection on the current `WrappedServer` if it is loaded, without unloading it.
-- Model pin configuration stores canonical model names only; recipe options remain owned by the existing recipe-options path.
-- Explicit unload affects current residency only; unpinning is the action that removes a model from pin configuration.
-- Deleting a model removes that model name from pin configuration.
-- Collection ids are not pinned; users pin the concrete loaded component models instead.
-- NPU exclusivity still applies between model pins; startup pin loading processes pins in configured order, so a later conflicting pinned NPU model can evict an earlier one instead of preserving all pins resident.
-- `pinned_models` preserves insertion order and `lemond` loads pins in that order; drag-to-reorder is optional UI polish, not required for the first implementation.
+- Configured pins live in `pinned_models`, are loaded at startup, do not consume count-managed slots, and are excluded from ordinary automatic capacity victims.
+- An incoming pinned NPU/FLM model can evict an incompatible pinned incumbent. This last-pinned-load-wins behavior is unsafe and is replaced by the accepted target below.
 - Busy `WrappedServer` instances are protected from eviction until their active request ends.
-- Non-file-not-found load failures trigger an evict-all-and-retry path.
-- Exclusive NPU recipes evict other NPU users; FLM has recipe-specific coexistence rules.
+- The load-failure retry path preserves configured pins but can evict every eligible unpinned model before retrying.
+- This ref has no upstream-style reactive pressure engine or idle KV-cache reclamation.
+
+## Accepted Model Residency Target
+
+- Continued fork maintenance is decided. Reconcile onto current stable upstream, then implement this target using upstream terminology and APIs where they fit.
+- Pins consume `max_loaded_models` slots and are never automatic LRU victims. Hatchery disables the count ceiling with `max_loaded_models=-1` and uses the capacity policy as its primary admission bound.
+- `recipe_options.json` is the source of durable per-model pin preference. A global `load_pinned_models_on_startup` policy, defaulting to false, controls best-effort startup admission of those models.
+- Startup failures are logged and surfaced without preventing `lemond` from starting. A saved pin preference remains visible even when its model is not resident.
+- Startup loading preflights the complete saved-pin set. It loads nonconflicting preferences but does not choose a winner from a mutually exclusive NPU/FLM set; every member of that set remains durable and receives a surfaced conflict.
+- Hatchery admission uses GTT/shared GPU memory as the model-residency capacity signal. Host `MemAvailable` is an independent system-health interlock and is never added to GTT usage.
+- Admission reclamation dry-runs the full candidate plan before changing residency. Estimate model and KV-cache GTT demand from measured or calibrated footprints, with an explicit fallback for unknown models.
+- Pressure reclamation and admission reclamation share eligibility rules. A pinned or in-use model vetoes automatic hard reclamation.
+- Soft reclamation may clear reconstructible idle state such as a KV cache while preserving weights, the backend process, and any pin.
+- Hard-reclamation order is largest cold unpinned idle model first, then largest warm unpinned idle model. Age alone does not trigger hard reclamation when there is no admission or measured pressure.
+- NPU/FLM conflict planning resolves the effective device and slot policy before eviction. If any conflicting resident is pinned or in use, reject the incoming load without changing residency.
+- A pinned newcomer has no precedence over a pinned incumbent. Reconfiguring a live pinned model requires explicit unpin or an explicit force operation.
+- Load-failure retry may reclaim only eligible unpinned idle models. It never performs an unconditional evict-all retry.
+- Manual unload, explicit force, service termination, dead-backend pruning, and owner-scoped job cleanup remain distinct explicit or lifecycle operations.
+- Runtime pinning follows upstream load and pin semantics. Durable pin persistence is a separate per-model recipe-options operation that patches only `pinned` and preserves every unrelated saved option.
 
 ## Frontend Split
 
@@ -54,12 +63,15 @@ This file captures implementation landmarks that are useful before changing Lemo
 - The Tauri desktop app uses `src/app/src-tauri/` and installs `window.api` through `tauriShim.ts`.
 - The browser web app in `src/web-app/` reuses the shared renderer with a separate package/dependency tree.
 - Do not consolidate `src/app/package.json` and `src/web-app/package.json`; the split supports Debian native packaging with system Node modules.
-- Model pin controls belong at the leading edge of active-model list rows, not in the trailing unload/action button cluster.
-- The active-model UI should surface configured pinned models even when they are not currently loaded, so users can see failed/manual-unloaded pins and unpin them.
-- Keep the active-model section label as "ACTIVE MODELS". Without pins, its count pill reports `N loaded`; with pins, report `N loaded · M pinned`.
-- Active-model row ordering should prioritize current and actionable runtime state: loading rows, pinned rows with load errors, loaded pinned rows, loaded unpinned rows, then pinned-not-loaded rows without errors. Preserve server pin order inside pinned buckets; sort unpinned rows by display name.
-- Avoid visible group headers or separators in the active-model list until normal usage shows the list is too long to scan by row state alone.
-- Pinned-not-loaded rows should use the trailing action slot for `Load`; pinned rows with load errors should use that slot for `Retry`.
+
+### Accepted residency UI target
+
+- Runtime pin state, saved pin preference, and startup-loading policy use distinct controls and labels. A pin action never silently changes the startup policy.
+- Saved pin preferences and startup failures remain visible when their models are not loaded so users can retry, change options, or remove the preference.
+- The startup-loading setting is server-owned lifecycle configuration. It must not move into per-client desktop or web-app settings.
+- Residency rows surface loaded, in-use, pinned, remembered-pin, loading, soft-reclaimed, pressure-reclaimed, and refusal states with text or accessible names in addition to color.
+- Resource telemetry distinguishes GTT/shared GPU memory from host memory on platforms where that distinction is meaningful.
+- Follow `DESIGN.md` and `.impeccable/design.json` for the Impeccable v4 product language. Current CSS that contradicts those documents is implementation debt, not a design-system exception.
 
 ## OmniRouter
 
