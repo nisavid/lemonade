@@ -240,8 +240,12 @@ An ambiguous backend or resource state that is not routable and conservatively r
 _Avoid_: Crediting memory, count, or compatibility capacity merely because an unload or rollback returned an uncertain result.
 
 **Backend recovery authority**:
-A platform/backend guarantee established before subprocess spawn that lets `lemond` recover ownership safely after interruption: either validated process containment that releases the complete child tree with the daemon, or transient durable ownership metadata retained until release is verified.
-_Avoid_: Using saved pin preferences as process-ownership evidence or treating operational recovery metadata as desired configuration or proof of commit.
+A platform/backend guarantee established before subprocess spawn that lets `lemond` recover ownership safely after interruption: either validated process containment that releases the complete child tree with the daemon, or transient durable ownership metadata retained until release is verified. Journaled launches use a pre-created launch identity bound atomically to process creation and a monotonic handoff to the complete process-tree identity.
+_Avoid_: Using saved pin preferences or a reusable PID as ownership evidence, or treating operational recovery metadata as desired configuration or proof of commit.
+
+**Daemon recovery barrier**:
+An exclusive startup phase that restores every outstanding ownership record and constraint claim before any model-lifecycle request or automatic residency plan can run.
+_Avoid_: Starting the pin loader, pressure engine, or ordinary load handling while survivor ownership or prior claims remain unreconciled.
 
 **NPU**:
 The neural processing unit targeted by RyzenAI and FastFlowLM paths.
@@ -360,6 +364,7 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - A **residency capability profile** records evidence per operation and domain set; the **effective residency mode** for each cell also depends on the current health of that operation's required signals.
 - A **residency plan reservation** atomically acquires every **residency constraint claim** and action lease. Verified outcomes convert those claims to committed occupancy or release them; ambiguous outcomes transfer them to **quarantined residency**.
 - Every backend spawn requires a **backend recovery authority**. Desired residency remains in recipe options; transient ownership metadata exists only to identify and safely clean up runtime resources after interruption.
+- A new `lemond` owner crosses the **daemon recovery barrier** before model lifecycle becomes ready. Surviving resources enter **quarantined residency** until ownership and release are verified.
 - Loaded-model categories control per-type LRU slots; **NPU exclusivity** controls cross-type NPU conflicts without overriding pins or in-use protection.
 - **OmniRouter** uses **Collections** and **tool definitions** to expose multi-modal endpoints through the standard tool-calling loop.
 - **Fork-local changes** target **fork origin** unless the user declares an **upstream contribution exception**.
