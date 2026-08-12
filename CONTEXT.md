@@ -223,6 +223,14 @@ _Avoid_: Calling design coverage validation or implying that fallback-only behav
 The collection of per-operation capability levels for a platform and backend, including at least admission and measured-pressure reclamation. A combination-wide label may summarize the profile for display but is not a policy input.
 _Avoid_: Assuming admission and external-pressure handling have the same signal availability or evidence.
 
+**Footprint confidence class**:
+The server-computed assurance that a predicted residency effect has a conservative bound suitable for a particular operation. A reviewed capability-catalog rule derives the class from recognized estimator or measurement provenance and uncertainty.
+_Avoid_: Trusting an adapter-supplied confidence label or treating an unknown bound as zero.
+
+**Residency capability catalog**:
+A reviewed, versioned, content-addressed set of per-operation rules that maps an attested platform, backend, topology, configuration, recovery mechanism, and evidence set to one capability level, effective prerequisites, and fallback or refusal.
+_Avoid_: Letting a live adapter promote its own capability or reinterpreting an existing claim more permissively after a catalog change.
+
 **Effective residency mode**:
 The behavior currently available for one residency operation and affected domain set after combining its capability level with the live health and freshness of required signals: capacity-aware automation, the declared conservative fallback, or refusal.
 _Avoid_: Treating a validated capability level as proof that its sensors are currently available, fresh, or trustworthy.
@@ -235,17 +243,25 @@ _Avoid_: Treating a sequence of opportunistic per-model choices as one atomic pl
 An atomic server-owned claim on an operation's complete constraint-claim and ordered-action set before any irreversible action begins.
 _Avoid_: Treating a per-model lease or a read-only preflight as plan-wide protection from concurrent admissions and lifecycle changes.
 
+**Residency lifecycle mutation gate**:
+The server-owned coordination boundary that fences topology, catalog, configuration, observation, recovery, journal, and backend-growth generations. Ordinary lifecycle work requires a fully ready token; narrowly scoped recovery remediation can only strengthen or reconcile blocked state and verify cleanup.
+_Avoid_: Sampling independent readiness flags or adding an untyped recovery bypass around ordinary locking and claim rules.
+
+**Suspended residency**:
+Known-owned, fully bounded, non-routable residency whose current policy or evidence is invalid. Within one continuously fenced daemon epoch, it may return to active only after full re-attestation and claim reconciliation.
+_Avoid_: Using suspension for uncertain ownership, effects, or release; those conditions require quarantine.
+
 **Quarantined residency**:
 An ambiguous backend or resource state that is not routable and conservatively retains every plausible constraint claim until cleanup verifies release.
-_Avoid_: Crediting memory, count, or compatibility capacity merely because an unload or rollback returned an uncertain result.
+_Avoid_: Crediting memory, count, or compatibility capacity merely because an unload or rollback returned an uncertain result, or reactivating quarantine instead of releasing it.
 
 **Backend recovery authority**:
-A platform/backend guarantee established before subprocess spawn that lets `lemond` recover ownership safely after interruption: either validated process containment that releases the complete child tree with the daemon, or transient durable ownership metadata retained until release is verified. Journaled launches use a pre-created launch identity bound atomically to process creation and a monotonic handoff to the complete process-tree identity.
+A platform/backend guarantee established before subprocess spawn that lets `lemond` recover ownership safely after interruption. A launch uses exactly one reviewed mode: hereditary containment that covers every future resource-owning descendant, or durable membership that externally prevents descendant creation and resource acquisition until each owner is journaled and atomically bound. Both modes retain ownership evidence until complete release is verified.
 _Avoid_: Using saved pin preferences or a reusable PID as ownership evidence, or treating operational recovery metadata as desired configuration or proof of commit.
 
 **Daemon recovery barrier**:
-An exclusive startup phase that restores every outstanding ownership record and constraint claim before any model-lifecycle request or automatic residency plan can run.
-_Avoid_: Starting the pin loader, pressure engine, or ordinary load handling while survivor ownership or prior claims remain unreconciled.
+An exclusive startup phase that quarantines every prior-epoch ownership record and constraint claim before any model-lifecycle request or automatic residency plan can run. Recovery does not adopt surviving backends; it proves ownership before cleanup and releases claims only after complete resource-tree release.
+_Avoid_: Starting the pin loader, pressure engine, or ordinary load handling while survivor ownership or prior claims remain unreconciled, or restoring a prior process to active merely because its journal record was valid.
 
 **NPU**:
 The neural processing unit targeted by RyzenAI and FastFlowLM paths.
