@@ -142,8 +142,12 @@ A durable per-model recipe option that asks `lemond` to apply a model pin whenev
 _Avoid_: Treating the saved preference as proof that the model is currently loaded or pinned.
 
 **Pinned-model startup loading**:
-A server startup policy that loads models with a saved pin preference when enabled.
+A server startup policy that, when enabled, attempts grouped admission of models with a saved pin preference.
 _Avoid_: Folding startup loading into the definition of a model pin or enabling it implicitly for every user.
+
+**Startup admission set**:
+A connected set of saved pin preferences whose models share a residency constraint. Startup selects the set all-or-none: every member is jointly admissible, or no member receives precedence.
+_Avoid_: Using registry, JSON, container, or execution order to choose which remembered pins become resident.
 
 **Model residency**:
 The current presence of model weights and backend state in the device-specific memory and process resources used for inference.
@@ -196,7 +200,7 @@ An independent system-health guard that preserves enough memory for the operatin
 _Avoid_: Treating the safety floor as model-footprint accounting or as a second model-capacity pool.
 
 **Residency constraint**:
-A safety condition that a residency plan must satisfy, such as headroom in a residency memory domain or the host-memory safety floor. A constraint need not be a distinct memory-accounting pool.
+A condition that a residency plan must satisfy, such as memory-domain headroom, the host-memory safety floor, a count-managed slot, or NPU/FLM compatibility. A constraint need not be a distinct memory-accounting pool.
 _Avoid_: Adding aliased views of one physical allocation as if each constraint consumed separate bytes.
 
 **Residency capability level**:
@@ -327,6 +331,7 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - A **model name** resolves to model metadata, a **recipe**, **checkpoints**, labels, loaded-model category, and recipe options.
 - A **recipe** selects the execution family; a **backend** selects the concrete engine or device path inside that family.
 - In the accepted fork residency model, a **Model pin** protects current residency; a **saved pin preference** controls pinning on a future load; **pinned-model startup loading** decides whether those preferences cause startup admission.
+- **Pinned-model startup loading** partitions remembered pins into **startup admission sets** connected by shared constraints. Each set is selected all-or-none; independent feasible sets may still load.
 - In that target, **admission reclamation** and **pressure reclamation** use different triggers but share eligibility rules: an **in-use model** or **Model pin** vetoes automatic hard reclamation.
 - **Soft reclamation** may preserve a pin because model weights and the backend remain resident; **hard reclamation** removes residency.
 - A **residency memory domain** is the capacity and pressure boundary for model residency. Hatchery's **GTT/shared GPU memory** is one such domain; its **host-memory safety floor** constrains the same physical system memory without becoming model-footprint accounting or another capacity pool.

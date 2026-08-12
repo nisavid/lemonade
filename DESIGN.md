@@ -234,7 +234,7 @@ Navigation is stable, compact, and conventional. The current destination uses a 
 
 ### Model Residency Controls
 
-Runtime state and durable preference are distinct. A model row can show “Loaded,” “In use,” “Pinned,” “Remembered pin,” “Loading,” or a specific failure. The runtime pin action and the durable “Pin whenever loaded” preference must not look like the same control. The global startup setting explains that it loads remembered pins when the server starts; it does not redefine pinning itself.
+Runtime state and durable preference are distinct. A model row can show “Loaded,” “In use,” “Pinned,” “Remembered pin,” “Loading,” or a specific failure. The runtime pin action and the durable “Pin whenever loaded” preference must not look like the same control. The global startup setting explains that it attempts complete compatible groups of remembered pins when the server starts; conflicts stay remembered and unloaded. It does not redefine pinning itself.
 
 Automatic pressure and admission actions must remain observable. When Lemonade clears an idle KV cache, evicts a model, refuses admission, or cannot relieve pressure because every candidate is pinned or in use, the UI and logs state what happened and why.
 
