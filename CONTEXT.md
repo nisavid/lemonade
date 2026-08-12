@@ -138,7 +138,7 @@ In the accepted fork residency model, a runtime property of a loaded model that 
 _Avoid_: Treating a runtime pin as durable configuration, startup loading, or a backend version pin.
 
 **Saved pin preference**:
-A durable per-model recipe option that asks `lemond` to apply a model pin whenever that model is loaded.
+A durable per-model recipe option that asks `lemond` to apply a model pin whenever a completed load commits that model to residency.
 _Avoid_: Treating the saved preference as proof that the model is currently loaded or pinned.
 
 **Pinned-model startup loading**:
@@ -148,6 +148,14 @@ _Avoid_: Folding startup loading into the definition of a model pin or enabling 
 **Startup admission set**:
 A connected set of saved pin preferences whose models share a residency constraint. Startup selects the set all-or-none: every member is jointly admissible, or no member receives precedence.
 _Avoid_: Using registry, JSON, container, or execution order to choose which remembered pins become resident.
+
+**Resolved admission intent**:
+An immutable planning snapshot of a requested model's identity, recipe, backend, device, saved options, topology, count category, effective mode, configuration and signal generations, and predicted constraint effects.
+_Avoid_: Building admission sets from nominal model names before their actual constraints are resolved.
+
+**Provisional startup load**:
+Backend resources materialized for a startup admission set but still owned exclusively by that plan. It is non-routable, is not published as loaded, and has no runtime pin until the complete set commits.
+_Avoid_: Applying ordinary pin protection to transaction-owned cleanup or exposing a provisional member as independently available.
 
 **Model residency**:
 The current presence of model weights and backend state in the device-specific memory and process resources used for inference.
@@ -203,6 +211,10 @@ _Avoid_: Treating the safety floor as model-footprint accounting or as a second 
 A condition that a residency plan must satisfy, such as memory-domain headroom, the host-memory safety floor, a count-managed slot, or NPU/FLM compatibility. A constraint need not be a distinct memory-accounting pool.
 _Avoid_: Adding aliased views of one physical allocation as if each constraint consumed separate bytes.
 
+**Residency constraint claim**:
+A reservation or occupancy recorded in the server-owned constraint ledger. Claims cover every affected constraint and move atomically through reserved, provisional, committed, quarantined, or released accounting states.
+_Avoid_: Reserving only familiar memory or compatibility constraints while leaving count or adapter-declared constraints available to competing plans.
+
 **Residency capability level**:
 The evidence-backed status of one residency operation for a platform, backend, and affected domain set. **Validated** means end-to-end physical tests of that operation; **modeled** means primary-evidence architecture and signals without full physical validation; **fallback-only** means an explicit safe fallback without full capacity automation; **unsupported** means no safe residency behavior.
 _Avoid_: Calling design coverage validation or implying that fallback-only behavior provides capacity-aware automation.
@@ -220,8 +232,12 @@ The server-owned decision and outcome for one admission, measured-pressure, NPU-
 _Avoid_: Treating a sequence of opportunistic per-model choices as one atomic plan.
 
 **Residency plan reservation**:
-An atomic server-owned claim on an operation's incoming resource effects, compatibility slots, and complete ordered action set before any irreversible action begins.
+An atomic server-owned claim on an operation's complete constraint-claim and ordered-action set before any irreversible action begins.
 _Avoid_: Treating a per-model lease or a read-only preflight as plan-wide protection from concurrent admissions and lifecycle changes.
+
+**Quarantined residency**:
+An ambiguous backend or resource state that is not routable and conservatively retains every plausible constraint claim until cleanup verifies release.
+_Avoid_: Crediting memory, count, or compatibility capacity merely because an unload or rollback returned an uncertain result.
 
 **NPU**:
 The neural processing unit targeted by RyzenAI and FastFlowLM paths.
@@ -332,12 +348,13 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - A **recipe** selects the execution family; a **backend** selects the concrete engine or device path inside that family.
 - In the accepted fork residency model, a **Model pin** protects current residency; a **saved pin preference** controls pinning on a future load; **pinned-model startup loading** decides whether those preferences cause startup admission.
 - **Pinned-model startup loading** partitions remembered pins into **startup admission sets** connected by shared constraints. Each set is selected all-or-none; independent feasible sets may still load.
+- A **startup admission set** is built from immutable **resolved admission intents**. Its members remain **provisional startup loads** until one atomic commit publishes the complete set and applies runtime pins.
 - In that target, **admission reclamation** and **pressure reclamation** use different triggers but share eligibility rules: an **in-use model** or **Model pin** vetoes automatic hard reclamation.
 - **Soft reclamation** may preserve a pin because model weights and the backend remain resident; **hard reclamation** removes residency.
 - A **residency memory domain** is the capacity and pressure boundary for model residency. Hatchery's **GTT/shared GPU memory** is one such domain; its **host-memory safety floor** constrains the same physical system memory without becoming model-footprint accounting or another capacity pool.
 - A **residency plan** must satisfy every **residency constraint**. Reclaiming one shared allocation may improve both GTT headroom and the host floor without creating two independently reclaimable allocations.
 - A **residency capability profile** records evidence per operation and domain set; the **effective residency mode** for each cell also depends on the current health of that operation's required signals.
-- A **residency plan reservation** makes the complete decision boundary atomic; typed per-resident action leases protect each reserved side effect through completion.
+- A **residency plan reservation** atomically acquires every **residency constraint claim** and action lease. Verified outcomes convert those claims to committed occupancy or release them; ambiguous outcomes transfer them to **quarantined residency**.
 - Loaded-model categories control per-type LRU slots; **NPU exclusivity** controls cross-type NPU conflicts without overriding pins or in-use protection.
 - **OmniRouter** uses **Collections** and **tool definitions** to expose multi-modal endpoints through the standard tool-calling loop.
 - **Fork-local changes** target **fork origin** unless the user declares an **upstream contribution exception**.
