@@ -204,8 +204,8 @@
     {
       "name": "Startup Pin Policy",
       "kind": "custom",
-      "description": "A familiar checkbox for the global policy that loads remembered pins at server startup.",
-      "html": "<label class=\"ds-policy\"><input type=\"checkbox\"><span><strong>Load remembered pins at startup</strong><small>Loads models whose saved recipe options include a pin preference.</small></span></label>",
+      "description": "A familiar checkbox for the global policy that attempts grouped admission of remembered pins at server startup.",
+      "html": "<label class=\"ds-policy\"><input type=\"checkbox\"><span><strong>Load remembered pins at startup</strong><small>Attempts complete compatible groups. Conflicts stay remembered and unloaded.</small></span></label>",
       "css": ".ds-policy { display: flex; align-items: flex-start; gap: 10px; max-width: 420px; padding: 12px; border-radius: 8px; background: var(--bg-secondary, #F5F2EC); color: var(--text-primary, #000); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; } .ds-policy input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: #FCD846; } .ds-policy span { display: grid; gap: 4px; } .ds-policy strong { font-size: 13px; } .ds-policy small { color: var(--text-secondary, #6B6B6B); font-size: 12px; line-height: 1.4; } .ds-policy:focus-within { box-shadow: 0 0 0 2px var(--text-link, #1976D2); } .ds-policy:has(input:disabled) { cursor: not-allowed; opacity: .6; }"
     },
     {
