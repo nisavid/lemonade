@@ -223,13 +223,21 @@ _Avoid_: Calling design coverage validation or implying that fallback-only behav
 The collection of per-operation capability levels for a platform and backend, including at least admission and measured-pressure reclamation. A combination-wide label may summarize the profile for display but is not a policy input.
 _Avoid_: Assuming admission and external-pressure handling have the same signal availability or evidence.
 
+**Residency completeness manifest**:
+The server-built inventory of every footprint and ordinary constraint-claim family required for one resolved intent, operation, and lifecycle phase, plus every required action lease and ownership/recovery claim. Each footprint or ordinary constraint family is classified as `not_applicable`, `known_zero`, `bounded`, or `unknown` before any side effect. Action leases and ownership/recovery claims must be explicitly present but do not create new ordinary claim-algebra kinds.
+_Avoid_: Treating an unobserved family as absent or letting a complete memory estimate substitute for count, compatibility, ownership, or action-lease completeness.
+
 **Footprint confidence class**:
-The server-computed assurance that a predicted residency effect has a conservative bound suitable for a particular operation. A reviewed capability-catalog rule derives the class from recognized estimator or measurement provenance and uncertainty.
-_Avoid_: Trusting an adapter-supplied confidence label or treating an unknown bound as zero.
+The server-computed assurance that a predicted residency effect has a conservative bound suitable for a particular operation. `enforced_complete` uses an external mechanism that prevents every effect from exceeding its complete envelope. `validated_predictor` uses reviewed component derivations and a residual envelope physically validated for the catalog cell. `calibrated_instance` is a reviewed exact-fingerprint bound restricted to explicitly requested, isolated validation or discovery. `incomplete` lacks a mandatory bound; `unknown` lacks trustworthy applicability, placement, logical grouping, or total effects.
+_Avoid_: Trusting an adapter-supplied label, applying a generic model-size percentage, generalizing an exact-instance calibration, or treating `incomplete` or `unknown` as ordinary admission authority.
 
 **Residency capability catalog**:
 A reviewed, versioned, content-addressed set of per-operation rules that maps an attested platform, backend, topology, configuration, recovery mechanism, and evidence set to one capability level, effective prerequisites, and fallback or refusal.
 _Avoid_: Letting a live adapter promote its own capability or reinterpreting an existing claim more permissively after a catalog change.
+
+**Residency admission baseline**:
+A cataloged, operation-scoped composition of fresh capacity, usage, budget, process, backend, and ledger evidence into the current constraint state. Each observation declares its scope and covered allocation groups so the control plane can account for resident and external demand without omission or double counting.
+_Avoid_: Treating every signal as device-wide headroom, blindly adding resident claims to a device-wide usage counter, or claiming another application's demand as Lemonade-owned capacity.
 
 **Effective residency mode**:
 The behavior currently available for one residency operation and affected domain set after combining its capability level with the live health and freshness of required signals: capacity-aware automation, the declared conservative fallback, or refusal.
@@ -378,6 +386,8 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - A **residency memory domain** is the capacity and pressure boundary for model residency. Hatchery's **GTT/shared GPU memory** is one such domain; its **host-memory safety floor** constrains the same physical system memory without becoming model-footprint accounting or another capacity pool.
 - A **residency plan** must satisfy every **residency constraint**. Reclaiming one shared allocation may improve both GTT headroom and the host floor without creating two independently reclaimable allocations.
 - A **residency capability profile** records evidence per operation and domain set; the **effective residency mode** for each cell also depends on the current health of that operation's required signals.
+- A **residency completeness manifest** covers every required footprint and ordinary or lifecycle claim. Its **footprint confidence class** comes from reviewed analytic, enforced, or calibration evidence and never replaces whole-claim completeness.
+- A **residency admission baseline** composes scoped observations with ledger claims. External applications consume available capacity but never become Lemonade ownership or cleanup targets.
 - A **residency plan reservation** atomically acquires every **residency constraint claim** and action lease. Verified outcomes convert those claims to committed occupancy or release them; ambiguous outcomes transfer them to **quarantined residency**.
 - Every backend spawn requires a **backend recovery authority**. Desired residency remains in recipe options; transient ownership metadata exists only to identify and safely clean up runtime resources after interruption.
 - A new `lemond` owner crosses the **daemon recovery barrier** before model lifecycle becomes ready. Surviving resources enter **quarantined residency** until ownership and release are verified.
