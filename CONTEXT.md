@@ -173,6 +173,18 @@ _Avoid_: Waiting for a failed or destabilizing load before considering predictab
 Reclaiming eligible resident model resources in response to measured memory pressure, including pressure created by other applications.
 _Avoid_: Treating pressure reclamation and admission reclamation as interchangeable triggers.
 
+**Pressure recovery deficit**:
+The conservative progress required for one active pressure constraint to reach its recovery-exit target, including hysteresis headroom. It may be positive before the constraint breaches its safety boundary.
+_Avoid_: Giving early-warning reclamation zero utility merely because measured headroom remains positive.
+
+**Pressure episode**:
+The interval during which at least one canonical pressure constraint remains in an active phase. The server adds and removes constraints from the live vector as fresh evidence proves their transitions; invalid evidence only latches a constraint that was already active.
+_Avoid_: Treating stale evidence as proof of pressure or ending an episode while an active constraint lacks fresh recovery evidence.
+
+**Resident-use lease**:
+A server-owned acquisition that lets one routed operation use a resident. The final lease release that takes the active-use count to zero records when the resident became idle, including after failed or cancelled work.
+_Avoid_: Resetting reclamation recency for monitoring, maintenance, or soft-reclamation activity.
+
 **Soft reclamation**:
 Releasing reconstructible idle state, such as a KV cache, while preserving model weights, the backend process, and any model pin.
 _Avoid_: Reporting soft reclamation as a model eviction.
@@ -250,6 +262,10 @@ _Avoid_: Treating a sequence of opportunistic per-model choices as one atomic pl
 **Residency plan reservation**:
 An atomic server-owned claim on an operation's complete constraint-claim and ordered-action set before any irreversible action begins.
 _Avoid_: Treating a per-model lease or a read-only preflight as plan-wide protection from concurrent admissions and lifecycle changes.
+
+**Pressure coordinator epoch**:
+The server-owned scheduling state for one pressure episode across a transitively overlapping claim and eligibility scope. It owns the outstanding planning attempt, retry token, wait state, fairness queue, and bounded backoff.
+_Avoid_: Running concurrent plans for aliased scopes or repeatedly replanning unchanged pressure while queued work starves.
 
 **Residency lifecycle mutation gate**:
 The server-owned coordination boundary that fences topology, catalog, configuration, observation, recovery, journal, and backend-growth generations. Ordinary lifecycle work requires a fully ready token; narrowly scoped recovery remediation can only strengthen or reconcile blocked state and verify cleanup.
@@ -382,6 +398,7 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - **Pinned-model startup loading** partitions remembered pins into **startup admission sets** connected by shared constraints. Each set is selected all-or-none; independent feasible sets may still load.
 - A **startup admission set** is built from immutable **resolved admission intents**. Its members remain **provisional startup loads** until one atomic commit publishes the complete set and applies runtime pins.
 - In that target, **admission reclamation** and **pressure reclamation** use different triggers but share eligibility rules: an **in-use model** or **Model pin** vetoes automatic hard reclamation.
+- A **pressure episode** tracks the live vector of active canonical constraints. Its **pressure recovery deficits** target stabilized recovery, while evidence validity remains a separate prerequisite for action and exit.
 - **Soft reclamation** may preserve a pin because model weights and the backend remain resident; **hard reclamation** removes residency.
 - A **residency memory domain** is the capacity and pressure boundary for model residency. Hatchery's **GTT/shared GPU memory** is one such domain; its **host-memory safety floor** constrains the same physical system memory without becoming model-footprint accounting or another capacity pool.
 - A **residency plan** must satisfy every **residency constraint**. Reclaiming one shared allocation may improve both GTT headroom and the host floor without creating two independently reclaimable allocations.
@@ -389,6 +406,7 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - A **residency completeness manifest** covers every required footprint and ordinary or lifecycle claim. Its **footprint confidence class** comes from reviewed analytic, enforced, or calibration evidence and never replaces whole-claim completeness.
 - A **residency admission baseline** composes scoped observations with ledger claims. External applications consume available capacity but never become Lemonade ownership or cleanup targets.
 - A **residency plan reservation** atomically acquires every **residency constraint claim** and action lease. Verified outcomes convert those claims to committed occupancy or release them; ambiguous outcomes transfer them to **quarantined residency**.
+- A **pressure coordinator epoch** serializes overlapping pressure planning and resident-use admission. A **resident-use lease** records actual use and determines when a resident becomes idle for reclamation ordering.
 - Every backend spawn requires a **backend recovery authority**. Desired residency remains in recipe options; transient ownership metadata exists only to identify and safely clean up runtime resources after interruption.
 - A new `lemond` owner crosses the **daemon recovery barrier** before model lifecycle becomes ready. Surviving resources enter **quarantined residency** until ownership and release are verified.
 - Loaded-model categories control per-type LRU slots; **NPU exclusivity** controls cross-type NPU conflicts without overriding pins or in-use protection.
