@@ -216,10 +216,10 @@
       "css": ".ds-status { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 10px; border-top: 1px solid var(--border-primary, #333); background: var(--bg-primary, #0A0A0A); color: var(--text-primary, #FFF); font: 600 12px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; } .ds-status-dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--success-color, #4CAF50); } .ds-status > span:last-child { color: var(--text-secondary, #888); font-family: Consolas, Monaco, monospace; font-variant-numeric: tabular-nums; }"
     },
     {
-      "name": "Persistent Model Error",
+      "name": "Persistent Model Recovery",
       "kind": "custom",
-      "description": "An inline recovery message that remains beside the affected model until resolved.",
-      "html": "<div class=\"ds-error\" role=\"alert\"><strong>Could not load remembered pin</strong><span>Free GTT capacity or unpin another model, then retry.</span><button>Retry load</button></div>",
+      "description": "An inline recovery message that remains beside the affected model through grouped-startup rollback or cleanup until resolved.",
+      "html": "<div class=\"ds-error\" role=\"alert\"><strong>Startup cleanup required</strong><span>A model process may still hold resources. Retry cleanup before loading conflicting models.</span><button>Retry cleanup</button></div>",
       "css": ".ds-error { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; max-width: 520px; padding: 12px 16px; border: 1px solid var(--error-color, #F44336); border-radius: 8px; background: var(--bg-primary, #FFF); color: var(--text-primary, #000); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; } .ds-error strong { font-size: 13px; } .ds-error span { grid-column: 1; color: var(--toast-error-text, #B91C1C); font-size: 12px; line-height: 1.4; } .ds-error button { grid-column: 2; grid-row: 1 / span 2; align-self: center; border: 0; border-radius: 6px; background: var(--error-color, #F44336); color: #000; padding: 8px 12px; font-weight: 600; cursor: pointer; } .ds-error button:hover { background: #E43A32; } .ds-error button:focus-visible { outline: 2px solid var(--text-link, #1976D2); outline-offset: 2px; } .ds-error button:disabled { cursor: wait; opacity: .55; }"
     },
     {
