@@ -255,6 +255,22 @@ _Avoid_: Treating every signal as device-wide headroom, blindly adding resident 
 The behavior currently available for one residency operation and affected domain set after combining its capability level with the live health and freshness of required signals: capacity-aware automation, the declared conservative fallback, or refusal.
 _Avoid_: Treating a validated capability level as proof that its sensors are currently available, fresh, or trustworthy.
 
+**Configured residency intent**:
+The typed server policy requested for one operation, recorded with source `fixed_policy`, `default`, `operator`, or `migration`. Admission and recovery use fixed intents; pressure and startup use the accepted public settings.
+_Avoid_: Copying raw configuration keys into explanations or using configured intent as proof that automation is currently available.
+
+**Residency authority root**:
+The validated, atomically published generation that makes one residency configuration, pin-preference, or migration state effective. Prepared journal entries remain unpublished until their complete source vector commits.
+_Avoid_: Reading staged files as effective state, silently substituting defaults when no valid root exists, or letting a degraded prior root authorize new dependent work.
+
+**Residency explanation revision**:
+An immutable, bounded projection committed with an authoritative lifecycle transition. It supplies the current operation phase, outcome, reasons, capability, effective mode, evidence, actions, and retention state to APIs and logs.
+_Avoid_: Rebuilding policy in a client, treating an explanation as action authority, or publishing a lifecycle transition without its matching revision.
+
+**Residency status capability**:
+A bounded bearer capability issued independently for one operation, credential principal, caller/request scope, endpoint, and compact-status audience. It expires after 24 hours or the operation's earlier detail expiry, can be revoked by the administrator, principal, or subject lifecycle, and persists only as signed scope metadata plus a hash.
+_Avoid_: Storing bearer plaintext, reusing one issuance across callers or operations, accepting it after revocation or detail tombstoning, or treating status access as mutation authority.
+
 **Residency plan**:
 The server-owned decision and outcome for one admission, measured-pressure, NPU-conflict, or load-retry trigger, including its constraint snapshot and complete ordered action set.
 _Avoid_: Treating a sequence of opportunistic per-model choices as one atomic plan.
@@ -278,6 +294,10 @@ _Avoid_: Using suspension for uncertain ownership, effects, or release; those co
 **Quarantined residency**:
 An ambiguous backend or resource state that is not routable and conservatively retains every plausible constraint claim until cleanup verifies release.
 _Avoid_: Crediting memory, count, or compatibility capacity merely because an unload or rollback returned an uncertain result, or reactivating quarantine instead of releasing it.
+
+**Artifact quarantine record**:
+A durable non-operation authority that owns identity and artifact-writer fences, maximum plausible state, and one immutable recovery intent after an artifact or model-identity effect becomes ambiguous. Only its origin-specific clear row can release those fences.
+_Avoid_: Expiring ambiguous artifact authority, clearing it from a generic cleanup success, or treating its status projection as the authority itself.
 
 **Backend recovery authority**:
 A platform/backend guarantee established before subprocess spawn that lets `lemond` recover ownership safely after interruption. A launch uses exactly one reviewed mode: hereditary containment that covers every future resource-owning descendant, or durable membership that externally prevents descendant creation and resource acquisition until each owner is journaled and atomically bound. Both modes retain ownership evidence until complete release is verified.
@@ -403,12 +423,16 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - A **residency memory domain** is the capacity and pressure boundary for model residency. Hatchery's **GTT/shared GPU memory** is one such domain; its **host-memory safety floor** constrains the same physical system memory without becoming model-footprint accounting or another capacity pool.
 - A **residency plan** must satisfy every **residency constraint**. Reclaiming one shared allocation may improve both GTT headroom and the host floor without creating two independently reclaimable allocations.
 - A **residency capability profile** records evidence per operation and domain set; the **effective residency mode** for each cell also depends on the current health of that operation's required signals.
+- **Configured residency intent** records requested policy; the **effective residency mode** records the concrete behavior currently authorized. A catalog fallback is a concrete mode plus a stable rule identifier, never a bare mode named `fallback`.
+- A **residency authority root** makes canonical configuration or pin preference effective. Its journals and migrations publish through generation-bound transactions; absent or degraded authority fails closed for dependent work.
 - A **residency completeness manifest** covers every required footprint and ordinary or lifecycle claim. Its **footprint confidence class** comes from reviewed analytic, enforced, or calibration evidence and never replaces whole-claim completeness.
 - A **residency admission baseline** composes scoped observations with ledger claims. External applications consume available capacity but never become Lemonade ownership or cleanup targets.
 - A **residency plan reservation** atomically acquires every **residency constraint claim** and action lease. Verified outcomes convert those claims to committed occupancy or release them; ambiguous outcomes transfer them to **quarantined residency**.
 - A **pressure coordinator epoch** serializes overlapping pressure planning and resident-use admission. A **resident-use lease** records actual use and determines when a resident becomes idle for reclamation ordering.
 - Every backend spawn requires a **backend recovery authority**. Desired residency remains in recipe options; transient ownership metadata exists only to identify and safely clean up runtime resources after interruption.
 - A new `lemond` owner crosses the **daemon recovery barrier** before model lifecycle becomes ready. Surviving resources enter **quarantined residency** until ownership and release are verified.
+- Every authoritative lifecycle transition publishes one **residency explanation revision**. A **residency status capability** reveals only that operation's compact status, while lifecycle journals and claim ledgers remain authoritative.
+- Ambiguous model-artifact or identity effects transfer into an **artifact quarantine record**. Cleanup attempts may report outcomes, but only the record's closed clear table releases its identity and writer fences.
 - Loaded-model categories control per-type LRU slots; **NPU exclusivity** controls cross-type NPU conflicts without overriding pins or in-use protection.
 - **OmniRouter** uses **Collections** and **tool definitions** to expose multi-modal endpoints through the standard tool-calling loop.
 - **Fork-local changes** target **fork origin** unless the user declares an **upstream contribution exception**.
