@@ -229,7 +229,7 @@ _Avoid_: Reserving only familiar memory or compatibility constraints while leavi
 
 **Residency capability level**:
 The evidence-backed status of one residency operation for a platform, backend, and affected domain set. **Validated** means end-to-end physical tests of that operation; **modeled** means primary-evidence architecture and signals without full physical validation; **fallback-only** means an explicit safe fallback without full capacity automation; **unsupported** means no safe residency behavior.
-_Avoid_: Calling design coverage validation or implying that fallback-only behavior provides capacity-aware automation.
+_Avoid_: Calling design coverage validation, implying that fallback-only behavior provides capacity-aware automation, or treating a modeled pressure-reclamation cell as authority for a destructive automatic action.
 
 **Residency capability profile**:
 The collection of per-operation capability levels for a platform and backend, including at least admission and measured-pressure reclamation. A combination-wide label may summarize the profile for display but is not a policy input.
@@ -240,8 +240,12 @@ The server-built inventory of every footprint and ordinary constraint-claim fami
 _Avoid_: Treating an unobserved family as absent or letting a complete memory estimate substitute for count, compatibility, ownership, or action-lease completeness.
 
 **Footprint confidence class**:
-The server-computed assurance that a predicted residency effect has a conservative bound suitable for a particular operation. `enforced_complete` uses an external mechanism that prevents every effect from exceeding its complete envelope. `validated_predictor` uses reviewed component derivations and a residual envelope physically validated for the catalog cell. `calibrated_instance` is a reviewed exact-fingerprint bound restricted to explicitly requested, isolated validation or discovery. `incomplete` lacks a mandatory bound; `unknown` lacks trustworthy applicability, placement, logical grouping, or total effects.
-_Avoid_: Trusting an adapter-supplied label, applying a generic model-size percentage, generalizing an exact-instance calibration, or treating `incomplete` or `unknown` as ordinary admission authority.
+The assurance assigned by a reviewed server-owned catalog revision that a complete predicted residency manifest has a conservative bound suitable for a particular operation. `enforced_complete` is supported by an external mechanism that prevents every effect from exceeding its complete envelope. `validated_predictor` is supported by reviewed component derivations and a residual envelope physically validated for the closed catalog-cell predicate. `calibrated_instance` is a reviewed exact-fingerprint bound restricted to explicitly requested, isolated validation or discovery. `incomplete` lacks a mandatory bound; `unknown` lacks trustworthy applicability, placement, logical grouping, or total effects.
+_Avoid_: Letting an estimator or enforcement mechanism assign its own class, applying a generic model-size percentage, generalizing an exact-instance calibration, or treating `incomplete` or `unknown` as ordinary admission authority.
+
+**Residency predictor rule**:
+A content-addressed analytic derivation, complete lifetime-component model, applicability predicate, and residual evidence that produces one footprint bound for server-owned catalog review. A matching validated rule may size a previously unprofiled model inside its closed predicate; individual model profiling is optional evidence for a later reviewed revision, not a prerequisite for every ordinary admission.
+_Avoid_: Calling the source-derived allocation plan an exact physical lifetime footprint, absorbing a missing major component into the residual, trusting a backend release label without its effective dependency provenance, or using admission-time backend/GPU effects to discover the bound.
 
 **Residency capability catalog**:
 A reviewed, versioned, content-addressed set of per-operation rules that maps an attested platform, backend, topology, configuration, recovery mechanism, and evidence set to one capability level, effective prerequisites, and fallback or refusal.
@@ -253,7 +257,7 @@ _Avoid_: Treating every signal as device-wide headroom, blindly adding resident 
 
 **Effective residency mode**:
 The behavior currently available for one residency operation and affected domain set after combining its capability level with the live health and freshness of required signals: capacity-aware automation, the declared conservative fallback, or refusal.
-_Avoid_: Treating a validated capability level as proof that its sensors are currently available, fresh, or trustworthy.
+_Avoid_: Treating a validated capability level as proof that its sensors are currently available, fresh, or trustworthy, or exposing a bare mode named `fallback` instead of the cataloged concrete mode and rule identifier.
 
 **Configured residency intent**:
 The typed server policy requested for one operation, recorded with source `fixed_policy`, `default`, `operator`, or `migration`. Admission and recovery use fixed intents; pressure and startup use the accepted public settings.
