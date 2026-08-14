@@ -171,6 +171,10 @@ def render_inventory(projection: dict[str, Any]) -> str:
             "| Support baseline | "
             f"{render_code(projection['source_support_baseline'])} |"
         ),
+        *(
+            f"| C++ source tree {render_code(path)} | {render_code(tree_id)} |"
+            for path, tree_id in sorted(projection["source_tree_objects"].items())
+        ),
         "",
         "### Backend variants",
         "",

@@ -24,14 +24,15 @@ Use `.agents/skills/working-with-upstream-refs/SKILL.md` for current commands an
 
 ## Accepted Residency Research
 
-Issue 35's portable support inventory is frozen against upstream `main` commit `d2a4f85dbf44b7671319ed0010ad936a71dedf15`. Refresh the upstream refs before using the inventory for implementation; a support-surface change requires a new matrix revision rather than silent inheritance.
+Issue 35's portable support inventory is frozen against upstream `main` commit `a505bbc702cc1fcd44ef73c44defabc98c36d505`. That commit is the research/source-closure baseline, not the runtime implementation base. Before runtime work, verify and reconcile the latest stable upstream release separately, then re-scout changed seams. A support-surface change requires a new matrix revision rather than silent inheritance.
 
-- `docs/research/portable-residency-capability-inventory.json`: authoritative normalized upstream support inventory, with atomic backend variants, finite platform predicates, applicability and exclusion edges, operation/suite references, and source-blob bindings. Validate it with `tools/validate_residency_capability_inventory.py`.
+- `docs/research/portable-residency-capability-inventory.json`: authoritative normalized upstream support inventory, with atomic backend variants, finite platform predicates, applicability and exclusion edges, operation/suite references, and source object bindings. Validate it with `tools/validate_residency_capability_inventory.py`.
 - `docs/research/portable-residency-capability-matrix.md`: human-facing domain, fallback, recovery-authority, and promotion contract plus a generated projection of the normalized inventory. It distinguishes exact runtime cells from evidence-only compatibility contracts and keeps evidence ceiling, accepted capability level, delivery state, and live effective mode separate.
 - `docs/research/hatchery-residency-validation-profile.md`: first physical reference profile and cross-cutting validation contract for Hatchery.
 - `docs/research/hatchery-campaign-parameters.md`: accepted Hatchery `gfx1151` and `llamacpp:rocm` thresholds, timing, workload, liveness, evidence, and promotion overlay.
 - `docs/research/profile-free-residency-estimation.md`: closed v1 Hatchery llama.cpp/ROCm predictor design and applicability boundary.
 - `docs/research/upstream-validation-data-conventions.md`: upstream-adjacent packaging precedent and the accepted fork release/evidence split.
+- `plan/architecture-portable-residency-1.md`: decision-complete, dependency-ordered implementation and qualification handoff. It keeps partial work non-authorizing and names the safe checkpoint, fallback, and validation boundary for each phase.
 
 These documents define accepted design and evidence gates. They do not claim that the runtime implements a cell or that physical validation has occurred.
 
@@ -80,7 +81,7 @@ These documents define accepted design and evidence gates. They do not claim tha
 - `upstream/main:src/cpp/server/eviction_engine.cpp` and `upstream/main:src/cpp/include/lemon/eviction_engine.h`: upstream automatic idle, soft-reclamation, and memory-pressure policy. These paths are not present at the checked-out fork ref.
 - `upstream/main:src/cpp/server/system_info.cpp` and `upstream/main:src/cpp/include/lemon/system_info.h`: upstream platform memory and accelerator-pressure signals, including AMD APU GTT accounting.
 - `upstream/main:src/cpp/server/recipe_options.cpp` and `upstream/main:src/cpp/include/lemon/recipe_options.h`: upstream per-model load preferences, including the saved `pinned` option. The checked-out fork stores durable pins separately in `pinned_models`.
-- `src/cpp/server/model_manager.cpp` and `src/cpp/include/lemon/model_manager.h`: registry loading, user models, extra models, path resolution, downloads.
+- `src/cpp/server/model_manager.cpp` and `src/cpp/include/lemon/model_manager.h`: checked-out-fork registry loading, user models, extra models, path resolution, and downloads. `upstream/main:src/cpp/server/model_manager.cpp`, `upstream/main:src/cpp/include/lemon/registry_files.h`, and the backend-ops dispatch files are the source route for artifact-aware main/auxiliary selection and reuse; those newer paths are not present at the checked-out fork ref.
 - `src/cpp/include/lemon/wrapped_server.h`: backend subprocess abstraction.
 - `src/cpp/include/lemon/server_capabilities.h`: completion, embedding, reranking, audio, image, TTS, and slots capability interfaces.
 - `src/cpp/include/lemon/model_types.h`: model type and device type classification.

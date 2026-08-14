@@ -60,12 +60,16 @@ class FrozenSourceClosure:
     recipe_model_types: dict[str, set[str]]
     descriptor_recipes: set[str]
     collection_recipes: set[str]
+    tree_objects: dict[str, str]
 
 
-def git_blob(repo: Path, commit: str, path: str) -> str:
+def git_source_object_id(repo: Path, commit: str, path: str, expected_type: str) -> str:
+    """Resolve one immutable source path and require its exact Git object type."""
+
+    object_spec = f"{commit}:{path}"
     try:
         result = subprocess.run(
-            ["git", "rev-parse", f"{commit}:{path}"],
+            ["git", "rev-parse", object_spec],
             cwd=repo,
             check=True,
             capture_output=True,
@@ -73,15 +77,33 @@ def git_blob(repo: Path, commit: str, path: str) -> str:
         )
     except subprocess.CalledProcessError as error:
         fail(
-            f"cannot resolve frozen source blob {path}; "
+            f"cannot resolve frozen source {expected_type} {path}; "
             f"git stderr: {_bounded_git_stderr(error)}"
+        )
+    object_type = subprocess.run(
+        ["git", "cat-file", "-t", object_spec],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if object_type.returncode != 0:
+        fail(
+            f"cannot inspect frozen source object {path}; "
+            f"git stderr: {_bounded_git_stderr(object_type)}"
+        )
+    actual_type = object_type.stdout.strip()
+    if actual_type != expected_type:
+        fail(
+            f"frozen source object {path} must be a Git {expected_type}; "
+            f"got {actual_type or 'unknown'}"
         )
     return result.stdout.strip()
 
 
 def require_git_commit(repo: Path, commit: str) -> None:
     result = subprocess.run(
-        ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
+        ["git", "cat-file", "-t", commit],
         cwd=repo,
         check=False,
         capture_output=True,
@@ -93,9 +115,16 @@ def require_git_commit(repo: Path, commit: str) -> None:
             "run `git fetch --no-tags --depth=1 "
             f"https://github.com/lemonade-sdk/lemonade.git {commit}` and retry"
         )
+    actual_type = result.stdout.strip()
+    if actual_type != "commit":
+        fail(
+            "source support baseline must be a Git commit; "
+            f"got {actual_type or 'unknown'}"
+        )
 
 
 def git_text(repo: Path, commit: str, path: str) -> str:
+    git_source_object_id(repo, commit, path, "blob")
     try:
         result = subprocess.run(
             ["git", "show", f"{commit}:{path}"],
@@ -110,6 +139,30 @@ def git_text(repo: Path, commit: str, path: str) -> str:
             f"git stderr: {_bounded_git_stderr(error)}"
         )
     return result.stdout
+
+
+def git_grep_paths(repo: Path, commit: str, pattern: str, pathspec: str) -> set[str]:
+    """Return paths whose immutable source text contains one fixed string."""
+
+    result = subprocess.run(
+        ["git", "grep", "--no-color", "-l", "-F", pattern, commit, "--", pathspec],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode not in (0, 1):
+        fail(
+            f"cannot derive frozen source occurrences for {pattern}; "
+            f"git stderr: {_bounded_git_stderr(result)}"
+        )
+    prefix = f"{commit}:"
+    paths: set[str] = set()
+    for line in result.stdout.splitlines():
+        if not line.startswith(prefix) or len(line) == len(prefix):
+            fail(f"git grep returned an invalid frozen source path for {pattern}")
+        paths.add(line[len(prefix) :])
+    return paths
 
 
 def strip_cmake_comment(line: str) -> str:
@@ -795,7 +848,7 @@ def validate_source_blobs(
     )
     if set(source_blobs) != expected_paths:
         fail(
-            "source_file_blobs must exactly cover frozen descriptor inputs; "
+            "source_file_blobs must exactly cover frozen source inputs; "
             f"missing={sorted(expected_paths - set(source_blobs))}, "
             f"extra={sorted(set(source_blobs) - expected_paths)}"
         )
@@ -805,12 +858,44 @@ def validate_source_blobs(
         )
         if re.fullmatch(r"[0-9a-f]{40}", expected_blob) is None:
             fail(f"source_file_blobs[{source_path}] must be a full lowercase blob id")
-        actual_blob = git_blob(repo, baseline, source_path)
+        actual_blob = git_source_object_id(repo, baseline, source_path, "blob")
         if actual_blob != expected_blob:
             fail(
                 f"source blob mismatch for {source_path}: "
                 f"expected {expected_blob}, got {actual_blob}"
             )
+
+
+def validate_source_tree_objects(
+    repo: Path, baseline: str, inventory: dict[str, Any]
+) -> dict[str, str]:
+    """Bind the full C++ source tree so delegated selector helpers cannot drift."""
+
+    tree_objects = require_mapping(
+        inventory.get("source_tree_objects"), "source_tree_objects"
+    )
+    required_paths = {"src/cpp"}
+    if set(tree_objects) != required_paths:
+        fail(
+            "source_tree_objects must exactly cover the C++ source closure; "
+            f"missing={sorted(required_paths - set(tree_objects))}, "
+            f"extra={sorted(set(tree_objects) - required_paths)}"
+        )
+    validated: dict[str, str] = {}
+    for source_path, expected_tree_value in tree_objects.items():
+        expected_tree = require_string(
+            expected_tree_value, f"source_tree_objects[{source_path}]"
+        )
+        if re.fullmatch(r"[0-9a-f]{40}", expected_tree) is None:
+            fail(f"source_tree_objects[{source_path}] must be a full lowercase tree id")
+        actual_tree = git_source_object_id(repo, baseline, source_path, "tree")
+        if actual_tree != expected_tree:
+            fail(
+                f"source tree mismatch for {source_path}: "
+                f"expected {expected_tree}, got {actual_tree}"
+            )
+        validated[source_path] = expected_tree
+    return validated
 
 
 def validate_source_closure(
@@ -826,23 +911,41 @@ def validate_source_closure(
     descriptor_paths = {
         f"src/cpp/include/lemon/backends/{stem}/{stem}.h" for _, stem in backends
     }
-    expected_paths = descriptor_paths | {
-        "CMakeLists.txt",
-        "src/cpp/include/lemon/backends/backend_descriptor.h",
-        "src/cpp/include/lemon/recipe_backend_def.h",
-        "src/cpp/include/lemon/model_types.h",
-        "src/cpp/include/lemon/backends/fastflowlm/fastflowlm_server.h",
-        "src/cpp/server/backends/backend_descriptor_registry.cpp",
-        "src/cpp/server/backends/backend_descriptors_generated.h.in",
-        "src/cpp/server/backends/fastflowlm/fastflowlm_server.cpp",
-        "src/cpp/server/model_manager.cpp",
-        "src/cpp/server/router.cpp",
-        "src/cpp/server/system_info.cpp",
-        "src/cpp/resources/backend_versions.json",
-        "src/cpp/resources/server_models.json",
-        "docs/guide/configuration/multi-model.md",
-    }
+    checkpoint_selector_paths = git_grep_paths(
+        repo, baseline, "select_checkpoint_files", "src/cpp"
+    )
+    expected_paths = (
+        descriptor_paths
+        | checkpoint_selector_paths
+        | {
+            "CMakeLists.txt",
+            "src/cpp/include/lemon/backends/backend_descriptor.h",
+            "src/cpp/include/lemon/backends/backend_ops.h",
+            "src/cpp/include/lemon/backends/backend_registry.h",
+            "src/cpp/include/lemon/registry_files.h",
+            "src/cpp/include/lemon/gguf_reader.h",
+            "src/cpp/include/lemon/gguf_shard_utils.h",
+            "src/cpp/include/lemon/hf_variants.h",
+            "src/cpp/include/lemon/recipe_backend_def.h",
+            "src/cpp/include/lemon/model_types.h",
+            "src/cpp/include/lemon/backends/fastflowlm/fastflowlm_server.h",
+            "src/cpp/server/backends/backend_factories_generated.h.in",
+            "src/cpp/server/backends/backend_ops.cpp",
+            "src/cpp/server/backends/backend_registry.cpp",
+            "src/cpp/server/backends/fastflowlm/fastflowlm_server.cpp",
+            "src/cpp/server/hf_variants.cpp",
+            "src/cpp/server/backends/backend_descriptor_registry.cpp",
+            "src/cpp/server/backends/backend_descriptors_generated.h.in",
+            "src/cpp/server/model_manager.cpp",
+            "src/cpp/server/router.cpp",
+            "src/cpp/server/system_info.cpp",
+            "src/cpp/resources/backend_versions.json",
+            "src/cpp/resources/server_models.json",
+            "docs/guide/configuration/multi-model.md",
+        }
+    )
     validate_source_blobs(repo, baseline, inventory, expected_paths)
+    tree_objects = validate_source_tree_objects(repo, baseline, inventory)
 
     source_support: set[SourceSupportKey] = set()
     empty_support_recipes: set[str] = set()
@@ -879,4 +982,5 @@ def validate_source_closure(
         recipe_model_types=recipe_model_types,
         descriptor_recipes=set(descriptor_labels),
         collection_recipes=collection_recipes,
+        tree_objects=tree_objects,
     )

@@ -39,11 +39,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 https://github.com/lemonade-sdk/lemonade.git d2a4f85dbf44b7671319ed0010ad936a71dedf15
-          test "$(git rev-parse --verify 'FETCH_HEAD^{commit}')" = d2a4f85dbf44b7671319ed0010ad936a71dedf15
-          test "$(git cat-file -t 'd2a4f85dbf44b7671319ed0010ad936a71dedf15^{commit}')" = commit
-          test "$(git cat-file -t 'd2a4f85dbf44b7671319ed0010ad936a71dedf15:src/cpp/include/lemon/model_types.h')" = blob
-          test "$(git rev-parse 'd2a4f85dbf44b7671319ed0010ad936a71dedf15:src/cpp/include/lemon/model_types.h')" = 3084d17ec13564c506e09e12433c015bfb0f1ab7
+          git fetch --no-tags --depth=1 https://github.com/lemonade-sdk/lemonade.git a505bbc702cc1fcd44ef73c44defabc98c36d505
+          test "$(git rev-parse --verify 'FETCH_HEAD^{commit}')" = a505bbc702cc1fcd44ef73c44defabc98c36d505
+          test "$(git cat-file -t 'a505bbc702cc1fcd44ef73c44defabc98c36d505')" = commit
+          test "$(git cat-file -t 'a505bbc702cc1fcd44ef73c44defabc98c36d505:src/cpp/include/lemon/model_types.h')" = blob
+          test "$(git rev-parse 'a505bbc702cc1fcd44ef73c44defabc98c36d505:src/cpp/include/lemon/model_types.h')" = 3084d17ec13564c506e09e12433c015bfb0f1ab7
       - name: Validate portable residency inventory
         run: python tools/validate_residency_capability_inventory.py
       - name: Test portable residency inventory validator
