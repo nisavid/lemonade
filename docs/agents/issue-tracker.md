@@ -66,13 +66,13 @@ List an issue's blockers with:
 gh api --paginate repos/nisavid/lemonade/issues/<issue-number>/dependencies/blocked_by
 ```
 
-An open child is on the frontier only when it is unassigned and its `blocked_by` response is empty. Claim a frontier ticket before working it:
+An open child is on the frontier only when it is unassigned and has no open blocker in its `blocked_by` response. Closed dependencies remain useful graph history but do not block the frontier. Claim a frontier ticket before working it:
 
 ```bash
 gh issue edit <ticket-number> --repo nisavid/lemonade --add-assignee @me
 ```
 
-Resolve one non-research ticket per session. Post the answer as a resolution comment, close the ticket, and append one linked gist to the map's **Decisions so far** section. Refer to maps and tickets by linked title in human-facing prose; numbers are only operational identifiers.
+Resolve one non-research ticket per session. Post the answer as a resolution comment, close the ticket, and append one linked summary bullet to the map's **Decisions so far** section. Refer to maps and tickets by linked title in human-facing prose; numbers are only operational identifiers.
 
 GitHub documents the underlying [sub-issue](https://docs.github.com/en/rest/issues/sub-issues) and [issue-dependency](https://docs.github.com/en/rest/issues/issue-dependencies) APIs.
 

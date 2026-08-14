@@ -24,6 +24,31 @@ jobs:
       - name: Run app regression tests
         run: node test/app/run-app-regression-tests.cjs
 
+  portable-residency-inventory:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-portable-residency-inventory-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+      - name: Fetch pinned upstream validation source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 https://github.com/lemonade-sdk/lemonade.git d2a4f85dbf44b7671319ed0010ad936a71dedf15
+          test "$(git rev-parse --verify 'FETCH_HEAD^{commit}')" = d2a4f85dbf44b7671319ed0010ad936a71dedf15
+          test "$(git cat-file -t 'd2a4f85dbf44b7671319ed0010ad936a71dedf15^{commit}')" = commit
+          test "$(git cat-file -t 'd2a4f85dbf44b7671319ed0010ad936a71dedf15:src/cpp/include/lemon/model_types.h')" = blob
+          test "$(git rev-parse 'd2a4f85dbf44b7671319ed0010ad936a71dedf15:src/cpp/include/lemon/model_types.h')" = 3084d17ec13564c506e09e12433c015bfb0f1ab7
+      - name: Validate portable residency inventory
+        run: python tools/validate_residency_capability_inventory.py
+      - name: Test portable residency inventory validator
+        run: python -m unittest discover -s test -p 'test_residency_capability_inventory_*.py'
+
   markdown-link-check:
     runs-on: ubuntu-latest
     concurrency:

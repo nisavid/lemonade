@@ -22,6 +22,19 @@ Prefer live upstream sources for time-sensitive details such as latest releases,
 
 Use `.agents/skills/working-with-upstream-refs/SKILL.md` for current commands and branch-role rules before comparing, syncing, or investigating upstream commits.
 
+## Accepted Residency Research
+
+Issue 35's portable support inventory is frozen against upstream `main` commit `d2a4f85dbf44b7671319ed0010ad936a71dedf15`. Refresh the upstream refs before using the inventory for implementation; a support-surface change requires a new matrix revision rather than silent inheritance.
+
+- `docs/research/portable-residency-capability-inventory.json`: authoritative normalized upstream support inventory, with atomic backend variants, finite platform predicates, applicability and exclusion edges, operation/suite references, and source-blob bindings. Validate it with `tools/validate_residency_capability_inventory.py`.
+- `docs/research/portable-residency-capability-matrix.md`: human-facing domain, fallback, recovery-authority, and promotion contract plus a generated projection of the normalized inventory. It distinguishes exact runtime cells from evidence-only compatibility contracts and keeps evidence ceiling, accepted capability level, delivery state, and live effective mode separate.
+- `docs/research/hatchery-residency-validation-profile.md`: first physical reference profile and cross-cutting validation contract for Hatchery.
+- `docs/research/hatchery-campaign-parameters.md`: accepted Hatchery `gfx1151` and `llamacpp:rocm` thresholds, timing, workload, liveness, evidence, and promotion overlay.
+- `docs/research/profile-free-residency-estimation.md`: closed v1 Hatchery llama.cpp/ROCm predictor design and applicability boundary.
+- `docs/research/upstream-validation-data-conventions.md`: upstream-adjacent packaging precedent and the accepted fork release/evidence split.
+
+These documents define accepted design and evidence gates. They do not claim that the runtime implements a cell or that physical validation has occurred.
+
 ## Local Source Routes
 
 ### Product shape and philosophy

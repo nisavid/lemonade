@@ -1,21 +1,22 @@
 # Upstream validation-data conventions
 
-This note answers the Issue 35 question of how Lemonade should package, distribute,
-and extend model/hardware residency profiles. It is based on upstream `main` at
+Status: accepted Issue [#35](https://github.com/nisavid/lemonade/issues/35) catalog and evidence-distribution policy; not a runtime collection or remote-update implementation.
+
+This note defines how Lemonade packages, distributes, and extends model and
+hardware residency profiles under the accepted Issue 35 contract. It is based on upstream `main` at
 [`23c7ede63b26cf1d083c1e64948607b8a0cd24aa`](https://github.com/lemonade-sdk/lemonade/tree/23c7ede63b26cf1d083c1e64948607b8a0cd24aa)
 and the latest published upstream release available on 2026-08-13,
 [`v11.5.2`](https://github.com/lemonade-sdk/lemonade/releases/tag/v11.5.2).
 
 ## Conclusion
 
-The fork should bundle the small, reviewed, runtime-consumed residency profile
+The fork bundles the small, reviewed, runtime-consumed residency profile
 catalog with each Lemonade release. This matches Lemonade's established pattern
 for authoritative JSON resources and its stated Auto-Tune direction. Large
-sanitized campaign evidence should be separate, content-addressed assets attached
+sanitized campaign evidence is published as separate, content-addressed assets attached
 to the same fork release initially, with compact manifests and digests retained
-in Git. Runtime-collected observations should remain local and report-only in the
-first version; their contribution, curation, and redistribution can be designed
-later.
+in Git. Runtime-collected observations remain local and report-only in the first
+version. Their contribution, curation, and redistribution are follow-up work.
 
 The witness is not a profile-data store, upload service, or distribution layer.
 It is a small anti-rollback and liveness authority for the newest accepted catalog
@@ -58,7 +59,7 @@ the [top-level JSON producer](https://github.com/lemonade-sdk/lemonade/blob/23c7
 the [per-result shape](https://github.com/lemonade-sdk/lemonade/blob/23c7ede63b26cf1d083c1e64948607b8a0cd24aa/src/cpp/cli/bench_output.cpp#L167-L249),
 and the [hardware vocabulary](https://github.com/lemonade-sdk/lemonade/blob/23c7ede63b26cf1d083c1e64948607b8a0cd24aa/src/cpp/cli/bench_sysinfo.cpp#L27-L140).
 
-The residency harness should reuse that vocabulary and output style where the
+The residency harness reuses that vocabulary and output style where the
 semantics agree. The existing benchmark format is not sufficient by itself for
 capacity authority: it lacks the full model/backend/runtime dependency identity,
 schema-major contract, canonical byte-unit bounds, time-series pressure evidence,
@@ -125,7 +126,7 @@ release assets. The model-registry cache records immutable Hugging Face commit
 SHAs or a normalized-tree fingerprint when the provider offers no immutable
 snapshot identifier; see the [cache provenance contract](https://github.com/lemonade-sdk/lemonade/blob/23c7ede63b26cf1d083c1e64948607b8a0cd24aa/docs/dev/model-registries.md#L32-L50).
 
-These conventions should be reused for profile schema evolution, evidence asset
+These conventions govern profile schema evolution, evidence asset
 digests, and source dependency closure.
 
 ### Release assets
@@ -136,7 +137,7 @@ The fork had no published GitHub releases when checked on 2026-08-13. Attaching
 profile manifests and evidence archives to fork releases is compatible with the
 existing release mechanism, but it will be a deliberate fork-local convention.
 
-## Recommended Issue 35 split
+## Accepted Issue 35 split
 
 | Data | Initial home | Runtime authority |
 | --- | --- | --- |
@@ -147,16 +148,20 @@ existing release mechanism, but it will be a deliberate fork-local convention.
 | Runtime observations | Local cache or explicit export only | Report-only in the first version; cannot mutate an active bound |
 | Witness checkpoint | Separate append-only service/key | Latest-sequence and anti-rollback authority only |
 
-The shipped catalog should use a dedicated name such as
+The shipped catalog uses a dedicated name such as
 `residency_profiles.json` rather than overloading `server_models.json` or
-`architecture_defaults.json`. It should carry a required schema major, catalog
-revision, exact cell/dependency identity, modeled or validated state, operational
-bounds, evidence-manifest digest, and expiry. A canonical schema hash and
-conformance fixtures should protect released meanings.
+`architecture_defaults.json`. It carries a required schema major, catalog
+revision, exact cell/dependency identity, `evidence_ceiling`, accepted
+`capability_level=unsupported|fallback_only|modeled|validated`,
+`delivery_state=absent|implemented_unverified|release_verified`, operational
+bounds, evidence-manifest digest, and expiry. Live signal, evidence-liveness,
+and recovery state remain runtime inputs; the immutable catalog carries their
+prerequisites and concrete fallback contract rather than a mutable live value.
+A canonical schema hash and conformance fixtures protect released meanings.
 
 Putting the large evidence archive next to the fork's normal release assets is a
 reasonable first version and matches the operator's desired discovery path. The
-archive should remain a separate asset rather than being embedded in every MSI,
+archive remains a separate asset rather than being embedded in every MSI,
 package, or embeddable archive: the server needs the compact reviewed catalog,
 while raw traces increase download size and may require narrower disclosure. If
 campaign cadence later diverges from product releases, a dedicated evidence-only
@@ -164,8 +169,8 @@ release series can preserve the same manifest and digest contract without
 changing runtime semantics.
 
 Runtime-collected extensions are intentionally deferred. The first version may
-export observations in a bench-like JSON envelope, but it should neither upload
-them automatically nor merge them into the accepted catalog. A future iteration
+export observations in a bench-like JSON envelope, but it neither uploads them
+automatically nor merges them into the accepted catalog. A future iteration
 can design submission, deduplication, redaction, outlier handling, review,
 promotion, and redistribution, following the Auto-Tune roadmap's separation
 between capture, curation, and application.
