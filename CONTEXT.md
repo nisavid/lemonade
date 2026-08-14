@@ -228,11 +228,23 @@ A reservation or occupancy recorded in the server-owned constraint ledger. Claim
 _Avoid_: Reserving only familiar memory or compatibility constraints while leaving count or adapter-declared constraints available to competing plans.
 
 **Residency capability level**:
-The evidence-backed status of one residency operation for a platform, backend, and affected domain set. **Validated** means end-to-end physical tests of that operation; **modeled** means primary-evidence architecture and signals without full physical validation; **fallback-only** means an explicit safe fallback without full capacity automation; **unsupported** means no safe residency behavior.
+The evidence-backed status of one exact runtime cell or evidence-only compatibility contract. **Validated** means end-to-end physical tests of the runtime operation; **modeled** means primary-evidence architecture and every applicable signal or contract proof without full physical validation; **fallback-only** means a cataloged concrete fallback or refusal without full capacity automation; **unsupported** means no safe residency behavior. A compatibility contract never gains live authority merely from its level.
 _Avoid_: Calling design coverage validation, implying that fallback-only behavior provides capacity-aware automation, or treating a modeled pressure-reclamation cell as authority for a destructive automatic action.
 
+**Residency compatibility promotion contract**:
+An evidence-only identity over one frozen source baseline, exact source-derived cross-variant cases, coverage dimensions, `NPC` relation selector, enumerated relation constraints, evidence/gate sets, state, and fallback. It may justify only those enumerated relation constraints; it is not a runtime cell. Participant-local slot cardinality, ownership, protection, and recovery remain obligations of separate exact promotion units. The contract binds no hardware, process, claim, or recovery identity and grants no live action authority; physical qualification creates separate exact platform cells. Its `delivery_state` gates availability, so synthetic relation evidence cannot make an absent contract usable.
+_Avoid_: Inventing one cross-platform runtime selector for variants that do not coexist on the same supported platform, importing participant-local constraints into a relation proof, or treating synthetic compatibility evidence as capacity or displacement authority.
+
+**Residency evidence ceiling**:
+The strongest capability level that one frozen evidence program could justify for an exact runtime cell or evidence-only compatibility contract if every required gate passes. It is a campaign target, not the promotion unit's accepted capability level or current runtime authority.
+_Avoid_: Labeling a cell or contract modeled or validated merely because its planned evidence ceiling has that name.
+
+**Residency delivery state**:
+The implementation status of one complete runtime-cell or compatibility-contract unit: `absent`, `implemented_unverified`, or `release_verified`. Partial implementation remains `absent` for the complete unit; source presence alone never establishes its capability level, and evidence cannot make an absent unit available.
+_Avoid_: Treating accepted design, an upstream-adjacent mechanism, or passing synthetic tests as proof that the complete runtime behavior is delivered.
+
 **Residency capability profile**:
-The collection of per-operation capability levels for a platform and backend, including at least admission and measured-pressure reclamation. A combination-wide label may summarize the profile for display but is not a policy input.
+The collection of per-operation capability levels for a platform and backend, including admission and, where applicable, measured-pressure reclamation; a non-applicable operation remains explicit. A combination-wide label may summarize the profile for display but is not a policy input.
 _Avoid_: Assuming admission and external-pressure handling have the same signal availability or evidence.
 
 **Residency completeness manifest**:
@@ -251,13 +263,17 @@ _Avoid_: Calling the source-derived allocation plan an exact physical lifetime f
 A reviewed, versioned, content-addressed set of per-operation rules that maps an attested platform, backend, topology, configuration, recovery mechanism, and evidence set to one capability level, effective prerequisites, and fallback or refusal.
 _Avoid_: Letting a live adapter promote its own capability or reinterpreting an existing claim more permissively after a catalog change.
 
+**Residency evidence witness**:
+An independently administered append-only authority that checkpoints the newest accepted catalog and evidence-manifest digests and supplies bounded liveness evidence. It stores compact sequence, identity, digest, and signature metadata rather than profiles or traces.
+_Avoid_: Treating the witness as bulk evidence storage, runtime observation collection, profile fitting, curation, or redistribution.
+
 **Residency admission baseline**:
 A cataloged, operation-scoped composition of fresh capacity, usage, budget, process, backend, and ledger evidence into the current constraint state. Each observation declares its scope and covered allocation groups so the control plane can account for resident and external demand without omission or double counting.
 _Avoid_: Treating every signal as device-wide headroom, blindly adding resident claims to a device-wide usage counter, or claiming another application's demand as Lemonade-owned capacity.
 
 **Effective residency mode**:
-The behavior currently available for one residency operation and affected domain set after combining its capability level with the live health and freshness of required signals: capacity-aware automation, the declared conservative fallback, or refusal.
-_Avoid_: Treating a validated capability level as proof that its sensors are currently available, fresh, or trustworthy, or exposing a bare mode named `fallback` instead of the cataloged concrete mode and rule identifier.
+The behavior currently available for one residency operation and affected domain set after taking the conservative meet of configured intent, delivery state, accepted capability level, live signal health, evidence-liveness authority, and recovery readiness: capacity-aware automation, a declared concrete fallback, or refusal.
+_Avoid_: Treating a validated capability level as proof that implementation, sensors, evidence, or recovery are currently available and healthy, or exposing a bare mode named `fallback` instead of the cataloged concrete mode and rule identifier.
 
 **Configured residency intent**:
 The typed server policy requested for one operation, recorded with source `fixed_policy`, `default`, `operator`, or `migration`. Admission and recovery use fixed intents; pressure and startup use the accepted public settings.
@@ -328,7 +344,7 @@ The primary LLM inference recipe family for GGUF models across CPU, Vulkan, ROCm
 _Avoid_: Assuming llama.cpp itself downloads models at request time.
 
 **FastFlowLM**:
-The `flm` recipe family for NPU LLM, embedding, reranking, and audio paths.
+The `flm` recipe family for NPU LLM, embedding, and transcription deployment slots. Its LLM deployment also serves reranking; reranking is not a separate FLM model-type slot.
 _Avoid_: Applying non-FLM model download assumptions to FLM models.
 
 **RyzenAI**:

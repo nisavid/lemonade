@@ -1,14 +1,14 @@
 # Hatchery residency validation profile
 
-Status: research proposal for Issue [#35](https://github.com/nisavid/lemonade/issues/35), not accepted policy or proof of current implementation.
+Status: accepted Issue [#35](https://github.com/nisavid/lemonade/issues/35) validation contract; not proof of current implementation or physical validation.
 
 Date: 2026-08-12
 
-## Recommendation
+## Accepted Hatchery contract
 
-Use Hatchery as the first narrowly validated capability profile, with separate capability cells for predictive admission, measured-pressure reclamation, grouped startup admission, and lifecycle recovery. Validate `llamacpp` on the concrete GPU backend used for the fork's first implementation before expanding to other backends. Keep every untested backend/operation cell at `modeled`, `fallback-only`, or `unsupported`; do not infer a combination-wide `validated` label.
+Use Hatchery as the first narrowly validated capability profile, with separate capability cells for predictive admission, measured-pressure reclamation, grouped startup admission, and lifecycle recovery. Validate Hatchery `llamacpp:rocm` first, then qualify `llamacpp:vulkan` as a separate cell without making it block the first usable release. Keep every untested backend/operation cell at `modeled`, `fallback-only`, or `unsupported`; do not infer a combination-wide `validated` label.
 
-The first physical gate should combine:
+The first physical gate combines:
 
 1. Actual downloaded models spanning tiny through near-capacity footprints.
 2. Prospective high-context, multi-model, and near-boundary workloads.
@@ -16,7 +16,7 @@ The first physical gate should combine:
 4. Real external GPU and host-memory pressure from processes that Lemonade does not own.
 5. Barrier-controlled concurrency and crash injection, not timing-dependent race tests.
 
-No capability cell advances to `validated` unless its immutable evidence bundle passes every mandatory row for that operation, backend, affected domain set, and runtime fingerprint.
+No capability cell advances to `validated` unless its complete promotion-evidence index and every referenced immutable run and evidence bundle pass each mandatory row for that operation, backend, affected domain set, and runtime fingerprint.
 
 ## Accepted contract used as the oracle
 
@@ -48,7 +48,7 @@ The Linux amdgpu ABI exposes `mem_info_gtt_total` and `mem_info_gtt_used` in byt
 
 Linux defines `MemAvailable` as an estimate of memory available for starting new applications without swapping, accounting for reclaimable caches, slab, and zone watermarks. See [the `/proc/meminfo` documentation](https://docs.kernel.org/filesystems/proc.html#meminfo).
 
-Linux PSI reports system and cgroup memory-stall time. PSI is useful corroborating safety evidence, but this proposal does not make it an admission authority until a catalog rule defines its semantics and effect model. See [Pressure Stall Information](https://docs.kernel.org/accounting/psi.html).
+Linux PSI reports system and cgroup memory-stall time. PSI is useful corroborating safety evidence, but this contract does not make it an admission authority until a catalog rule defines its semantics and effect model. See [Pressure Stall Information](https://docs.kernel.org/accounting/psi.html).
 
 DRM fdinfo may expose per-client memory-region statistics. Where amdgpu provides complete, stable keys on Hatchery, they are useful attribution evidence; global sysfs remains the physical-domain observation. See [DRM client usage stats](https://docs.kernel.org/gpu/drm-usage-stats.html).
 
@@ -62,7 +62,7 @@ This source is evidence about upstream behavior, not a validation oracle for the
 
 The following live, read-only snapshot was captured on 2026-08-12. Record these fields again for every validation run; this snapshot must not authorize later runs by itself.
 
-The snapshot used `uname`, `lscpu`, `lspci`, `/proc/meminfo`, `/proc/pressure/memory`, `/sys/class/drm/card1/device/mem_info_*`, `/sys/module/ttm/parameters/pages_limit`, `amd-smi version`, `amd-smi metric --mem-usage`, `lemonade status`, and `lemonade list`. The run harness should preserve the raw outputs rather than only this summary.
+The snapshot used `uname`, `lscpu`, `lspci`, `/proc/meminfo`, `/proc/pressure/memory`, `/sys/class/drm/card1/device/mem_info_*`, `/sys/module/ttm/parameters/pages_limit`, `amd-smi version`, `amd-smi metric --mem-usage`, `lemonade status`, and `lemonade list`. The run harness preserves the raw outputs rather than only this summary.
 
 | Field | Observed value |
 | --- | --- |
@@ -91,9 +91,11 @@ A cell is keyed by all facts that can change permission or measurement:
 - platform and durable hardware identity;
 - OS, kernel, amdgpu/ROCm/Vulkan runtime, backend executable, and Lemonade build identities;
 - recipe, backend, device, topology generation, and affected domain set;
-- operation (`admission`, `measured_pressure_reclamation`, `startup_admission`, `npu_conflict`, or `recovery`);
+- runtime operation template and leaf (`ADM` / `admission`, `PRE` / `pressure_reclamation`, `STA` / `startup_load`, or `REC` / `prior_epoch_owner_cleanup`);
 - pressure profile, configuration, catalog, predictor, and recovery-authority identities;
 - model architecture/encoding applicability and request/workload class.
+
+An evidence-only compatibility contract has a separate identity: the frozen source baseline, exact source-derived participant cases, directions, incumbent states, model-type coverage, `NPC` relation selector, enumerated relation constraints, suite and gate sets, evidence ceiling, capability and delivery state, and concrete fallback. It never borrows a runtime cell's hardware, process, claim, or recovery identity. Its gates can prove only the enumerated relation constraints; `delivery_state=absent` leaves the contract unavailable regardless of planned or collected synthetic evidence.
 
 Promotion rules:
 
@@ -101,7 +103,7 @@ Promotion rules:
 | --- | --- |
 | `unsupported` | Primary evidence or physical failure shows that no safe automatic or declared fallback behavior exists. The server refuses with the registered reason and makes no side effect. |
 | `fallback-only` | The declared conservative fallback/refusal is fully specified and passes conformance, protection, recovery, and explanation tests. No capacity automation is implied. |
-| `modeled` | Primary architecture evidence, complete normalized contracts, analytic component bounds, deterministic synthetic tests, and safe fallback/refusal pass, but the full physical matrix has not. |
+| `modeled` | Primary architecture evidence, complete normalized contracts, every applicable analytic component bound, deterministic synthetic tests, and the cataloged concrete fallback/refusal pass, but the full physical matrix has not. Analytic memory bounds are mandatory only for resource-capacity cells. |
 | `validated` | The exact cell passes the mandatory physical, concurrency, fault, restart, and conformance rows below with complete immutable evidence. For footprint authority, held-out physical workloads remain under the reviewed conservative bound. |
 
 Promotion is monotone only within one immutable catalog revision. Any bound exceedance, newly unclassified placement, failed recovery invariant, or material fingerprint change invalidates the matching runtime cell and requires a future reviewed catalog revision; it does not expand a live bound.
@@ -172,35 +174,35 @@ Run one GTT allocator and one host allocator concurrently, then release them in 
 - withdrawing external pressure before hard-action dwell prevents an unnecessary hard action;
 - recovery exit requires fresh coherent evidence and the configured stabilization interval.
 
-## Recommended Hatchery validation matrix
+## Accepted Hatchery validation matrix
 
-`L` means a real `llamacpp` GPU backend selected for the initial implementation. `V` means the separate vLLM ROCm cell. `S` means deterministic synthetic support. Exact backend names and versions must be frozen before execution.
+`L` means the real Hatchery `llamacpp:rocm` runtime fixture and environment; each row is assigned only to the applicable operation-specific promotion cell through the machine gate registry. `V` means the separate vLLM ROCm fixture. `S` means deterministic synthetic support. Exact backend names and versions must be frozen before execution.
 
-| ID | Backend | Trigger and workload | Required result |
-| --- | --- | --- | --- |
-| H-TOP-01 | L, V | Cold baseline and each actual model class | Attest one GTT residency domain plus host floor; classify every model effect; no unexplained model-attributable VRAM placement. |
-| H-FP-01 | L | Actual portfolio, high context, and concurrent sequences | Every phase's observed effect stays within its analytic component/lifetime bound plus declared uncertainty; validate residual on held-out models. |
-| H-ADM-01 | L | Incoming model safely fits | Load without reclamation; reservation precedes spawn; observed placement narrows but never enlarges claims. |
-| H-ADM-02 | L | Incoming model fits only after reclamation | Reserve the complete deterministic eligible set before action, reclaim only enough, reconcile, then load without exceeding either constraint. |
-| H-ADM-03 | L, S | Unknown/incomplete incoming footprint | Refuse before any resident reclamation or backend spawn with the registered confidence/evidence reason. |
-| H-ADM-04 | L | GTT-fit/host-floor-fail and host-fit/GTT-fail cases | Refuse or reclaim against the deficient constraint vector; do not alias, sum, or ignore either constraint. |
-| H-GROW-01 | L | KV/transient/retained growth at maximum context/concurrency | Reserve the complete lifetime alternative before effect, or refuse before growth; unprepared retention is an envelope violation and quarantine path. |
-| H-PRE-01 | L | External GTT steps cross reclaim entry | Observe external demand, honor dwell, use soft-first strata, execute at most one hard action per pressure plan, and reach stabilized recovery without touching the external process. |
-| H-PRE-02 | L | Host-only allocator crosses host-floor entry | Act on the host-floor deficit even while GTT remains normal; verified release must improve the expected constraint effects. |
-| H-PRE-03 | L | Combined GTT and host pressure | Score the full deficit vector; count shared allocation bytes once; persist the plan key and first-action comparison evidence. |
-| H-PRE-04 | L | Pressure withdrawn before dwell, during recovery, and after renewed pressure | No premature hard action; correct phase, dwell-reset, and stabilization behavior from monotonic time. |
-| H-PROT-01 | L | Only pinned residents could solve pressure/admission | Do not hard-reclaim them; refuse or report unresolved pressure with residency unchanged. Idle pinned soft reclamation is allowed only if its action preserves weights/process/pin. |
-| H-PROT-02 | L | Candidate actively serving a long request | Preserve the request and resident; expose bounded `waiting_for_in_use`; act only after the final use lease releases and a fresh plan selects it. |
-| H-ORD-01 | L, S | Cold and warm residents with tied and untied useful effects | Follow fixed strata and deterministic tie keys, not artifact size, load cost, registry order, or current request recency. |
-| H-CON-01 | L, S | Two individually feasible admissions whose combination is infeasible | Exactly one complete reservation wins; the other retries/refuses without oversubscription or partial unjournaled effects. |
-| H-CON-02 | L, S | Pressure planning races load, inference, pin, unload, and signal refresh | One ledger/gate serializes conflicts; disjoint work proceeds; stale plan tokens cannot commit. |
-| H-EVD-01 | S plus live signal fault | Signal missing, stale, superseded, unhealthy, malformed, or topology-changed | Select the declared concrete fallback/refusal; never initiate action, clear an active episode, or publish success from invalid evidence. |
-| H-STA-01 | L | Feasible and infeasible grouped saved-pin startup sets | Feasible set publishes atomically with runtime pins; infeasible set loads none and preserves preferences; independent sets still proceed. |
-| H-NPU-01 | S, then physical if available | Incoming NPU/FLM conflict with unpinned-idle, pinned, and in-use incumbents | Only unpinned-idle conflicts may be displaced. Protected conflict rejects the incoming load without changing residency. |
-| H-REC-01 | L, S | Crash/restart matrix and second-daemon attempt | No adoption of survivors; complete claim replay; only proven-owned cleanup; lifecycle remains fenced until verified release. |
-| H-EXP-01 | all | Every terminal and degraded path above | API, compact status, structured log, and compatibility response agree on operation, phase, outcome, effective mode, ordered reasons, and retention metadata. |
+| ID | Fixture | Applications | Trigger | Required result |
+| --- | --- | --- | --- | --- |
+| H-TOP-01 | L, V | exact_runtime | Cold baseline and each actual model class | Attest one GTT residency domain plus host floor; classify every model effect; no unexplained model-attributable VRAM placement. |
+| H-FP-01 | L | exact_runtime | Actual portfolio, high context, and concurrent sequences | Every phase's observed effect stays within its analytic component/lifetime bound plus declared uncertainty; validate residual on held-out models. |
+| H-ADM-01 | L | exact_runtime | Incoming model safely fits | Load without reclamation; reservation precedes spawn; observed placement narrows but never enlarges claims. |
+| H-ADM-02 | L | exact_runtime | Incoming model fits only after reclamation | Reserve the complete deterministic eligible set before action, reclaim only enough, reconcile, then load without exceeding either constraint. |
+| H-ADM-03 | L, S | exact_runtime, exact_synthetic | Unknown/incomplete incoming footprint | Refuse before any resident reclamation or backend spawn with the registered confidence/evidence reason. |
+| H-ADM-04 | L | exact_runtime | GTT-fit/host-floor-fail and host-fit/GTT-fail cases | Refuse or reclaim against the deficient constraint vector; do not alias, sum, or ignore either constraint. |
+| H-GROW-01 | L | exact_runtime | KV/transient/retained growth at maximum context/concurrency | Reserve the complete lifetime alternative before effect, or refuse before growth; unprepared retention is an envelope violation and quarantine path. |
+| H-PRE-01 | L | exact_runtime | External GTT steps cross reclaim entry | Observe external demand, honor dwell, use soft-first strata, execute at most one hard action per pressure plan, and reach stabilized recovery without touching the external process. |
+| H-PRE-02 | L | exact_runtime | Host-only allocator crosses host-floor entry | Act on the host-floor deficit even while GTT remains normal; verified release must improve the expected constraint effects. |
+| H-PRE-03 | L | exact_runtime | Combined GTT and host pressure | Score the full deficit vector; count shared allocation bytes once; persist the plan key and first-action comparison evidence. |
+| H-PRE-04 | L | exact_runtime | Pressure withdrawn before dwell, during recovery, and after renewed pressure | No premature hard action; correct phase, dwell-reset, and stabilization behavior from monotonic time. |
+| H-PROT-01 | L | exact_runtime | Only pinned residents could solve pressure/admission | Do not hard-reclaim them; refuse or report unresolved pressure with residency unchanged. Idle pinned soft reclamation is allowed only if its action preserves weights/process/pin. |
+| H-PROT-02 | L | exact_runtime | Candidate actively serving a long request | Preserve the request and resident; expose bounded `waiting_for_in_use`; act only after the final use lease releases and a fresh plan selects it. |
+| H-ORD-01 | L, S | exact_runtime, exact_synthetic | Cold and warm residents with tied and untied useful effects | Follow fixed strata and deterministic tie keys, not artifact size, load cost, registry order, or current request recency. |
+| H-CON-01 | L, S | exact_runtime, exact_synthetic | Two individually feasible admissions whose combination is infeasible | Exactly one complete reservation wins; the other retries/refuses without oversubscription or partial unjournaled effects. |
+| H-CON-02 | L, S | exact_runtime, exact_synthetic | Pressure planning races load, inference, pin, unload, and signal refresh | One ledger/gate serializes conflicts; disjoint work proceeds; stale plan tokens cannot commit. |
+| H-EVD-01 | S plus live signal fault | exact_runtime, exact_synthetic, compatibility_synthetic | Signal missing, stale, superseded, unhealthy, malformed, or topology-changed | Select the declared concrete fallback/refusal; never initiate action, clear an active episode, or publish success from invalid evidence. |
+| H-STA-01 | L | exact_runtime | Feasible and infeasible grouped saved-pin startup sets | Feasible set publishes atomically with runtime pins; infeasible set loads none and preserves preferences; independent sets still proceed. |
+| H-NPU-01 | S NPU compatibility relation fixture | compatibility_synthetic | Every source-derived platform case and incoming direction with unpinned-idle, pinned, and in-use incumbents | Classify the `npu_cross_family` conflict, preserve every incumbent, and refuse the incoming load before eviction or backend spawn; unpinned-idle state grants no displacement authority. |
+| H-REC-01 | L, S | exact_runtime, exact_synthetic | Crash/restart matrix and second-daemon attempt | No adoption of survivors; complete claim replay; only proven-owned cleanup; lifecycle remains fenced until verified release. |
+| H-EXP-01 | all | exact_runtime, exact_synthetic, compatibility_synthetic | Every terminal and degraded path applicable to the selected promotion unit | API, compact status, structured log, and compatibility response agree on operation, phase, outcome, effective mode, ordered reasons, and retention metadata. |
 
-The initial narrowly `validated` target should be H-TOP, H-FP, H-ADM, H-GROW, H-PRE, H-PROT, H-ORD, H-CON, H-EVD, H-REC, and H-EXP for one concrete `llamacpp` GPU backend. H-STA is separately promoted after grouped startup exists. vLLM and NPU/FLM remain separate cells regardless of `llamacpp` results.
+The machine inventory's exact roster independently promotes Hatchery `llamacpp:rocm` admission, pressure reclamation, prior-epoch recovery, and—after grouped startup exists—startup-load cells. Each consumes only its fully expanded atomic gate set; no profile-wide result promotes the other operations. Vulkan and vLLM remain separate runtime cells, while NPU/FLM compatibility remains a separate evidence-only promotion contract until exact platform runtime cells exist; none inherits a Hatchery ROCm result.
 
 ## Exact pass/fail evidence contract
 
@@ -290,20 +292,8 @@ Mandatory crash points:
 
 For each crash point, restart must replay maximum claims, prove the prior daemon dead or fenced, avoid PID-only ownership, reject a deliberately reused PID with a different start identity, never adopt survivors, clean only proven-owned descendants, and keep ordinary lifecycle unavailable until the journal and ledger agree. Repeat with truncated, malformed, missing-content, and older-schema records. A second live daemon must not classify the first daemon's children as orphans.
 
-## Open decisions for Issue 35
+## Resolved Issue 35 decisions
 
-These choices materially change the validation result and should be grilled before a capability is promoted:
+The versioned [Hatchery campaign parameters](hatchery-campaign-parameters.md) resolve the initial backend, pressure and recovery thresholds, host floor, PSI role, sampling and uncertainty bounds, workload partition, helper design, cold-attempt schedule, fingerprint invalidation, NPU/FLM ceiling, evidence distribution, and privacy policy. [Profile-free residency estimation](profile-free-residency-estimation.md) defines the accepted narrow estimator rule, while [Upstream validation-data conventions](upstream-validation-data-conventions.md) defines catalog and evidence distribution.
 
-1. Which concrete Hatchery `llamacpp` GPU backend is first: Vulkan, ROCm, or both as separate cells?
-2. What exact GTT reclaim-entry, critical-entry, recovery-exit, dwell, and stabilization profile applies to Hatchery?
-3. What exact host `MemAvailable` floor and hysteresis preserve interactive system health, and what watchdog latency/heartbeat bound defines failure?
-4. Is PSI only corroborating evidence for the initial cell, or does a reviewed catalog cell make it an authoritative qualitative/rate constraint?
-5. What measurement cadence, maximum skew, counter noise, and unrelated-demand envelope are accepted for the physical lab session?
-6. Which downloaded 17–22 GB models form the calibration set, which models are held out, and which high-context/concurrency shapes represent prospective use?
-7. Which deterministic external GTT helper is reviewable and reproducible: a small HIP program, a pinned PyTorch/ROCm environment, or both?
-8. What constitutes a cold independent attempt: daemon restart, backend/cache cleanup, OS reboot, or a stronger combination for particular rows?
-9. Which runtime fingerprint changes invalidate a validated cell immediately, and which may inherit evidence through an explicit reviewed compatibility rule?
-10. Is physical NPU/FLM conflict validation available on Hatchery now, or should the initial route retain it as modeled after synthetic conformance?
-11. What evidence retention location and privacy/redaction policy applies to large run bundles and process/driver diagnostics?
-
-Until these are fixed, the profile is decision-ready research, not an executable acceptance certificate.
+This contract is executable only after it is flattened into the content-addressed campaign manifest defined by the overlay and all pre-collection deployment bindings are present. Acceptance of the design does not promote any cell or prove implementation.

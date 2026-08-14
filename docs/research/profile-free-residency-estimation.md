@@ -1,11 +1,11 @@
 # Profile-free residency estimation for Hatchery llama.cpp/ROCm
 
-Status: research finding, not an accepted product policy or implementation specification.
+Status: accepted Issue [#35](https://github.com/nisavid/lemonade/issues/35) v1 Hatchery predictor design input; not a current implementation or physical validation result.
 
 ## Finding
 
 A conservative, profile-free estimate is feasible for the initial, tightly
-versioned Hatchery cell. Lemonade does not need to wait for a portable
+versioned Hatchery configuration profile. Lemonade does not need to wait for a portable
 architecture-by-architecture formula, and it does not need to require a profile
 for every model.
 
@@ -24,7 +24,7 @@ bound adds the few allocations omitted from the breakdown, known load and
 concurrency transients, and an empirically validated residual for lazy
 backend/runtime/driver allocations and measurement uncertainty.
 
-The initial formula should therefore be:
+The initial formula is:
 
 ```text
 planned = llama.cpp no_alloc(model + context + compute)
@@ -48,7 +48,7 @@ GART/GTT as mapping limits rather than a separate physical-memory pool, and GTT
 as dynamic system-RAM mappings used as the primary AI-compute pool. See [AMD's
 Strix Halo system-optimization guide](https://rocm.docs.amd.com/en/docs-7.2.0/how-to/system-optimization/strixhalo.html).
 
-## Applicability cell
+## V1 applicability profile
 
 The result applies only when the estimator mirrors the load exactly. The
 minimum identity includes:
@@ -66,13 +66,13 @@ minimum identity includes:
 
 ### Current checkout versus refresh target
 
-The current fork checkout at `13a5c6aa` pins `rocm-stable` to `b9586`; that is
-the source context in which this research began, not the backend the refreshed
-fork should target. Immutable upstream Lemonade commit `3e532596` pins
+The research base at fork commit `13a5c6aa` pins `rocm-stable` to `b9586`; that is
+the source context in which this research began, not the backend selected by
+the accepted v1 design. Immutable upstream Lemonade commit `3e532596` pins
 `rocm-stable` to release label `b10397` and TheRock 7.13.0; see the upstream
 [`backend_versions.json`](https://github.com/lemonade-sdk/lemonade/blob/3e53259600bf9076d51fd9dee889732e0df0c11a/src/cpp/resources/backend_versions.json#L48-L52)
 and [ROCm stable asset selection](https://github.com/lemonade-sdk/lemonade/blob/3e53259600bf9076d51fd9dee889732e0df0c11a/src/cpp/server/backends/llamacpp/llamacpp_server.cpp#L176-L194).
-The recommendation in this note targets that refreshed upstream launch shape,
+The accepted v1 design in this note targets that refreshed upstream launch shape,
 not `b9586` behavior.
 
 The `b10397` label is not a sufficient source identity. Lemonade's build-only
@@ -87,7 +87,7 @@ as `llama-b10394`; the release job subsequently renamed the collected archive
 to a `b10397` filename. See [the Ubuntu ROCm 7.13 build job](https://github.com/lemonade-sdk/llama.cpp/actions/runs/31600709220/job/94127102963)
 and [the release job](https://github.com/lemonade-sdk/llama.cpp/actions/runs/31600709220/job/94179956648).
 
-Consequently, the v1 cell must record the downloaded asset's SHA-256 and the
+Consequently, the v1 configuration profile must record the downloaded asset's SHA-256 and the
 binary's reported version/source commit. The current upstream label is a lookup
 key, not evidence that every asset was compiled from the revision whose count
 is 10397. All llama.cpp source claims below cite the resolved Linux ROCm 7.13
@@ -96,12 +96,12 @@ artifact source, `680a9ae6`.
 Upstream now passes a local GGUF or `-hf`, the selected context size, optional
 projector and speculative inputs, arbitrary recipe arguments, and
 `--load-mode none` on an iGPU; see [upstream argument construction](https://github.com/lemonade-sdk/lemonade/blob/3e53259600bf9076d51fd9dee889732e0df0c11a/src/cpp/server/backends/llamacpp/llamacpp_server.cpp#L289-L447).
-Those choices expose memory-affecting cases that the first cell must either
+Those choices expose memory-affecting cases that the v1 configuration profile must either
 model explicitly or exclude.
 
 ### V1 configuration predicate
 
-A load is in the initial text-only cell only when every item below is true:
+A load is in the v1 text-only configuration profile only when every item below is true:
 
 - the host is Hatchery's Linux `gfx1151` Strix Halo configuration and the
   backend is the upstream `rocm-stable` 7.13 asset identified by its verified
@@ -124,7 +124,7 @@ A load is in the initial text-only cell only when every item below is true:
 - Lemonade serializes candidate load transitions and admits at most the one
   candidate-over-residents lifecycle overlap included in the bound. A resident
   accepts one active inference sequence; any broader per-process or admission
-  concurrency is outside the cell.
+  concurrency is outside the profile.
 
 Explicit `--fit off` and `--gpu-layers all` prevent llama-server's own
 free-memory-dependent fitting from changing placement behind Lemonade's
@@ -151,7 +151,7 @@ V1 does not rely on that mutable default.
   later composition point; see [speculative fitting](https://github.com/ggml-org/llama.cpp/blob/680a9ae63d60d35c21a0dcd7d3fabdb9c6bfc963/tools/server/server-context.cpp#L1136-L1189).
 - **`hf_load`:** excluded because it lets llama-server resolve and download the
   model and optional projector rather than supplying the exact local artifact
-  set to the estimator. It can enter a later cell only after resolution produces
+  set to the estimator. It can enter a later configuration profile only after resolution produces
   an immutable local manifest and all components are estimated.
 - **Recipe-supplied memory-affecting arguments:** excluded rather than guessed.
   A later allowlist may admit an option only when its normalized effective
@@ -168,13 +168,13 @@ V1 does not rely on that mutable default.
 
 An excluded configuration reports an estimator identity mismatch and follows
 the `unknown` fallback below. It does not borrow capacity credit from the
-text-only cell.
+  text-only profile.
 
 ## Exact and derivable terms
 
 ### Model tensors
 
-The model term should come from the actual GGUF tensor directory and the
+The model term comes from the actual GGUF tensor directory and the
 backend allocation calculator, not from nominal parameter count or file size.
 GGUF records each tensor's name, dimensions, type, and aligned data offset; see
 the official [GGUF format specification](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md)
@@ -209,7 +209,7 @@ For ordinary llama.cpp operation, KV capacity is allocated when the context is
 created. A nearly empty versus nearly full logical cache does not imply a
 corresponding change in this core allocation. Running both workloads is still
 valuable because execution can trigger lazy backend allocations and transient
-peaks; it should not be used to fit a KV formula that the source already knows.
+peaks; the campaign does not use it to fit a KV formula that the source already knows.
 
 ### Compute and attention buffers
 
@@ -254,7 +254,7 @@ I/O. See [`llama_model_loader::load_all_data()`](https://github.com/ggml-org/lla
 This is a conditional, bounded transient. The estimator must evaluate the same
 flags and capabilities as the actual launch; it must not blindly add or omit
 the buffers. Model-file page cache and mapped-file behavior must be treated
-separately if mmap is enabled in another cell.
+separately if mmap is enabled in another configuration profile.
 
 ### Host/device duplication and mappings
 
@@ -263,7 +263,7 @@ physical memory, and do not infer that every tensor is device-placed merely
 because Lemonade requests full offload. The dry construction reports actual
 CPU/host versus HIP buffer-type placement. CPU-resident tensors count as host
 allocations; HIP device buffers consume GTT-backed system RAM in the initial
-cell.
+configuration profile.
 
 With `--load-mode none`, the model file is not retained as the tensor backing
 mapping. The source path above streams data through bounded upload buffers when
@@ -335,7 +335,7 @@ in the applicability identity.
 An arbitrary large “fudge factor” is not a confidently safe bound until it has
 evidence behind it. It can be selected conservatively for initial experiments,
 but validation must show that it bounds the positive residual for the declared
-cell. The residual need not be precise: it may deliberately be loose, provided
+configuration profile. The residual need not be precise: it may deliberately be loose, provided
 it remains useful and never understates the observed safety peak.
 
 ## Measurement on Strix Halo
@@ -366,11 +366,11 @@ and host-memory floor.
 
 ## Validation and promotion threshold
 
-Profiles of individual models should be optional refinements. The prerequisite
-for automatic capacity action is validation of the *cell-wide analytic method
+Profiles of individual models are optional refinements. The prerequisite
+for automatic capacity action is validation of the *profile-wide analytic method
 and residual envelope*, not a stored profile for each admitted model.
 
-Calibrate on a deliberately varied set that covers the cell's supported
+Calibrate on a deliberately varied set that covers the profile's supported
 surface, including:
 
 - dense and mixture-of-experts models;
@@ -411,8 +411,11 @@ validated_residual >= max(all positive_residuals)
                     + reviewed_safety_margin
 ```
 
-Promotion requires all held-out runs to remain within the proposed bound. A
-single unexplained exceedance blocks promotion; averages and high percentiles
+Promotion requires all valid held-out runs to remain within the proposed bound. Every
+valid exceedance blocks the current predictor-rule revision; explaining the miss
+only makes it calibration input for a new revision with a newly frozen, disjoint
+held-out campaign. A predeclared invalid-attempt rule may exclude bad evidence,
+but the result cannot be reclassified after observation. Averages and high percentiles
 are utility measures, not safety boundaries. Repeat trials must cover
 nondeterminism and sampling uncertainty. Revalidate after a material change to
 the llama.cpp binary/build, ROCm/HIP, driver/kernel, hardware or GTT setup, or a
@@ -434,16 +437,16 @@ reclamation separately requires validated resident ownership and identity,
 pin/in-use eligibility, race-free reservation, unload/termination behavior,
 and post-action release verification.
 
-Recommended fallback states are explicit:
+Accepted fallback states are explicit:
 
 | Estimator state | Capacity behavior |
 | --- | --- |
-| Exact cell match; analytic method and residual validated | May supply capacity credit and automatic admission decisions. |
-| Exact cell match; method not yet validated | Report/shadow only; no capacity credit or automatic hard reclamation. |
-| Identity mismatch, unsupported option, dry construction failure, or unknown placement | Unknown; refuse predictive capacity automation rather than substitute file size or another cell's residual. |
+| Exact configuration-profile match; analytic method and residual validated | May supply capacity credit and automatic admission decisions in an independently authorized runtime cell. |
+| Exact configuration-profile match; method not yet validated | Report/shadow only; no capacity credit or automatic hard reclamation. |
+| Identity mismatch, unsupported option, dry construction failure, or unknown placement | Unknown; refuse predictive capacity automation rather than substitute file size or another profile's residual. |
 | Compatible optional per-model profile | May tighten only according to a separately accepted profile policy; otherwise retain the validated analytic bound. |
 
-“Fallback” should therefore name a behavior, not merely say “safe”: unknown
+“Fallback” names a behavior, not merely “safe”: unknown
 estimation, no speculative capacity credit, no capacity-driven eviction, and a
 clear diagnostic. Explicit user-requested load/unload behavior remains governed
 by its own policy.
@@ -455,8 +458,8 @@ perform a faithful dry construction, for explanation and independent
 cross-checking, and for early fallback before a backend cell exists. Collected
 profiles can help identify missing terms and fit conservative residuals.
 
-That work should not block the initial llama.cpp/ROCm implementation. Nor should
-it estimate a “supremum” merely by fitting the observed maximum: any proposed
+That work does not block the initial llama.cpp/ROCm implementation. It does not
+estimate a “supremum” merely by fitting the observed maximum: any proposed
 portable envelope needs declared applicability, held-out coverage, measurement
 uncertainty, a safety margin, and explicit behavior for architectures or
 options outside its support.
@@ -469,20 +472,10 @@ and parallel/concurrent execution whose complete maximum shape is supplied to
 the planner and exercised physically. Each component needs its own identity,
 residual, and composition rule before it contributes capacity credit.
 
-## Policy questions exposed by the research
+## Accepted policy answers
 
-1. Does `modeled` mean “source-derived but not yet physically validated,” with
-   `validated` applying to all models/configurations inside a proven cell even
-   when no per-model profile exists? Recommended: yes.
-2. If dry construction fails or the identity is unmatched, should Lemonade
-   refuse predictive capacity automation or use a coarser file-size heuristic?
-   Recommended for the first release: refuse and report `unknown`.
-3. Should estimator promotion and reclamation-mechanism promotion be separate
-   capabilities? Recommended: yes; a sound byte estimate cannot prove that a
-   particular process is safe to evict.
-4. May a residual carry across a backend/runtime/driver version change?
-   Recommended: no automatic carry. The new cell may reuse the old envelope in
-   shadow mode while it requalifies.
-5. What false-rejection or over-eviction rate is acceptable for a deliberately
-   loose but safe residual? This is a utility threshold, separate from the
-   zero-unexplained-exceedance safety threshold.
+1. `modeled` means source-derived with complete normalized contracts and synthetic evidence but without the required physical end-to-end validation. A reviewed catalog may assign `validated_predictor` to every model/configuration inside the exact proven predicate without requiring a stored per-model profile.
+2. Dry-construction failure, identity mismatch, unsupported configuration, or unknown placement produces `unknown` and refuses predictive capacity automation before reclamation or spawn. File size and another profile's residual are not substitutes.
+3. Estimator and reclamation-mechanism promotion remain separate. A sound byte estimate cannot prove resident eligibility, ownership, action safety, or verified release.
+4. A residual never carries automatically across a backend, runtime, driver, or other material fingerprint change. The new predicate may reuse the old envelope only in shadow/report mode while a new revision requalifies.
+5. Safety permits no valid bound exceedance. The accepted Hatchery campaign separately requires per-projection overhead and two-resident feasibility before granting capacity credit, so a technically safe but impractical predictor remains report-only until a new reviewed rule improves its utility.

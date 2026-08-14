@@ -1,0 +1,472 @@
+{
+  "schema_version": 4,
+  "source_support_baseline": "d2a4f85dbf44b7671319ed0010ad936a71dedf15",
+  "campaign_base_binding": {
+    "document": "docs/research/hatchery-residency-validation-profile.md",
+    "sha256": "ee6d0bd0586a2e448afd915573f697abdbdc1880fcd495c1fcbfc92cedf0d94c"
+  },
+  "source_file_blobs": {
+    "CMakeLists.txt": "64df6d3414567909bfb99e16f21a43b1dbc87d90",
+    "src/cpp/include/lemon/backends/backend_descriptor.h": "51b357154657d3c6df50281a179122b6bdb70a63",
+    "src/cpp/include/lemon/recipe_backend_def.h": "932db70f315c4348a46b93cafbf27d5004b6ffbe",
+    "src/cpp/include/lemon/model_types.h": "3084d17ec13564c506e09e12433c015bfb0f1ab7",
+    "src/cpp/server/model_manager.cpp": "3cd0a217881390a95f01a0a204295816e71e6a5e",
+    "src/cpp/server/router.cpp": "8635c2a83d82ad74df684e57c532ec9140381279",
+    "src/cpp/include/lemon/backends/fastflowlm/fastflowlm_server.h": "bdcb1d88a27c87b8af85ba5193694d1eb2bbbd26",
+    "src/cpp/server/backends/fastflowlm/fastflowlm_server.cpp": "ffd69cbad659b490f384ed49889cfd2f2780889a",
+    "docs/guide/configuration/multi-model.md": "845441b9e99bef6aa475f797c2a97a0d3343c713",
+    "src/cpp/resources/backend_versions.json": "f17dc73fe07020bf1444fc2195f53f28998dadc0",
+    "src/cpp/resources/server_models.json": "9a11c7e0ceec56a91429a3f03f04fa560fcacbf9",
+    "src/cpp/server/backends/backend_descriptor_registry.cpp": "6d1741d87123bcd8480e8a77349f23bf37cec634",
+    "src/cpp/server/backends/backend_descriptors_generated.h.in": "3f6d7ec2a64d61bf11e954da1901ca00b5f579f3",
+    "src/cpp/server/system_info.cpp": "a00e514677b5e5bc18c02999f68cf7d4b72eebb5",
+    "src/cpp/include/lemon/backends/llamacpp/llamacpp.h": "0c25da1d3a097cb4e07caf76220e363bb80b22dc",
+    "src/cpp/include/lemon/backends/whispercpp/whispercpp.h": "c10aefdc60b002c4194d5cd2801b5649dbb05cb0",
+    "src/cpp/include/lemon/backends/moonshine/moonshine.h": "d817a1258a9a93e74870db26e535e2293fe41406",
+    "src/cpp/include/lemon/backends/kokoro/kokoro.h": "ce708c21fd1852f42a88b0fce37108af9e060810",
+    "src/cpp/include/lemon/backends/sdcpp/sdcpp.h": "75809cad3e16c7e0d791843f34d73e175fe80e2b",
+    "src/cpp/include/lemon/backends/fastflowlm/fastflowlm.h": "3e7742c6ec4a207dc7b273c18224f456abffcb30",
+    "src/cpp/include/lemon/backends/ryzenai/ryzenai.h": "6df5511e4ec09f42aa73639a1be2ca308fb500e4",
+    "src/cpp/include/lemon/backends/vllm/vllm.h": "586e574af9d82adce7d9cd1c93a6e1e18a026416",
+    "src/cpp/include/lemon/backends/thenoise/thenoise.h": "18274cc79c39f22137e7f6e1de8b17d749f2deac",
+    "src/cpp/include/lemon/backends/cloud/cloud.h": "976a84f702cfd0f49f9372d278cb4278e30145ac",
+    "src/cpp/include/lemon/backends/thinksound/thinksound.h": "fed7fd48109bca2172bd28de9d9468aa33bb36d2",
+    "src/cpp/include/lemon/backends/acestep/acestep.h": "c5945bc39aed4a669bde4e0c1194842c1bcd6dac",
+    "src/cpp/include/lemon/backends/onnxruntime/onnxruntime.h": "52a1626ec6c188ed6b52f568fa5b7123c5f611c8",
+    "src/cpp/include/lemon/backends/trellis/trellis.h": "692f096bf52b50156f8967361d7f9a185a8289a6",
+    "src/cpp/include/lemon/backends/openmoss/openmoss.h": "983a635cbcd3610a254bb95d6d7913f1ecf7e28e"
+  },
+  "enums": {
+    "capability_level": ["unsupported", "fallback_only", "modeled", "validated"],
+    "delivery_state": ["absent", "implemented_unverified", "release_verified"],
+    "operation_template": ["ADM", "LFR", "PRE", "STA", "REC", "UNL", "PIN", "NPC"],
+    "operation_leaf": ["admission", "explicit_unload", "force_unload", "pressure_reclamation", "startup_load", "service_termination", "dead_backend_pruning", "same_epoch_recovery_cleanup", "prior_epoch_owner_cleanup", "artifact_scope_recovery_cleanup", "saved_pin_mutation", "runtime_pin_mutation", "legacy_pin_batch", "resident_state_recovery_cleanup"],
+    "model_type": ["llm", "embedding", "reranking", "transcription", "image", "tts", "audio-generation", "classification", "mesh"],
+    "constraint_kind": ["gpu_shared_residency", "gpu_provider_resolved_capacity", "host_memavailable_floor", "host_effects_provider_resolved", "model_type_pool", "ownership", "flm_type_slot", "npu_cross_family", "npu_exclusive"]
+  },
+  "operation_sets": {
+    "gpu_resource": ["ADM", "LFR", "PRE", "STA", "REC", "UNL", "PIN"],
+    "npu_compatibility": ["ADM", "LFR", "STA", "REC", "UNL", "PIN", "NPC"]
+  },
+  "constraint_profiles": {
+    "apple_unified": ["gpu_shared_residency", "host_memavailable_floor", "model_type_pool", "ownership"],
+    "provider_resolved_gpu": ["gpu_provider_resolved_capacity", "host_effects_provider_resolved", "model_type_pool", "ownership"],
+    "npu_flm": ["flm_type_slot", "npu_cross_family", "model_type_pool", "ownership"],
+    "npu_exclusive": ["npu_exclusive", "npu_cross_family", "model_type_pool", "ownership"]
+  },
+  "recovery_profiles": {
+    "native_subprocess_tree": {
+      "launch": "prepared",
+      "containment": "complete_descendant_process_tree",
+      "ownership": "lemonade_spawned_process_tree",
+      "verified_release": [
+        "process",
+        "resource",
+        "constraint"
+      ]
+    },
+    "python_or_async_job_tree": {
+      "launch": "prepared",
+      "containment": "complete_worker_or_async_job_membership",
+      "ownership": "lemonade_worker_or_async_job",
+      "verified_release": [
+        "native_completion_or_cancellation_join",
+        "resource"
+      ]
+    },
+    "flm_system_managed": {
+      "launch": "prepared",
+      "containment": "serving_process_or_service_membership_excluding_external_package_and_model_store",
+      "ownership": "lemonade_serving_process_or_service_only",
+      "verified_release": [
+        "service",
+        "device_claim"
+      ]
+    }
+  },
+  "suite_registry": {
+    "PT-ID": {"operations": ["*"], "proof": "identity, provenance, and immutable fingerprint"},
+    "PT-TOP": {"operations": ["*"], "proof": "topology and placement attribution"},
+    "PT-FP": {"operations": ["ADM", "STA"], "proof": "complete conservative lifetime footprint"},
+    "PT-SIG": {"operations": ["ADM", "PRE", "STA"], "proof": "fresh coherent signals and uncertainty"},
+    "PT-ADM": {"operations": ["ADM"], "proof": "predictive admission and growth"},
+    "PT-LFR": {"operations": ["LFR"], "proof": "load-failure retry without unproved victims"},
+    "PT-PRE": {"operations": ["PRE"], "proof": "pressure reclamation and verified recovery"},
+    "PT-STA": {"operations": ["STA"], "proof": "grouped startup admission"},
+    "PT-NPU": {"operations": ["ADM", "NPC"], "proof": "NPU and FLM compatibility admission and conflict"},
+    "PT-REC": {"operations": ["REC", "NPC"], "proof": "runtime ownership replay and verified release, or compatibility-synthetic fail-closed relation-state response"},
+    "PT-UNL": {"operations": ["UNL"], "proof": "explicit and forced unload protection"},
+    "PT-PIN": {"operations": ["PIN"], "proof": "saved and runtime pin mutation"},
+    "PT-CON": {"operations": ["*"], "proof": "atomic concurrency and stale-token rejection"},
+    "PT-ART": {"operations": ["*"], "proof": "artifact and native-writer ambiguity handoff"},
+    "PT-EXP": {"operations": ["*"], "proof": "generated explanation and reason conformance"},
+    "PT-LIV": {"operations": ["*"], "proof": "evidence-liveness rollback and restoration"}
+  },
+  "suite_sets": {
+    "gpu_standard": ["PT-ID", "PT-TOP", "PT-FP", "PT-SIG", "PT-ADM", "PT-LFR", "PT-PRE", "PT-STA", "PT-REC", "PT-UNL", "PT-PIN", "PT-CON", "PT-ART", "PT-EXP", "PT-LIV"],
+    "npu_compatibility": ["PT-ID", "PT-TOP", "PT-SIG", "PT-LFR", "PT-STA", "PT-NPU", "PT-REC", "PT-UNL", "PT-PIN", "PT-CON", "PT-EXP", "PT-LIV"]
+  },
+  "fallback_registry": {
+    "residency_admission_refuse_unknown_demand_v1": {"operations": ["ADM"], "guard": "complete demand or capacity authority unavailable", "effect": "refuse before victim selection, reclamation, discovery spawn, or backend spawn"},
+    "residency_load_retry_refuse_unproven_victim_set_v1": {"operations": ["LFR"], "guard": "complete retry victim and release proof unavailable", "effect": "refuse retry without changing residency"},
+    "residency_pressure_report_only_unvalidated_v1": {"operations": ["PRE"], "guard": "reporting evidence valid but action authority unavailable", "effect": "report only and preserve residency"},
+    "residency_pressure_disabled_invalid_evidence_v1": {"operations": ["PRE"], "guard": "reporting evidence missing, stale, unhealthy, or incoherent", "effect": "disable pressure automation and preserve residency"},
+    "residency_startup_block_group_v1": {"operations": ["STA"], "guard": "complete grouped startup authority unavailable", "effect": "load no group member and preserve saved preferences"},
+    "residency_recovery_block_unproven_release_v1": {"operations": ["REC"], "guard": "ownership or verified release unavailable", "effect": "block lifecycle readiness and retain maximum plausible claims"},
+    "residency_unload_preserve_live_use_v1": {"operations": ["UNL"], "guard": "live-use fencing unavailable", "effect": "refuse unload and preserve resident"},
+    "residency_pin_mutation_refuse_stale_or_unready_v1": {"operations": ["PIN"], "guard": "generation stale or lifecycle unready", "effect": "refuse pin mutation"},
+    "residency_npu_conflict_preserve_refuse_v1": {"operations": ["NPC"], "guard": "NPU compatibility conflict lacks validated displacement authority", "effect": "preserve every incumbent and refuse incoming load"},
+    "hatchery_rocm_admission_refuse_unknown_capacity_v1": {"operations": ["ADM"], "guard": "Hatchery capacity authority insufficient", "effect": "refuse before victim selection, reclamation, discovery spawn, or backend spawn"},
+    "hatchery_rocm_pressure_report_only_v1": {"operations": ["PRE"], "guard": "Hatchery reporting evidence valid but action authority unavailable", "effect": "report only and preserve residency"},
+    "hatchery_rocm_pressure_disabled_invalid_evidence_v1": {"operations": ["PRE"], "guard": "Hatchery reporting evidence invalid", "effect": "disable pressure automation and preserve residency"},
+    "hatchery_rocm_startup_block_group_v1": {"operations": ["STA"], "guard": "Hatchery grouped startup authority insufficient", "effect": "load no group member and preserve saved preferences"},
+    "hatchery_rocm_recovery_block_readiness_v1": {"operations": ["REC"], "guard": "Hatchery ownership or release unproved", "effect": "block lifecycle readiness and retain maximum plausible claims"}
+  },
+  "fallback_sets": {
+    "gpu_standard": {"ADM": ["residency_admission_refuse_unknown_demand_v1"], "LFR": ["residency_load_retry_refuse_unproven_victim_set_v1"], "PRE": ["residency_pressure_report_only_unvalidated_v1", "residency_pressure_disabled_invalid_evidence_v1"], "STA": ["residency_startup_block_group_v1"], "REC": ["residency_recovery_block_unproven_release_v1"], "UNL": ["residency_unload_preserve_live_use_v1"], "PIN": ["residency_pin_mutation_refuse_stale_or_unready_v1"]},
+    "npu_compatibility": {"ADM": ["residency_admission_refuse_unknown_demand_v1"], "LFR": ["residency_load_retry_refuse_unproven_victim_set_v1"], "STA": ["residency_startup_block_group_v1"], "REC": ["residency_recovery_block_unproven_release_v1"], "UNL": ["residency_unload_preserve_live_use_v1"], "PIN": ["residency_pin_mutation_refuse_stale_or_unready_v1"], "NPC": ["residency_npu_conflict_preserve_refuse_v1"]}
+  },
+  "provider_keys": {
+    "cpu": "cpu",
+    "system": "system",
+    "metal": "metal",
+    "cuda": "cuda",
+    "vulkan": "vulkan",
+    "rocm": "rocm",
+    "npu": "xdna2"
+  },
+  "topology_rules": {
+    "cpu": "host_compatibility",
+    "metal": "unified",
+    "amd_gpu": "provider_resolved",
+    "nvidia_gpu": "provider_resolved",
+    "amd_npu": "npu_compatibility"
+  },
+  "recipe_model_type_contracts": {
+    "acestep": {"derivation": "server_models", "model_types": ["audio-generation"]},
+    "flm": {"derivation": "flm_slot_policy", "model_types": ["llm", "embedding", "transcription"]},
+    "kokoro": {"derivation": "server_models", "model_types": ["tts"]},
+    "llamacpp": {"derivation": "server_models", "model_types": ["llm", "embedding", "reranking"]},
+    "moonshine": {"derivation": "server_models", "model_types": ["transcription"]},
+    "onnxruntime": {"derivation": "server_models", "model_types": ["classification"]},
+    "openmoss": {"derivation": "server_models", "model_types": ["tts"]},
+    "ryzenai-llm": {"derivation": "server_models", "model_types": ["llm"]},
+    "sd-cpp": {"derivation": "server_models", "model_types": ["image"]},
+    "thenoise": {"derivation": "server_models", "model_types": ["image"]},
+    "thinksound": {"derivation": "server_models", "model_types": ["audio-generation"]},
+    "trellis": {"derivation": "server_models", "model_types": ["mesh"]},
+    "vllm": {"derivation": "server_models", "model_types": ["llm"]},
+    "whispercpp": {"derivation": "server_models", "model_types": ["transcription"]}
+  },
+  "hardware_profiles": {
+    "hatchery-gfx1151-shared-gtt-v1": {
+      "base_topology": "provider_resolved",
+      "topology": "shared_gtt",
+      "source_support": {"recipe": "llamacpp", "backend": "rocm", "os": "linux", "accelerator": "amd_gpu", "architectures": ["gfx1151"], "channels": ["stable"]},
+      "evidence_document": {
+        "locator": "docs/research/hatchery-campaign-parameters.md#live-hatchery-observations",
+        "sha256": "c43642e3ef985ee02d2e2e42d6a8ee8ac3e6f40703b88de97931fb91b43e501f"
+      },
+      "required_runtime_bindings": ["device_identity", "driver_runtime_closure"]
+    }
+  },
+  "configuration_profiles": {
+    "profile-free-residency-estimation-v1-text-only": {"model_types": ["llm"], "document": {"locator": "docs/research/profile-free-residency-estimation.md#v1-configuration-predicate", "sha256": "fb8da2962ff9070cc172995806f81ccf6c1ada267bd75f4edab9a29d7fb3cdda"}}
+  },
+  "workload_profiles": {
+    "hatchery-text-generation-campaign-v1": {"document": {"locator": "docs/research/hatchery-campaign-parameters.md#workload-partition-for-the-first-predictor-campaign", "sha256": "27840de0b38f113c13edcee700f4c27a7916a8d6888e10d966ffe39b11124aea"}}
+  },
+  "predictor_rules": {
+    "hatchery-llamacpp-rocm-profile-free-v1": {"document": {"locator": "docs/research/profile-free-residency-estimation.md#validation-and-promotion-threshold", "sha256": "a3184cf7a6c3e436ce41e11dee30ca1c7c780ac01374125d3880f6c46f46aef9"}, "confidence_target": "validated_predictor"}
+  },
+  "observation_contracts": {
+    "hatchery-gtt-host-observation-v1": {"constraints": ["gpu_shared_residency", "host_memavailable_floor"], "document": {"locator": "docs/research/hatchery-campaign-parameters.md#live-hatchery-observations", "sha256": "c43642e3ef985ee02d2e2e42d6a8ee8ac3e6f40703b88de97931fb91b43e501f"}}
+  },
+  "runtime_binding_kinds": ["device_identity", "backend_artifact_digest", "source_build_dependency_closure", "driver_runtime_closure", "model_manifest_digest", "normalized_configuration_digest", "evidence_index_digest", "evidence_liveness_lease"],
+  "gate_sources": {
+    "hatchery_base": {"document": "docs/research/hatchery-residency-validation-profile.md", "section": "Accepted Hatchery validation matrix", "section_sha256": "8fe930baadc1fe0d0d4f383750d10fbd89d9287bcc62066d265e79ec1a3b7d82"},
+    "hatchery_overlay": {"document": "docs/research/hatchery-campaign-parameters.md", "section": "Atomic overlay gate definitions", "section_sha256": "51c30f1931f85ae0faf3b08c6651174fcd2b024478af015532aa5082d14a320a"}
+  },
+  "gate_registry": {
+    "H-TOP-01": {"source": "hatchery_base", "suites": ["PT-ID", "PT-TOP"]},
+    "H-FP-01": {"source": "hatchery_base", "suites": ["PT-FP"]},
+    "H-ADM-01": {"source": "hatchery_base", "suites": ["PT-ADM"]},
+    "H-ADM-02": {"source": "hatchery_base", "suites": ["PT-ADM"]},
+    "H-ADM-03": {"source": "hatchery_base", "suites": ["PT-ADM"]},
+    "H-ADM-04": {"source": "hatchery_base", "suites": ["PT-ADM"]},
+    "H-GROW-01": {"source": "hatchery_base", "suites": ["PT-ADM"]},
+    "H-PRE-01": {"source": "hatchery_base", "suites": ["PT-PRE"]},
+    "H-PRE-02": {"source": "hatchery_base", "suites": ["PT-PRE"]},
+    "H-PRE-03": {"source": "hatchery_base", "suites": ["PT-PRE"]},
+    "H-PRE-04": {"source": "hatchery_base", "suites": ["PT-PRE"]},
+    "H-PROT-01": {"source": "hatchery_base", "suites": ["PT-ADM", "PT-PRE"]},
+    "H-PROT-02": {"source": "hatchery_base", "suites": ["PT-ADM", "PT-PRE"]},
+    "H-ORD-01": {"source": "hatchery_base", "suites": ["PT-ADM", "PT-PRE"]},
+    "H-CON-01": {"source": "hatchery_base", "suites": ["PT-CON"]},
+    "H-CON-02": {"source": "hatchery_base", "suites": ["PT-CON"]},
+    "H-EVD-01": {"source": "hatchery_base", "suites": ["PT-SIG"]},
+    "H-STA-01": {"source": "hatchery_base", "suites": ["PT-STA"]},
+    "H-NPU-01": {"source": "hatchery_base", "suites": ["PT-NPU"]},
+    "H-REC-01": {"source": "hatchery_base", "suites": ["PT-REC", "PT-ART"]},
+    "H-EXP-01": {"source": "hatchery_base", "suites": ["PT-EXP"]},
+    "H-EXT-01": {"source": "hatchery_overlay", "suites": ["PT-PRE"]},
+    "H-NPU-TOP-01": {"source": "hatchery_overlay", "suites": ["PT-ID", "PT-TOP"]},
+    "H-NPU-PROT-01": {"source": "hatchery_overlay", "suites": ["PT-NPU"]},
+    "H-NPU-PROT-02": {"source": "hatchery_overlay", "suites": ["PT-NPU"]},
+    "H-NPU-CON-01": {"source": "hatchery_overlay", "suites": ["PT-CON"]},
+    "H-NPU-CON-02": {"source": "hatchery_overlay", "suites": ["PT-CON"]},
+    "H-NPU-REC-01": {"source": "hatchery_overlay", "suites": ["PT-REC"]},
+    "H-LIV-01a": {"source": "hatchery_overlay", "suites": ["PT-LIV"]},
+    "H-LIV-01b": {"source": "hatchery_overlay", "suites": ["PT-LIV"]},
+    "H-LIV-01c": {"source": "hatchery_overlay", "suites": ["PT-LIV"]},
+    "H-LIV-01d": {"source": "hatchery_overlay", "suites": ["PT-LIV"]},
+    "H-LIV-01e": {"source": "hatchery_overlay", "suites": ["PT-LIV"]},
+    "H-LIV-01f": {"source": "hatchery_overlay", "suites": ["PT-LIV"]},
+    "H-LIV-01g": {"source": "hatchery_overlay", "suites": ["PT-LIV"]}
+  },
+  "gate_sets": {
+    "evidence_common_v1": {"extends": [], "members": ["H-EXP-01", "H-LIV-01a", "H-LIV-01b", "H-LIV-01c", "H-LIV-01d", "H-LIV-01e", "H-LIV-01f", "H-LIV-01g"]},
+    "hatchery_common_v1": {"extends": ["evidence_common_v1"], "members": ["H-TOP-01"]},
+    "hatchery_rocm_adm_v1": {"extends": ["hatchery_common_v1"], "members": ["H-FP-01", "H-ADM-01", "H-ADM-02", "H-ADM-03", "H-ADM-04", "H-GROW-01", "H-PROT-01", "H-PROT-02", "H-ORD-01", "H-CON-01", "H-CON-02", "H-EVD-01", "H-REC-01"]},
+    "hatchery_rocm_pre_v1": {"extends": ["hatchery_common_v1"], "members": ["H-FP-01", "H-PRE-01", "H-PRE-02", "H-PRE-03", "H-PRE-04", "H-EXT-01", "H-PROT-01", "H-PROT-02", "H-ORD-01", "H-CON-02", "H-EVD-01", "H-REC-01"]},
+    "hatchery_rocm_sta_v1": {"extends": ["hatchery_common_v1"], "members": ["H-FP-01", "H-STA-01", "H-CON-01", "H-CON-02", "H-EVD-01", "H-REC-01"]},
+    "hatchery_rocm_rec_v1": {"extends": ["hatchery_common_v1"], "members": ["H-EVD-01", "H-CON-02", "H-REC-01"]},
+    "xdna2_npu_flm_conflict_v1": {"extends": ["evidence_common_v1"], "members": ["H-NPU-TOP-01", "H-NPU-01", "H-NPU-PROT-01", "H-NPU-PROT-02", "H-NPU-CON-01", "H-NPU-CON-02", "H-EVD-01", "H-NPU-REC-01"]}
+  },
+  "platform_predicates": {
+    "macos-metal-apple-silicon": {"os": "macos", "provider": "metal", "accelerator": "metal", "architectures": ["*"], "channels": ["single"], "topology": "unified"},
+    "linux-nvidia-cuda-listed": {"os": "linux", "provider": "cuda", "accelerator": "nvidia_gpu", "architectures": ["sm_75", "sm_80", "sm_86", "sm_89", "sm_90", "sm_100", "sm_120", "sm_121"], "channels": ["single"], "topology": "provider_resolved"},
+    "windows-nvidia-cuda-listed": {"os": "windows", "provider": "cuda", "accelerator": "nvidia_gpu", "architectures": ["sm_75", "sm_80", "sm_86", "sm_89", "sm_90", "sm_100", "sm_120", "sm_121"], "channels": ["single"], "topology": "provider_resolved"},
+    "linux-nvidia-cuda-any": {"os": "linux", "provider": "cuda", "accelerator": "nvidia_gpu", "architectures": ["*"], "channels": ["single"], "topology": "provider_resolved"},
+    "windows-nvidia-cuda-any": {"os": "windows", "provider": "cuda", "accelerator": "nvidia_gpu", "architectures": ["*"], "channels": ["single"], "topology": "provider_resolved"},
+    "linux-amd-vulkan": {"os": "linux", "provider": "vulkan", "accelerator": "amd_gpu", "architectures": ["*"], "channels": ["single"], "topology": "provider_resolved"},
+    "windows-amd-vulkan": {"os": "windows", "provider": "vulkan", "accelerator": "amd_gpu", "architectures": ["*"], "channels": ["single"], "topology": "provider_resolved"},
+    "linux-nvidia-vulkan": {"os": "linux", "provider": "vulkan", "accelerator": "nvidia_gpu", "architectures": ["*"], "channels": ["single"], "topology": "provider_resolved"},
+    "windows-nvidia-vulkan": {"os": "windows", "provider": "vulkan", "accelerator": "nvidia_gpu", "architectures": ["*"], "channels": ["single"], "topology": "provider_resolved"},
+    "linux-amd-rocm-llamacpp": {"os": "linux", "provider": "rocm", "accelerator": "amd_gpu", "architectures": ["gfx103X", "gfx110X", "gfx1150", "gfx1151", "gfx1152", "gfx120X", "gfx908", "gfx90a", "gfx942"], "channels": ["stable", "nightly"], "topology": "provider_resolved"},
+    "linux-amd-rocm-llamacpp-gfx950-stable": {"os": "linux", "provider": "rocm", "accelerator": "amd_gpu", "architectures": ["gfx950"], "channels": ["stable"], "topology": "provider_resolved"},
+    "windows-amd-rocm-llamacpp": {"os": "windows", "provider": "rocm", "accelerator": "amd_gpu", "architectures": ["gfx103X", "gfx110X", "gfx1150", "gfx1151", "gfx1152", "gfx120X"], "channels": ["stable", "nightly"], "topology": "provider_resolved"},
+    "linux-amd-rocm-whisper": {"os": "linux", "provider": "rocm", "accelerator": "amd_gpu", "architectures": ["gfx110X", "gfx1150", "gfx1151", "gfx120X"], "channels": ["single"], "topology": "provider_resolved"},
+    "windows-amd-rocm-whisper": {"os": "windows", "provider": "rocm", "accelerator": "amd_gpu", "architectures": ["gfx110X", "gfx1150", "gfx1151", "gfx120X"], "channels": ["single"], "topology": "provider_resolved"},
+    "linux-amd-rocm-vllm": {"os": "linux", "provider": "rocm", "accelerator": "amd_gpu", "architectures": ["gfx110X", "gfx1150", "gfx1151", "gfx120X"], "channels": ["single"], "topology": "provider_resolved"},
+    "linux-amd-rocm-standard": {"os": "linux", "provider": "rocm", "accelerator": "amd_gpu", "architectures": ["gfx103X", "gfx110X", "gfx1150", "gfx1151", "gfx1152", "gfx120X"], "channels": ["single"], "topology": "provider_resolved"},
+    "windows-amd-rocm-standard": {"os": "windows", "provider": "rocm", "accelerator": "amd_gpu", "architectures": ["gfx103X", "gfx110X", "gfx1150", "gfx1151", "gfx1152", "gfx120X"], "channels": ["single"], "topology": "provider_resolved"},
+    "linux-amd-rocm-thenoise": {"os": "linux", "provider": "rocm", "accelerator": "amd_gpu", "architectures": ["gfx1150", "gfx1151", "gfx1152"], "channels": ["single"], "topology": "provider_resolved"},
+    "linux-amd-rocm-open": {"os": "linux", "provider": "rocm", "accelerator": "amd_gpu", "architectures": ["*"], "channels": ["single"], "topology": "provider_resolved"},
+    "windows-amd-rocm-open": {"os": "windows", "provider": "rocm", "accelerator": "amd_gpu", "architectures": ["*"], "channels": ["single"], "topology": "provider_resolved"},
+    "linux-xdna2": {"os": "linux", "provider": "xdna2", "accelerator": "amd_npu", "architectures": ["XDNA2"], "channels": ["single"], "topology": "npu_compatibility"},
+    "windows-xdna2": {"os": "windows", "provider": "xdna2", "accelerator": "amd_npu", "architectures": ["XDNA2"], "channels": ["single"], "topology": "npu_compatibility"}
+  },
+  "variants": [
+    {"id": "llamacpp-metal", "recipe": "llamacpp", "backend": "metal", "platforms": ["macos-metal-apple-silicon"], "model_types": ["llm", "embedding", "reranking"], "constraints": "apple_unified", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "llamacpp-cuda", "recipe": "llamacpp", "backend": "cuda", "platforms": ["linux-nvidia-cuda-listed", "windows-nvidia-cuda-listed"], "model_types": ["llm", "embedding", "reranking"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "llamacpp-vulkan", "recipe": "llamacpp", "backend": "vulkan", "platforms": ["linux-amd-vulkan", "windows-amd-vulkan"], "model_types": ["llm", "embedding", "reranking"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "llamacpp-rocm", "recipe": "llamacpp", "backend": "rocm", "platforms": ["linux-amd-rocm-llamacpp", "linux-amd-rocm-llamacpp-gfx950-stable", "windows-amd-rocm-llamacpp"], "model_types": ["llm", "embedding", "reranking"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "whispercpp-metal", "recipe": "whispercpp", "backend": "metal", "platforms": ["macos-metal-apple-silicon"], "model_types": ["transcription"], "constraints": "apple_unified", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "whispercpp-vulkan", "recipe": "whispercpp", "backend": "vulkan", "platforms": ["linux-amd-vulkan", "windows-amd-vulkan"], "model_types": ["transcription"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "whispercpp-rocm", "recipe": "whispercpp", "backend": "rocm", "platforms": ["linux-amd-rocm-whisper", "windows-amd-rocm-whisper"], "model_types": ["transcription"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "whispercpp-npu", "recipe": "whispercpp", "backend": "npu", "platforms": ["windows-xdna2"], "model_types": ["transcription"], "constraints": "npu_exclusive", "operations": "npu_compatibility", "recovery": "native_subprocess_tree", "suites": "npu_compatibility", "fallbacks": "npu_compatibility", "evidence_ceiling": "modeled"},
+    {"id": "sd-cpp-metal", "recipe": "sd-cpp", "backend": "metal", "platforms": ["macos-metal-apple-silicon"], "model_types": ["image"], "constraints": "apple_unified", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "sd-cpp-cuda", "recipe": "sd-cpp", "backend": "cuda", "platforms": ["linux-nvidia-cuda-listed", "windows-nvidia-cuda-listed"], "model_types": ["image"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "sd-cpp-vulkan", "recipe": "sd-cpp", "backend": "vulkan", "platforms": ["linux-amd-vulkan", "windows-amd-vulkan", "linux-nvidia-vulkan", "windows-nvidia-vulkan"], "model_types": ["image"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "sd-cpp-rocm", "recipe": "sd-cpp", "backend": "rocm", "platforms": ["linux-amd-rocm-standard", "windows-amd-rocm-standard"], "model_types": ["image"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "kokoro-metal", "recipe": "kokoro", "backend": "metal", "platforms": ["macos-metal-apple-silicon"], "model_types": ["tts"], "constraints": "apple_unified", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "vllm-rocm", "recipe": "vllm", "backend": "rocm", "platforms": ["linux-amd-rocm-vllm"], "model_types": ["llm"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "python_or_async_job_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "thenoise-rocm", "recipe": "thenoise", "backend": "rocm", "platforms": ["linux-amd-rocm-thenoise"], "model_types": ["image"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "thinksound-cuda", "recipe": "thinksound", "backend": "cuda", "platforms": ["linux-nvidia-cuda-any", "windows-nvidia-cuda-any"], "model_types": ["audio-generation"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "python_or_async_job_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "thinksound-vulkan", "recipe": "thinksound", "backend": "vulkan", "platforms": ["linux-amd-vulkan", "windows-amd-vulkan", "linux-nvidia-vulkan", "windows-nvidia-vulkan"], "model_types": ["audio-generation"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "python_or_async_job_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "thinksound-rocm", "recipe": "thinksound", "backend": "rocm", "platforms": ["linux-amd-rocm-standard", "windows-amd-rocm-standard"], "model_types": ["audio-generation"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "python_or_async_job_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "acestep-cuda", "recipe": "acestep", "backend": "cuda", "platforms": ["linux-nvidia-cuda-any", "windows-nvidia-cuda-any"], "model_types": ["audio-generation"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "python_or_async_job_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "acestep-vulkan", "recipe": "acestep", "backend": "vulkan", "platforms": ["linux-amd-vulkan", "windows-amd-vulkan", "linux-nvidia-vulkan", "windows-nvidia-vulkan"], "model_types": ["audio-generation"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "python_or_async_job_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "acestep-rocm", "recipe": "acestep", "backend": "rocm", "platforms": ["linux-amd-rocm-standard", "windows-amd-rocm-standard"], "model_types": ["audio-generation"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "python_or_async_job_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "trellis-cuda", "recipe": "trellis", "backend": "cuda", "platforms": ["linux-nvidia-cuda-any", "windows-nvidia-cuda-any"], "model_types": ["mesh"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "python_or_async_job_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "trellis-vulkan", "recipe": "trellis", "backend": "vulkan", "platforms": ["linux-amd-vulkan", "windows-amd-vulkan", "linux-nvidia-vulkan", "windows-nvidia-vulkan"], "model_types": ["mesh"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "python_or_async_job_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "trellis-rocm", "recipe": "trellis", "backend": "rocm", "platforms": ["linux-amd-rocm-standard", "windows-amd-rocm-standard"], "model_types": ["mesh"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "python_or_async_job_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "openmoss-cuda", "recipe": "openmoss", "backend": "cuda", "platforms": ["linux-nvidia-cuda-any", "windows-nvidia-cuda-any"], "model_types": ["tts"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "openmoss-vulkan", "recipe": "openmoss", "backend": "vulkan", "platforms": ["linux-amd-vulkan", "windows-amd-vulkan", "linux-nvidia-vulkan", "windows-nvidia-vulkan"], "model_types": ["tts"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "openmoss-rocm", "recipe": "openmoss", "backend": "rocm", "platforms": ["linux-amd-rocm-open", "windows-amd-rocm-open"], "model_types": ["tts"], "constraints": "provider_resolved_gpu", "operations": "gpu_resource", "recovery": "native_subprocess_tree", "suites": "gpu_standard", "fallbacks": "gpu_standard", "evidence_ceiling": "modeled"},
+    {"id": "flm-npu", "recipe": "flm", "backend": "npu", "platforms": ["linux-xdna2", "windows-xdna2"], "model_types": ["llm", "embedding", "transcription"], "constraints": "npu_flm", "operations": "npu_compatibility", "recovery": "flm_system_managed", "suites": "npu_compatibility", "fallbacks": "npu_compatibility", "evidence_ceiling": "modeled"},
+    {"id": "ryzenai-llm-npu", "recipe": "ryzenai-llm", "backend": "npu", "platforms": ["windows-xdna2"], "model_types": ["llm"], "constraints": "npu_exclusive", "operations": "npu_compatibility", "recovery": "native_subprocess_tree", "suites": "npu_compatibility", "fallbacks": "npu_compatibility", "evidence_ceiling": "modeled"}
+  ],
+  "exact_cells": [
+    {
+      "cell_id": "H-ROCM-ADM-GTT-HOST-v1",
+      "base_variant": "llamacpp-rocm",
+      "scope": "Predictive admission and lifetime growth over canonical GTT headroom plus the host-MemAvailable floor",
+      "match": {"platform": "linux-amd-rocm-llamacpp", "backend_channel": "stable", "hardware_profile": "hatchery-gfx1151-shared-gtt-v1", "model_types": ["llm"], "configuration_profile": "profile-free-residency-estimation-v1-text-only", "workload_profile": "hatchery-text-generation-campaign-v1", "predictor_rule": "hatchery-llamacpp-rocm-profile-free-v1", "observation_contract": "hatchery-gtt-host-observation-v1", "recovery": "native_subprocess_tree"},
+      "operation_template": "ADM",
+      "operation_leaf": "admission",
+      "constraints": ["gpu_shared_residency", "host_memavailable_floor", "model_type_pool", "ownership"],
+      "evidence_ceiling": "validated",
+      "capability_level": "unsupported",
+      "delivery_state": "absent",
+      "runtime_bindings": ["device_identity", "backend_artifact_digest", "source_build_dependency_closure", "driver_runtime_closure", "model_manifest_digest", "normalized_configuration_digest", "evidence_index_digest", "evidence_liveness_lease"],
+      "campaign_gate_set": "hatchery_rocm_adm_v1",
+      "promotion_target": "validated, with separately catalog-assigned validated_predictor confidence for the complete manifest",
+      "fallbacks": {"insufficient_capacity_authority": "hatchery_rocm_admission_refuse_unknown_capacity_v1"}
+    },
+    {
+      "cell_id": "H-ROCM-PRE-GTT-HOST-v1",
+      "base_variant": "llamacpp-rocm",
+      "scope": "Measured-pressure reclamation over canonical GTT headroom plus the host-MemAvailable floor",
+      "match": {"platform": "linux-amd-rocm-llamacpp", "backend_channel": "stable", "hardware_profile": "hatchery-gfx1151-shared-gtt-v1", "model_types": ["llm"], "configuration_profile": "profile-free-residency-estimation-v1-text-only", "workload_profile": "hatchery-text-generation-campaign-v1", "predictor_rule": "hatchery-llamacpp-rocm-profile-free-v1", "observation_contract": "hatchery-gtt-host-observation-v1", "recovery": "native_subprocess_tree"},
+      "operation_template": "PRE",
+      "operation_leaf": "pressure_reclamation",
+      "constraints": ["gpu_shared_residency", "host_memavailable_floor", "model_type_pool", "ownership"],
+      "evidence_ceiling": "validated",
+      "capability_level": "unsupported",
+      "delivery_state": "absent",
+      "runtime_bindings": ["device_identity", "backend_artifact_digest", "source_build_dependency_closure", "driver_runtime_closure", "model_manifest_digest", "normalized_configuration_digest", "evidence_index_digest", "evidence_liveness_lease"],
+      "campaign_gate_set": "hatchery_rocm_pre_v1",
+      "promotion_target": "validated",
+      "fallbacks": {"valid_reporting_without_action_authority": "hatchery_rocm_pressure_report_only_v1", "invalid_reporting_evidence": "hatchery_rocm_pressure_disabled_invalid_evidence_v1"}
+    },
+    {
+      "cell_id": "H-ROCM-STA-GTT-HOST-v1",
+      "base_variant": "llamacpp-rocm",
+      "scope": "Grouped startup admission over canonical GTT headroom plus the host-MemAvailable floor",
+      "match": {"platform": "linux-amd-rocm-llamacpp", "backend_channel": "stable", "hardware_profile": "hatchery-gfx1151-shared-gtt-v1", "model_types": ["llm"], "configuration_profile": "profile-free-residency-estimation-v1-text-only", "workload_profile": "hatchery-text-generation-campaign-v1", "predictor_rule": "hatchery-llamacpp-rocm-profile-free-v1", "observation_contract": "hatchery-gtt-host-observation-v1", "recovery": "native_subprocess_tree"},
+      "operation_template": "STA",
+      "operation_leaf": "startup_load",
+      "constraints": ["gpu_shared_residency", "host_memavailable_floor", "model_type_pool", "ownership"],
+      "evidence_ceiling": "validated",
+      "capability_level": "unsupported",
+      "delivery_state": "absent",
+      "runtime_bindings": ["device_identity", "backend_artifact_digest", "source_build_dependency_closure", "driver_runtime_closure", "model_manifest_digest", "normalized_configuration_digest", "evidence_index_digest", "evidence_liveness_lease"],
+      "campaign_gate_set": "hatchery_rocm_sta_v1",
+      "promotion_target": "validated only after grouped startup exists",
+      "fallbacks": {"insufficient_startup_authority": "hatchery_rocm_startup_block_group_v1"}
+    },
+    {
+      "cell_id": "H-ROCM-REC-GTT-HOST-OWN-v1",
+      "base_variant": "llamacpp-rocm",
+      "scope": "Prior-epoch lifecycle recovery over GTT, host memory, and Lemonade-owned process and claim closure",
+      "match": {"platform": "linux-amd-rocm-llamacpp", "backend_channel": "stable", "hardware_profile": "hatchery-gfx1151-shared-gtt-v1", "model_types": ["llm"], "configuration_profile": "profile-free-residency-estimation-v1-text-only", "workload_profile": "hatchery-text-generation-campaign-v1", "predictor_rule": "hatchery-llamacpp-rocm-profile-free-v1", "observation_contract": "hatchery-gtt-host-observation-v1", "recovery": "native_subprocess_tree"},
+      "operation_template": "REC",
+      "operation_leaf": "prior_epoch_owner_cleanup",
+      "constraints": ["gpu_shared_residency", "host_memavailable_floor", "model_type_pool", "ownership"],
+      "evidence_ceiling": "validated",
+      "capability_level": "unsupported",
+      "delivery_state": "absent",
+      "runtime_bindings": ["device_identity", "backend_artifact_digest", "source_build_dependency_closure", "driver_runtime_closure", "model_manifest_digest", "normalized_configuration_digest", "evidence_index_digest", "evidence_liveness_lease"],
+      "campaign_gate_set": "hatchery_rocm_rec_v1",
+      "promotion_target": "validated",
+      "fallbacks": {"unproven_release": "hatchery_rocm_recovery_block_readiness_v1"}
+    }
+  ],
+  "compatibility_contracts": [
+    {
+      "contract_id": "H-NPU-FLM-CONFLICT-XDNA2-v1",
+      "scope": "Cross-family XDNA2 NPU admission compatibility; no capacity or pressure authority",
+      "platform_cases": [
+        {"platform": "windows-xdna2", "coexist_by_type_variant": "flm-npu", "exclusive_variant": "whispercpp-npu"},
+        {"platform": "windows-xdna2", "coexist_by_type_variant": "flm-npu", "exclusive_variant": "ryzenai-llm-npu"}
+      ],
+      "directions": ["coexist_by_type_incoming", "exclusive_incoming"],
+      "incumbent_states": ["unpinned_idle", "pinned", "in_use"],
+      "model_type_coverage": "all_declared_by_participant",
+      "operation_template": "NPC",
+      "operation_leaf": "admission",
+      "relation_constraints": ["npu_cross_family"],
+      "evidence_ceiling": "modeled",
+      "capability_level": "unsupported",
+      "delivery_state": "absent",
+      "runtime_authority": "none",
+      "evidence_mode": "synthetic_only",
+      "suite_set": "npu_compatibility",
+      "campaign_gate_set": "xdna2_npu_flm_conflict_v1",
+      "promotion_target": "modeled",
+      "fallbacks": {"insufficient_displacement_authority": "residency_npu_conflict_preserve_refuse_v1"}
+    }
+  ],
+  "promotion_roster": {
+    "exact_cells": ["H-ROCM-ADM-GTT-HOST-v1", "H-ROCM-PRE-GTT-HOST-v1", "H-ROCM-STA-GTT-HOST-v1", "H-ROCM-REC-GTT-HOST-OWN-v1"],
+    "compatibility_contracts": ["H-NPU-FLM-CONFLICT-XDNA2-v1"]
+  },
+  "exclusions": [
+    {
+      "id": "cpu-residency",
+      "source_support": [
+        {"recipe": "llamacpp", "backend": "cpu", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64", "arm64"],
+        "channels": ["single"]},
+        {"recipe": "llamacpp", "backend": "cpu", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64", "arm64"],
+        "channels": ["single"]},
+        {"recipe": "whispercpp", "backend": "cpu", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "whispercpp", "backend": "cpu", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "sd-cpp", "backend": "cpu", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "sd-cpp", "backend": "cpu", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "kokoro", "backend": "cpu", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "kokoro", "backend": "cpu", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "moonshine", "backend": "cpu", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "moonshine", "backend": "cpu", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64", "arm64"],
+        "channels": ["single"]},
+        {"recipe": "moonshine", "backend": "cpu", "os": "macos", "accelerator": "cpu", "architectures": ["arm64"],
+        "channels": ["single"]},
+        {"recipe": "onnxruntime", "backend": "cpu", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "onnxruntime", "backend": "cpu", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64", "arm64"],
+        "channels": ["single"]},
+        {"recipe": "onnxruntime", "backend": "cpu", "os": "macos", "accelerator": "cpu", "architectures": ["arm64"],
+        "channels": ["single"]}
+      ],
+      "retained_contracts": ["model_type_pool", "ownership", "verified_release"],
+      "behavior": "existing CPU compatibility path; no memory-capacity automation"
+    },
+    {
+      "id": "cpu-vulkan-residency",
+      "source_support": [
+        {"recipe": "llamacpp", "backend": "vulkan", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64", "arm64"],
+        "channels": ["single"]},
+        {"recipe": "llamacpp", "backend": "vulkan", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64", "arm64"],
+        "channels": ["single"]},
+        {"recipe": "whispercpp", "backend": "vulkan", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "whispercpp", "backend": "vulkan", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "sd-cpp", "backend": "vulkan", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "sd-cpp", "backend": "vulkan", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "thinksound", "backend": "vulkan", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "thinksound", "backend": "vulkan", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "acestep", "backend": "vulkan", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "acestep", "backend": "vulkan", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "trellis", "backend": "vulkan", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "trellis", "backend": "vulkan", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "openmoss", "backend": "vulkan", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]},
+        {"recipe": "openmoss", "backend": "vulkan", "os": "windows", "accelerator": "cpu", "architectures": ["x86_64"],
+        "channels": ["single"]}
+      ],
+      "retained_contracts": ["model_type_pool", "ownership", "verified_release"],
+      "behavior": "CPU-resolved Vulkan compatibility path; no GPU or memory-capacity automation"
+    },
+    {
+      "id": "llamacpp-system-ambiguous",
+      "source_support": [{"recipe": "llamacpp", "backend": "system", "os": "linux", "accelerator": "cpu", "architectures": ["x86_64", "arm64"],
+        "channels": ["single"]}],
+      "retained_contracts": ["model_type_pool", "ownership", "verified_release"],
+      "behavior": "attest one concrete implementation or refuse; never inherit GPU authority by selector name"
+    },
+    {"id": "remote-cloud", "empty_support_recipes": ["cloud"], "behavior": "remote backend with no local residency cell"},
+    {"id": "collections", "non_descriptor_recipes": ["collection.omni", "collection.router"], "behavior": "resolve concrete child recipes before support-cell selection"}
+  ],
+  "coverage_policy": {
+    "classification_disposition": "exclude_cpu_onnxruntime_compatibility",
+    "host_floor_rule": "constraint_profile_only",
+    "multi_device_rule": "separate_exact_topology_placement_cell"
+  }
+}
