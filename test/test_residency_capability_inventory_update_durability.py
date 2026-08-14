@@ -61,16 +61,17 @@ def _injected_replace(source, destination, *args, **kwargs):
         _log('REPLACE ' + destination)
     return result
 
-def _injected_unlink(path, *args, **kwargs):
-    result = _real_unlink(path, *args, **kwargs)
-    path = os.path.abspath(os.fspath(path))
-    if path == os.environ['JOURNAL_PATH'] or '.residency-' in path:
-        _log('UNLINK ' + path)
-    return result
+class _InjectedUnlink:
+    def __call__(self, path, *args, **kwargs):
+        result = _real_unlink(path, *args, **kwargs)
+        path = os.path.abspath(os.fspath(path))
+        if path == os.environ['JOURNAL_PATH'] or '.residency-' in path:
+            _log('UNLINK ' + path)
+        return result
 
 os.fsync = _injected_fsync
 os.replace = _injected_replace
-os.unlink = _injected_unlink
+os.unlink = _InjectedUnlink()
 """)
             | {
                 "TRANSACTION_EVENT_LOG": str(event_log),
