@@ -226,6 +226,7 @@ class ProjectionValidation:
     """Validated public renderer projection after orphan closure."""
 
     source_support_baseline: str
+    source_tree_objects: dict[str, str]
     variants: list[dict[str, Any]]
     exclusions: list[dict[str, Any]]
     profile_semantics: dict[str, dict[str, Any]]
@@ -246,6 +247,7 @@ class ProjectionValidation:
 
         return {
             "source_support_baseline": self.source_support_baseline,
+            "source_tree_objects": self.source_tree_objects,
             "variants": self.variants,
             "exclusions": self.exclusions,
             "profile_semantics": self.profile_semantics,
@@ -334,6 +336,7 @@ def validate_closure_stage(
 
     return ProjectionValidation(
         source_support_baseline=vocabulary.source.baseline,
+        source_tree_objects=vocabulary.source.tree_objects,
         variants=variants.variants,
         exclusions=exclusions.exclusions,
         profile_semantics=profiles.registries,

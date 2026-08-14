@@ -56,6 +56,11 @@ class ResidencyCapabilityInventoryCliTest(ResidencyCapabilityInventoryCliCase):
             f"| Support baseline | `{self.inventory['source_support_baseline']}` |",
             result.stdout,
         )
+        self.assertIn(
+            "| C++ source tree `src/cpp` | "
+            f"`{self.inventory['source_tree_objects']['src/cpp']}` |",
+            result.stdout,
+        )
         self.assertIn("### Material profile semantic identities", result.stdout)
         self.assertIn("### Material profile document bindings", result.stdout)
         self.assertIn(

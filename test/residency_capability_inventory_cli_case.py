@@ -222,6 +222,11 @@ class ResidencyCapabilityInventoryCliCase(unittest.TestCase):
             source_blobs[path] = self._run_git(
                 "rev-parse", f"{commit}:{path}"
             ).stdout.strip()
+        source_trees = self.inventory.get("source_tree_objects", {})
+        for path in source_trees:
+            source_trees[path] = self._run_git(
+                "rev-parse", f"{commit}:{path}"
+            ).stdout.strip()
         self._write_inventory()
         return commit
 

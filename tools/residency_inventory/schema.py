@@ -35,6 +35,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "source_support_baseline",
     "campaign_base_binding",
     "source_file_blobs",
+    "source_tree_objects",
     "enums",
     "operation_sets",
     "constraint_profiles",
@@ -110,8 +111,8 @@ def validate_vocabulary_stage(
     """Validate the envelope, frozen inputs, enums, and platform registry shape."""
 
     require_exact_keys(inventory, EXPECTED_TOP_LEVEL_KEYS, "inventory")
-    if inventory.get("schema_version") != 4:
-        fail("schema_version must be 4")
+    if inventory.get("schema_version") != 5:
+        fail("schema_version must be 5")
 
     source = validate_source_closure(repo, inventory)
     provider_keys, topology_rules = validate_provider_and_topology_rules(
@@ -184,7 +185,7 @@ def validate_vocabulary_stage(
 
 
 def validate_inventory(repo: Path, inventory: dict[str, Any]) -> dict[str, Any]:
-    """Run the schema-v4 stages and return the renderer's normalized projection."""
+    """Run the current schema stages and return the normalized projection."""
 
     vocabulary = validate_vocabulary_stage(repo, inventory)
     policy = validate_policy_registry_stage(inventory, vocabulary)

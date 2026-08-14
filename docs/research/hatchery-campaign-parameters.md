@@ -28,7 +28,7 @@ The first profile contains four independently promoted Hatchery runtime cells pl
 At this fork revision, every row below has `capability_level=unsupported` and `delivery_state=absent`; the complete portable runtime and catalog are not implemented. `Evidence ceiling` is the strongest result the frozen campaign may justify after delivery, not a current status.
 
 <!-- BEGIN GENERATED HATCHERY EXACT CELLS -->
-Support baseline: `d2a4f85dbf44b7671319ed0010ad936a71dedf15`
+Support baseline: `a505bbc702cc1fcd44ef73c44defabc98c36d505`
 
 #### Runtime exact cells
 

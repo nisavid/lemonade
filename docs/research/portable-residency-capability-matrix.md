@@ -6,7 +6,7 @@ Date: 2026-08-13
 
 ## Scope baseline
 
-This matrix is frozen against upstream Lemonade `main` commit [`d2a4f85dbf44b7671319ed0010ad936a71dedf15`](https://github.com/lemonade-sdk/lemonade/commit/d2a4f85dbf44b7671319ed0010ad936a71dedf15). It covers every residency-relevant GPU and NPU recipe/backend support row declared by that source. A later upstream support change creates a new matrix revision; a new backend, operating system, accelerator family, topology, model type, or memory-affecting configuration never inherits authority from a similarly named row.
+This matrix is frozen against upstream Lemonade `main` commit [`a505bbc702cc1fcd44ef73c44defabc98c36d505`](https://github.com/lemonade-sdk/lemonade/commit/a505bbc702cc1fcd44ef73c44defabc98c36d505). It covers every residency-relevant GPU and NPU recipe/backend support row declared by that source. A later upstream support change creates a new matrix revision; a new backend, operating system, accelerator family, topology, model type, or memory-affecting configuration never inherits authority from a similarly named row.
 
 GPU model residency and NPU/FLM compatibility are in scope. CPU-only backends, remote `cloud`, and collection recipes are not independent residency cells:
 
@@ -98,15 +98,15 @@ Runtime cells use `ADM`, `LFR`, `PRE`, `STA`, `REC`, `UNL`, and `PIN` as applica
 
 The machine-readable [portable support inventory](portable-residency-capability-inventory.json) is authoritative for backend variants, finite platform predicates, source-derived model types, provider/topology rules, constraint/operation/recovery/suite references, atomic promotion gates, evidence ceilings, exact runtime cells, evidence-only compatibility contracts, and exclusions. It binds the complete descriptor/parser and model-type input closure at the frozen upstream commit. `tools/validate_residency_capability_inventory.py` derives upstream support from `LEMON_BACKENDS` and each descriptor, requires every support row to map exactly once to a target variant or explicit exclusion, validates source-derived model types and the closed promotion/gate/fallback registries, and byte-checks the generated projections.
 
-The validator requires the exact pinned commit object and every path/blob object named by `source_file_blobs`; no branch tip or remote-tracking ref is an authority input. Fetch the immutable object directly from the public upstream URL, then validate the declared object closure:
+The validator requires the exact pinned commit object, every path/blob object named by `source_file_blobs`, and every tree object named by `source_tree_objects`; no branch tip or remote-tracking ref is an authority input. Fetch the immutable object directly from the public upstream URL, then validate the declared object closure:
 
 ```bash
-git fetch --no-tags --depth=1 https://github.com/lemonade-sdk/lemonade.git d2a4f85dbf44b7671319ed0010ad936a71dedf15
-git cat-file -e 'd2a4f85dbf44b7671319ed0010ad936a71dedf15^{commit}'
+git fetch --no-tags --depth=1 https://github.com/lemonade-sdk/lemonade.git a505bbc702cc1fcd44ef73c44defabc98c36d505
+git cat-file -e 'a505bbc702cc1fcd44ef73c44defabc98c36d505^{commit}'
 python3 tools/validate_residency_capability_inventory.py
 ```
 
-If a local remote is already configured to fetch that public repository, `git fetch --no-tags --depth=1 <remote-name> d2a4f85dbf44b7671319ed0010ad936a71dedf15` is an equivalent transport alternative. The procedure does not require a remote named `upstream`. Fetching supplies objects only; the validator still compares the exact commit SHA and every declared source-path blob SHA from the inventory before deriving support.
+If a local remote is already configured to fetch that public repository, `git fetch --no-tags --depth=1 <remote-name> a505bbc702cc1fcd44ef73c44defabc98c36d505` is an equivalent transport alternative. The procedure does not require a remote named `upstream`. Fetching supplies objects only; the validator still compares the exact commit SHA and every declared source-path blob and tree identity from the inventory before deriving support.
 
 Material Markdown bindings use canonical UTF-8 text with CRLF and CR translated to LF before SHA-256. A `path#heading` binding includes the selected heading line and its section through, but not including, the next heading of the same or higher level. The complete campaign-base binding uses the same canonical-text convention. This keeps content identity stable across POSIX and Windows checkouts while making heading changes material.
 
@@ -119,7 +119,8 @@ The table below is a generated human projection, not a second source of cell app
 
 | Field | Identity |
 | --- | --- |
-| Support baseline | `d2a4f85dbf44b7671319ed0010ad936a71dedf15` |
+| Support baseline | `a505bbc702cc1fcd44ef73c44defabc98c36d505` |
+| C++ source tree `src/cpp` | `c242d0c885eb78ee62b38a25da8a17abb65a01fa` |
 
 ### Backend variants
 

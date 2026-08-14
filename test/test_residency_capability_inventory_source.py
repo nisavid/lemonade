@@ -77,7 +77,7 @@ subprocess.run = run
 
         self.assert_invalid(result, "gfx950/nightly")
 
-    def test_schema_version_must_be_four(self) -> None:
+    def test_schema_version_must_be_five(self) -> None:
         def use_old_schema(inventory: dict[str, object]) -> None:
             inventory["schema_version"] = 3
 
@@ -85,7 +85,68 @@ subprocess.run = run
 
         result = self._run_cli("--render")
 
-        self.assert_invalid(result, "schema_version must be 4")
+        self.assert_invalid(result, "schema_version must be 5")
+
+    def test_source_baseline_object_must_be_a_commit(self) -> None:
+        def select_blob_as_baseline(inventory: dict[str, object]) -> None:
+            inventory["source_support_baseline"] = inventory["source_file_blobs"][
+                "CMakeLists.txt"
+            ]
+
+        self._replace_inventory(select_blob_as_baseline)
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(result, "source support baseline must be a Git commit")
+        self.assertIn("got blob", result.stderr)
+
+    def test_frozen_source_blob_path_must_resolve_to_a_blob(self) -> None:
+        baseline = self.inventory["source_support_baseline"]
+        environment = self._sitecustomize_env(f"""
+import subprocess
+
+_real_run = subprocess.run
+
+
+def run(*args, **kwargs):
+    command = list(args[0])
+    if command[:3] == ["git", "cat-file", "-t"] and command[-1] == "{baseline}:CMakeLists.txt":
+        return subprocess.CompletedProcess(command, 0, stdout="tree\\n", stderr="")
+    return _real_run(*args, **kwargs)
+
+
+subprocess.run = run
+""")
+
+        result = self._run_cli("--render", env=environment)
+
+        self.assert_invalid(
+            result, "frozen source object CMakeLists.txt must be a Git blob"
+        )
+        self.assertIn("got tree", result.stderr)
+
+    def test_frozen_source_tree_path_must_resolve_to_a_tree(self) -> None:
+        baseline = self.inventory["source_support_baseline"]
+        environment = self._sitecustomize_env(f"""
+import subprocess
+
+_real_run = subprocess.run
+
+
+def run(*args, **kwargs):
+    command = list(args[0])
+    if command[:3] == ["git", "cat-file", "-t"] and command[-1] == "{baseline}:src/cpp":
+        return subprocess.CompletedProcess(command, 0, stdout="blob\\n", stderr="")
+    return _real_run(*args, **kwargs)
+
+
+subprocess.run = run
+""")
+
+        result = self._run_cli("--render", env=environment)
+
+        self.assert_invalid(result, "frozen source object src/cpp must be a Git tree")
+        self.assertIn("got blob", result.stderr)
 
     def test_malformed_descriptor_initializer_fails_closed(self) -> None:
         descriptor = "src/cpp/include/lemon/backends/llamacpp/llamacpp.h"
@@ -192,6 +253,113 @@ subprocess.run = run
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotEqual(result.stdout, accepted_render.stdout)
         self.assertEqual(result.stdout.count(descendant), 2)
+
+    def test_registry_selection_helper_is_a_required_source_input(self) -> None:
+        def omit_registry_helper(inventory: dict[str, object]) -> None:
+            inventory["source_file_blobs"].pop("src/cpp/include/lemon/registry_files.h")
+
+        self._replace_inventory(omit_registry_helper)
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(
+            result,
+            "missing=['src/cpp/include/lemon/registry_files.h']",
+        )
+
+    def test_selector_discovery_disables_git_color(self) -> None:
+        environment = self._sitecustomize_env("""
+import subprocess
+
+_real_run = subprocess.run
+
+
+def run(*args, **kwargs):
+    command = list(args[0])
+    if command[:2] == ["git", "grep"] and "--no-color" not in command:
+        return subprocess.CompletedProcess(
+            command, 2, stdout="", stderr="configured Git color escaped a path"
+        )
+    return _real_run(*args, **kwargs)
+
+
+subprocess.run = run
+""")
+
+        result = self._run_cli("--render", env=environment)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_backend_artifact_selector_override_is_frozen(self) -> None:
+        selector_path = "src/cpp/server/backends/acestep/acestep_server.cpp"
+        accepted_blobs = dict(self.inventory["source_file_blobs"])
+        self._commit_source_change(
+            selector_path,
+            lambda source: source.replace('"vae-BF16.gguf"', '"vae-F16.gguf"', 1),
+        )
+        self.inventory["source_file_blobs"] = accepted_blobs
+        self._write_inventory()
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(result, f"source blob mismatch for {selector_path}")
+
+    def test_new_backend_artifact_selector_override_must_be_frozen(self) -> None:
+        selector_path = "src/cpp/server/backends/vllm/vllm_server.cpp"
+        self._commit_source_change(
+            selector_path,
+            lambda source: source + "\n// select_checkpoint_files override fixture\n",
+        )
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(result, f"missing=['{selector_path}']")
+
+    def test_delegated_selector_helper_is_bound_by_the_cpp_tree(self) -> None:
+        accepted_trees = dict(self.inventory["source_tree_objects"])
+        helper_path = "src/cpp/include/lemon/backends/backend_utils.h"
+        self._commit_source_change(
+            helper_path,
+            lambda source: source + "\n// delegated artifact selector fixture\n",
+        )
+        self.inventory["source_tree_objects"] = accepted_trees
+        self._write_inventory()
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(result, "source tree mismatch for src/cpp")
+
+    def test_removed_backend_artifact_selector_override_is_rejected(self) -> None:
+        selector_path = "src/cpp/server/backends/acestep/acestep_server.cpp"
+        self._commit_source_change(
+            selector_path,
+            lambda source: source.replace(
+                "select_checkpoint_files", "retired_checkpoint_files", 1
+            ),
+        )
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(result, f"extra=['{selector_path}']")
+
+    def test_relocated_backend_artifact_selector_override_is_rejected(self) -> None:
+        old_path = "src/cpp/server/backends/acestep/acestep_server.cpp"
+        new_path = "src/cpp/server/backends/vllm/vllm_server.cpp"
+        self._commit_source_change(
+            old_path,
+            lambda source: source.replace(
+                "select_checkpoint_files", "retired_checkpoint_files", 1
+            ),
+        )
+        self._commit_source_change(
+            new_path,
+            lambda source: source + "\n// select_checkpoint_files relocation fixture\n",
+        )
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(result, f"missing=['{new_path}']")
+        self.assertIn(f"extra=['{old_path}']", result.stderr)
 
     def test_provider_must_match_the_source_backend(self) -> None:
         def mismatch_provider(inventory: dict[str, object]) -> None:
@@ -341,8 +509,8 @@ subprocess.run = run
         source = self.inventory_path.read_text(encoding="utf-8")
         self.inventory_path.write_text(
             source.replace(
-                '  "schema_version": 4,',
-                '  "schema_version": 4,\n  "schema_version": 4,',
+                '  "schema_version": 5,',
+                '  "schema_version": 5,\n  "schema_version": 5,',
                 1,
             ),
             encoding="utf-8",
