@@ -1,0 +1,59 @@
+diff --git c/test/test_residency_implementation_handoff.py w/test/test_residency_implementation_handoff.py
+index 23180421..072bcbd3 100644
+--- c/test/test_residency_implementation_handoff.py
++++ w/test/test_residency_implementation_handoff.py
+@@ -64,0 +65,12 @@ def _record_digest(record: dict[str, object]) -> str:
++def _directory_digest(root: Path) -> str:
++    digest = hashlib.sha256()
++    for path in sorted(
++        candidate for candidate in root.rglob("*") if candidate.is_file()
++    ):
++        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
++        digest.update(b"\0")
++        digest.update(path.read_bytes())
++        digest.update(b"\0")
++    return digest.hexdigest()
++
++
+@@ -66 +78 @@ class HandoffRepository:
+-    def __init__(self, root: Path):
++    def __init__(self, root: Path, *, object_format: str = "sha1"):
+@@ -67,0 +80 @@ class HandoffRepository:
++        self.object_format = object_format
+@@ -72 +85 @@ class HandoffRepository:
+-        self._git("init", "-q")
++        self._git("init", "-q", f"--object-format={object_format}")
+@@ -161,0 +175 @@ class HandoffRepository:
++            "import subprocess\n"
+@@ -166 +180 @@ class HandoffRepository:
+-            "    def test_output_exists(self):\n"
++            "    def test_output_and_pinned_tree_resolve(self):\n"
+@@ -167,0 +182,11 @@ class HandoffRepository:
++            "        result = subprocess.run(\n"
++            f"            ['git', 'rev-parse', '{task_base}^{{tree}}'],\n"
++            "            capture_output=True, text=True, check=False,\n"
++            "        )\n"
++            "        self.assertEqual(result.returncode, 0, result.stderr)\n"
++            "        object_format = subprocess.run(\n"
++            "            ['git', 'rev-parse', '--show-object-format'],\n"
++            "            capture_output=True, text=True, check=False,\n"
++            "        )\n"
++            "        self.assertEqual(object_format.returncode, 0, object_format.stderr)\n"
++            f"        self.assertEqual(object_format.stdout.strip(), {self.object_format!r})\n"
+@@ -492 +517 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
+-            fixture = HandoffRepository(Path(directory))
++            fixture = HandoffRepository(Path(directory), object_format="sha256")
+@@ -493,0 +519 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
++            source_digest = _directory_digest(fixture.root)
+@@ -497,5 +523,6 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
+-        self.assertEqual(result.returncode, 0, result.stderr)
+-        self.assertEqual(
+-            result.stdout,
+-            "portable residency implementation handoff: phase 0 valid\n",
+-        )
++            self.assertEqual(result.returncode, 0, result.stderr)
++            self.assertEqual(_directory_digest(fixture.root), source_digest)
++            self.assertEqual(
++                result.stdout,
++                "portable residency implementation handoff: phase 0 valid\n",
++            )
