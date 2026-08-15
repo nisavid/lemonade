@@ -16,11 +16,17 @@ You can see the full set of project maintainers, and the subject areas they main
 
 ## Table of Working Groups
 
-| Working Group (link) | Lead (GH handle) | Discord contact | Goal                                                                 |
-|----------------------|------------------|-----------------|----------------------------------------------------------------------|
-| [Omni Models](./omni-models.md) | @jeremyfowers    | @jfowers_amd    | Improve Omni Models to become a staple of local AI apps and use.     |
-| [Auto-Tune](./auto-tune.md) | @bitgamma        | @mikkoph        | Enable Lemonade instances to self-optimize models and backends.      |
-| [Cross-Vendor Support](./cross-vendor.md) | @kenvandine      | @kenvandine     | Lemonade is supported on all mass-market hardware and OS platforms.  |
-| Cloud Hybrid         | @ramkrishna2910  | @ramkrishna2910 | Lemonade can intelligently route between local and cloud models.     |
-| Remote Use           | @Geramy          | @geramyl        | Lemonade can serve inference to any device in any location.          |
-| GUI App              | @kponiel          | @primaL-       | Users can explore local AI in a delightful built-in GUI.             |
+| Working Group (link) | Lead (GH handle) | Discord contact | Goal |
+|----------------------|------------------|-----------------|------|
+| [Auto‑Tune](./auto-tune.md) | @bitgamma | @mikkoph | Enable Lemonade instances to self‑optimize models and backends. |
+| [Cross‑Vendor Support](./cross-vendor.md) | @kenvandine | @kenvandine | Lemonade is supported on all mass‑market hardware and OS platforms. |
+| Cloud Hybrid | @ramkrishna2910 | @ramkrishna2910 | Lemonade can intelligently route between local and cloud models. |
+| Remote Use | @Geramy | @geramyl | Lemonade can serve inference to any device in any location. |
+| GUI App | @kponiel | @primaL- | Users can explore local AI in a delightful built‑in GUI. |
+| [Enterprise Grade](./enterprise-grade.md) | @jeremyfowers | @jfowers_amd | Provide systematic testing and quality assurance for Lemonade components. |
+
+## Archived Working Groups
+
+| Working Group (link) | Lead (GH handle) | Discord contact | Goal |
+|----------------------|------------------|-----------------|------|
+| [Omni Models](./omni-models.md) | @jeremyfowers | @jfowers_amd | Improve Omni Models to become a staple of local AI apps and use. |

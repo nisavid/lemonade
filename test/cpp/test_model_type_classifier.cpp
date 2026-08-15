@@ -2,6 +2,7 @@
 // Compile with: cl /std:c++17 /EHsc /I src/cpp/include test/cpp/test_model_type_classifier.cpp
 // or:          g++ -std=c++17 -I src/cpp/include test/cpp/test_model_type_classifier.cpp -o classifier_test
 
+#include "lemon/backends/vllm/vllm.h"
 #include "lemon/model_types.h"
 #include <cassert>
 #include <cstdio>
@@ -11,7 +12,6 @@
 using lemon::ModelType;
 using lemon::DEVICE_GPU;
 using lemon::get_model_type_from_labels;
-using lemon::get_device_type_from_recipe;
 using lemon::model_type_to_string;
 
 struct Case {
@@ -69,7 +69,7 @@ int main() {
     }
 
     std::printf("\n%d/%zu cases passed\n", static_cast<int>(cases.size() - failures), cases.size());
-    if (get_device_type_from_recipe("vllm") != DEVICE_GPU) {
+    if (lemon::backends::vllm::descriptor.default_device != DEVICE_GPU) {
         std::printf("[FAIL] vllm device type should be GPU\n");
         ++failures;
     } else {
