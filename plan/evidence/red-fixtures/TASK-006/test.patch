@@ -1,0 +1,229 @@
+diff --git a/test/test_residency_implementation_base_scout.py b/test/test_residency_implementation_base_scout.py
+new file mode 100644
+--- /dev/null
++++ b/test/test_residency_implementation_base_scout.py
+@@ -0,0 +1,224 @@
++"""Public contract tests for the stable implementation-base scout."""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import subprocess
++import unittest
++from pathlib import Path
++
++REPO_ROOT = Path(__file__).resolve().parents[1]
++REPORT = REPO_ROOT / "plan" / "evidence" / "phase-0" / "stable-source-scout.json"
++BASE_COMMIT = "0e5b4ad66cc38805a47a65a2bdc8a557d9cbaefb"
++BASE_TREE = "0fc114102b653d0f4296a184f761131cf2a576bf"
++STABLE_COMMIT = "93aac619a9df474ae1782f4bd45a0a147d6dd4b5"
++ROUTING_HELPER_COMMIT = "9a8b2c99b975690dda56d6f1847b7b2bb35fbcaa"
++EXPECTED_INPUTS = {
++    "src/cpp/include/lemon/backends/backend_ops.h": "108747ce268939151bb9db0a9cd57bfa706d5f5f51e9965156e10f7b5131033c",
++    "src/cpp/include/lemon/backends/install_staging.h": "5aac0b54db5a377bb7e4e0a9adb871b9179943a16c5e76e4586e0b3af93d8a32",
++    "src/cpp/include/lemon/router.h": "811f6adbea8497c2ecb55258ca9d469940cdc9ec806e51b589a19ff8c802493f",
++    "src/cpp/include/lemon/runtime_config.h": "2e71cc4f7b58cea71b07b7d1d268774b4755578c83626f89b056106d3a09584e",
++    "src/cpp/include/lemon/utils/process_manager.h": "735346e564f435a5d427f2aaaf3586bb0344bb7f8635197cc6797646f429298e",
++    "src/cpp/include/lemon/wrapped_server.h": "86ea156341e5bdab7cfeb8163f1f8eff767ae9e67ce95cd9094d18e18b5bce63",
++    "src/cpp/server/backends/backend_registry.cpp": "ce0bc134dfb621659cab995d0e5bcfd1fa0700427fa3605bed8ae2337d44d426",
++    "src/cpp/server/backends/backend_utils.cpp": "35f195085ff50d495771082a9ee5ce4deb8b2b7ba0dbbb906f89d5e4cf80e3f3",
++    "src/cpp/server/eviction_engine.cpp": "b3893b209476c562d2cde4559b2430202b3e5bce09deecfb322a40b7ead41de5",
++    "src/cpp/server/global_vram_monitor.cpp": "747a6083e8ee4b8c3133da387bf474b84d24e97cd1222a6bd597c283d961115d",
++    "src/cpp/server/gpu_memory_planner.cpp": "7ba8ff406cb7060cfc7178b2ef1f79c1d01a320f98a163cf4633df4ccf84c48b",
++    "src/cpp/server/router.cpp": "82e002c17ecb575dccf838c5a6e1755016dab3a16918acab1ab4c6252e309cca",
++    "src/cpp/server/server.cpp": "3e541f333c44c71017d4375f9af14529287c653b1b042286ae4597c2638e0ca4",
++    "test/cpp/test_routing_helper_reconcile.cpp": "d4505318247133e0511e42af4d662d7900f072a1334760db0c00d1329ba2c5d8",
++}
++EXPECTED_SEAMS = {
++    "artifact_install_commit": (
++        "reused",
++        "src/cpp/include/lemon/backends/install_staging.h",
++        "commit_staged_install",
++    ),
++    "artifact_pull_import_delete_cleanup": (
++        "adapted",
++        "src/cpp/server/server.cpp",
++        "void Server::handle_pull(",
++    ),
++    "backend_ops_dispatch": (
++        "reused",
++        "src/cpp/server/backends/backend_registry.cpp",
++        "const BackendOps* ops_for(",
++    ),
++    "backend_process_lifecycle_hooks": (
++        "adapted",
++        "src/cpp/include/lemon/wrapped_server.h",
++        "consume_process_handle_for_cleanup",
++    ),
++    "configuration_and_legacy_keys": (
++        "adapted",
++        "src/cpp/include/lemon/runtime_config.h",
++        "max_gpu_memory_occupancy_gb",
++    ),
++    "existing_residency_tests": (
++        "retained",
++        "test/cpp/test_routing_helper_reconcile.cpp",
++        "test_reclaim_rearms_when_rescued_before_commit",
++    ),
++    "fork_plan_gpu_memory_admission": (
++        "replaced",
++        "src/cpp/server/gpu_memory_planner.cpp",
++        "GpuMemoryAdmissionPlan plan_gpu_memory_admission(",
++    ),
++    "process_ownership_and_release": (
++        "adapted",
++        "src/cpp/include/lemon/utils/process_manager.h",
++        "struct ProcessHandle",
++    ),
++    "public_api_route_mappings": (
++        "adapted",
++        "src/cpp/server/server.cpp",
++        "auto register_post =",
++    ),
++    "registry_artifact_selection": (
++        "reused",
++        "src/cpp/include/lemon/backends/backend_ops.h",
++        "select_checkpoint_files",
++    ),
++    "router_eviction_and_retry": (
++        "replaced",
++        "src/cpp/server/router.cpp",
++        "void Router::evict_server(",
++    ),
++    "stable_eviction_engine": (
++        "replaced",
++        "src/cpp/server/eviction_engine.cpp",
++        "void EvictionEngine::evaluate_servers(",
++    ),
++    "stable_global_vram_monitor": (
++        "replaced",
++        "src/cpp/server/global_vram_monitor.cpp",
++        "void GlobalVramMonitor::monitor_loop()",
++    ),
++}
++EXPECTED_SOURCE_FACTS = {
++    "routing_helper_reclaim_executor": (
++        "src/cpp/include/lemon/router.h",
++        "class RoutingHelperReclaimExecutor",
++    ),
++    "routing_helper_prune": (
++        "src/cpp/server/router.cpp",
++        "void Router::prune_stale_routing_helpers_locked() {",
++    ),
++    "routing_helper_reclaim_or_defer": (
++        "src/cpp/server/router.cpp",
++        "bool Router::reclaim_or_defer_helper_locked(WrappedServer* server) {",
++    ),
++    "routing_helper_idle_reclaim": (
++        "src/cpp/server/router.cpp",
++        "void Router::reclaim_stale_helper_if_idle(const std::string& model_name) {",
++    ),
++    "routing_helper_reclaim_notifier": (
++        "src/cpp/server/router.cpp",
++        "void Router::install_reclaim_notifier(WrappedServer* server) {",
++    ),
++    "routing_helper_pending_stale": (
++        "src/cpp/include/lemon/wrapped_server.h",
++        "bool mark_pending_stale_if_busy() {",
++    ),
++    "artifact_install_commit_callsite": (
++        "src/cpp/server/backends/backend_utils.cpp",
++        "exe_path = commit_staged_install(staging_dir, install_dir, spec.binary);",
++    ),
++}
++
++
++def _git(*args: str) -> subprocess.CompletedProcess[bytes]:
++    return subprocess.run(
++        ["git", *args],
++        cwd=REPO_ROOT,
++        capture_output=True,
++        check=False,
++    )
++
++
++class ResidencyImplementationBaseScoutTest(unittest.TestCase):
++    def test_report_is_the_exact_source_bound_scout_contract(self) -> None:
++        payload = json.loads(REPORT.read_text(encoding="utf-8"))
++
++        self.assertEqual(
++            set(payload),
++            {
++                "implementation_base_commit",
++                "implementation_base_tree",
++                "inputs",
++                "routing_helper_introduction_commit",
++                "schema",
++                "source_facts",
++                "source_seam_dispositions",
++                "stable_release_commit",
++                "stable_release_tag",
++            },
++        )
++        self.assertEqual(payload["schema"], "portable_residency_stable_source_scout/v1")
++        self.assertEqual(payload["implementation_base_commit"], BASE_COMMIT)
++        self.assertEqual(payload["implementation_base_tree"], BASE_TREE)
++        self.assertEqual(payload["stable_release_commit"], STABLE_COMMIT)
++        self.assertEqual(payload["stable_release_tag"], "v11.6.0")
++        self.assertEqual(
++            payload["routing_helper_introduction_commit"], ROUTING_HELPER_COMMIT
++        )
++
++        self.assertEqual(_git("rev-parse", f"{BASE_COMMIT}^{{tree}}").returncode, 0)
++        self.assertEqual(
++            _git("rev-parse", f"{BASE_COMMIT}^{{tree}}").stdout.decode().strip(),
++            BASE_TREE,
++        )
++        self.assertEqual(
++            _git("merge-base", "--is-ancestor", STABLE_COMMIT, BASE_COMMIT).returncode,
++            0,
++        )
++        self.assertEqual(
++            _git(
++                "merge-base",
++                "--is-ancestor",
++                ROUTING_HELPER_COMMIT,
++                BASE_COMMIT,
++            ).returncode,
++            0,
++        )
++
++        inputs = payload["inputs"]
++        self.assertEqual(len(inputs), len(EXPECTED_INPUTS))
++        self.assertEqual(
++            {item["path"]: item["sha256"] for item in inputs}, EXPECTED_INPUTS
++        )
++        blobs: dict[str, bytes] = {}
++        for source_path, expected_digest in EXPECTED_INPUTS.items():
++            result = _git("show", f"{BASE_COMMIT}:{source_path}")
++            self.assertEqual(result.returncode, 0, result.stderr.decode())
++            blobs[source_path] = result.stdout
++            self.assertEqual(hashlib.sha256(result.stdout).hexdigest(), expected_digest)
++
++        rows = payload["source_seam_dispositions"]
++        self.assertEqual(len(rows), len(EXPECTED_SEAMS))
++        actual_seams = {
++            row["id"]: (row["disposition"], row["path"], row["symbol"]) for row in rows
++        }
++        self.assertEqual(actual_seams, EXPECTED_SEAMS)
++        for row in rows:
++            self.assertEqual(
++                set(row),
++                {"id", "disposition", "path", "symbol", "note"},
++            )
++            self.assertTrue(row["note"])
++            self.assertIn(row["symbol"].encode(), blobs[row["path"]])
++
++        facts = payload["source_facts"]
++        self.assertEqual(len(facts), len(EXPECTED_SOURCE_FACTS))
++        actual_facts = {fact["id"]: (fact["path"], fact["symbol"]) for fact in facts}
++        self.assertEqual(actual_facts, EXPECTED_SOURCE_FACTS)
++        for fact in facts:
++            self.assertEqual(set(fact), {"id", "path", "symbol", "note"})
++            self.assertTrue(fact["note"])
++            self.assertIn(fact["symbol"].encode(), blobs[fact["path"]])
++
++
++if __name__ == "__main__":
++    unittest.main()
