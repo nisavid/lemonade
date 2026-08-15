@@ -359,7 +359,7 @@ class HandoffRepository:
 
         tasks: list[dict[str, object]] = []
         task_base = bootstrap_commit
-        for task_id in ("TASK-093", "TASK-006", "TASK-007"):
+        for task_id in ("TASK-093", "TASK-006", "TASK-007", "TASK-108", "TASK-109"):
             task, task_base = self._task_cycle(
                 task_id,
                 task_base,
@@ -447,7 +447,13 @@ class HandoffRepository:
         phase_checkpoint = self._commit("docs: freeze Phase 0 checkpoint")
         phase_record: dict[str, object] = {
             "phase": 0,
-            "task_ids": ["TASK-093", "TASK-006", "TASK-007"],
+            "task_ids": [
+                "TASK-093",
+                "TASK-006",
+                "TASK-007",
+                "TASK-108",
+                "TASK-109",
+            ],
             "task_evidence": tasks,
             "phase_checkpoint_commit": phase_checkpoint,
             "phase_checkpoint_tree": self._tree(phase_checkpoint),

@@ -22,7 +22,7 @@ TASK_ID = re.compile(r"^TASK-[0-9]{3}$")
 ALLOWED_COMMANDS = {"cmake", "ctest", "python3"}
 LATER_ROSTER_PATH = "docs/research/portable-residency-capability-inventory.json"
 EXPECTED_PHASE_TASKS = {
-    0: ("TASK-093", "TASK-006", "TASK-007"),
+    0: ("TASK-093", "TASK-006", "TASK-007", "TASK-108", "TASK-109"),
     1: ("TASK-008", "TASK-009", "TASK-010", "TASK-011", "TASK-012", "TASK-013"),
     2: ("TASK-014", "TASK-015", "TASK-016", "TASK-017", "TASK-018"),
     3: (
