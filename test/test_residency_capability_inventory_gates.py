@@ -39,6 +39,16 @@ class ResidencyCapabilityInventoryCliTest(ResidencyCapabilityInventoryCliCase):
 
         self.assert_invalid(result, "section_sha256 does not match")
 
+    def test_gate_source_invalid_utf8_reports_a_domain_failure(self) -> None:
+        profile = (
+            self.repo / "docs" / "research" / "hatchery-residency-validation-profile.md"
+        )
+        profile.write_bytes(b"\xff\xfe\x00")
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(result, "cannot read gate source")
+
     def test_gate_range_shorthand_fails_closed(self) -> None:
         def use_range(inventory: dict[str, object]) -> None:
             inventory["gate_sets"]["evidence_common_v1"]["members"][1] = "H-LIV-01a..g"

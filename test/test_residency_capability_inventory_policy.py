@@ -11,6 +11,22 @@ from residency_capability_inventory_cli_case import ResidencyCapabilityInventory
 class ResidencyCapabilityInventoryCliTest(ResidencyCapabilityInventoryCliCase):
     """Exercise closed residency-policy behavior through the CLI."""
 
+    def test_exact_cell_fallback_values_require_strings_before_deduplication(
+        self,
+    ) -> None:
+        self.inventory["exact_cells"][0]["fallbacks"][
+            "insufficient_capacity_authority"
+        ] = ["not-a-fallback-id"]
+        self._write_inventory()
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(
+            result,
+            "exact cell H-ROCM-ADM-GTT-HOST-v1.fallbacks."
+            "insufficient_capacity_authority must be a nonempty string",
+        )
+
     def test_fallback_operations_must_equal_all_actual_references(self) -> None:
         def widen_npu_fallback(inventory: dict[str, object]) -> None:
             inventory["fallback_registry"]["residency_npu_conflict_preserve_refuse_v1"][
@@ -384,6 +400,33 @@ class ResidencyCapabilityInventoryCliTest(ResidencyCapabilityInventoryCliCase):
         result = self._run_cli("--render")
 
         self.assert_invalid(result, "accepted closed recovery semantics")
+
+    def test_flm_recovery_requires_selected_membership_and_device_claim(
+        self,
+    ) -> None:
+        def use_selected_membership_release(inventory: dict[str, object]) -> None:
+            inventory["recovery_profiles"]["flm_system_managed"]["verified_release"] = [
+                "serving_process_or_service_membership",
+                "device_claim",
+            ]
+
+        self._replace_inventory(use_selected_membership_release)
+
+        accepted = self._run_cli("--render")
+
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+        def use_service_only_release(inventory: dict[str, object]) -> None:
+            inventory["recovery_profiles"]["flm_system_managed"]["verified_release"] = [
+                "service",
+                "device_claim",
+            ]
+
+        self._replace_inventory(use_service_only_release)
+
+        rejected = self._run_cli("--render")
+
+        self.assert_invalid(rejected, "accepted closed recovery semantics")
 
     def test_broad_variant_evidence_ceiling_must_remain_modeled(self) -> None:
         def promote_flm_variant(inventory: dict[str, object]) -> None:

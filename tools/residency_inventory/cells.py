@@ -454,12 +454,17 @@ def _validate_exact_cell_fallbacks(
     )
     if not cell_fallbacks:
         fail(f"exact cell {cell_id} must define guarded fallbacks")
-    require_unique(list(cell_fallbacks.values()), f"exact cell {cell_id} fallback IDs")
+    normalized_fallbacks: dict[str, str] = {}
     for guard, fallback_value in cell_fallbacks.items():
-        require_string(guard, f"exact cell {cell_id} fallback guard")
+        guard_id = require_string(guard, f"exact cell {cell_id} fallback guard")
         fallback_id = require_string(
-            fallback_value, f"exact cell {cell_id}.fallbacks.{guard}"
+            fallback_value, f"exact cell {cell_id}.fallbacks.{guard_id}"
         )
+        normalized_fallbacks[guard_id] = fallback_id
+    require_unique(
+        list(normalized_fallbacks.values()), f"exact cell {cell_id} fallback IDs"
+    )
+    for guard, fallback_id in normalized_fallbacks.items():
         if fallback_id not in context.fallback_registry:
             fail(f"exact cell {cell_id} references unknown fallback {fallback_id}")
         if EXPECTED_EXACT_FALLBACK_BY_GUARD.get(guard) != fallback_id:
@@ -476,7 +481,7 @@ def _validate_exact_cell_fallbacks(
                 f"exact cell {cell_id} fallback {fallback_id} does not apply "
                 f"to {operation_template}"
             )
-    return gate_set, cell_fallbacks
+    return gate_set, normalized_fallbacks
 
 
 def _require_accepted_exact_cell_identity(

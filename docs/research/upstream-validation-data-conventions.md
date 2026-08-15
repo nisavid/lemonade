@@ -1,6 +1,6 @@
 # Upstream validation-data conventions
 
-Status: accepted Issue [#35](https://github.com/nisavid/lemonade/issues/35) catalog and evidence-distribution policy; not a runtime collection or remote-update implementation.
+Status: accepted. This note defines the Issue [#35](https://github.com/nisavid/lemonade/issues/35) catalog and evidence-distribution policy; it is not a runtime collection or remote-update implementation.
 
 This note defines how Lemonade packages, distributes, and extends model and
 hardware residency profiles under the accepted Issue 35 contract. It is based on upstream `main` at

@@ -185,9 +185,13 @@ os.fsync = _injected_fsync
         )
         self.assertEqual(list(self.matrix_path.parent.glob(".*.residency-*")), [])
 
+    @unittest.skipIf(fcntl is None, "POSIX advisory locks are unavailable")
     def test_validator_clients_serialize_on_the_inventory_lock(self) -> None:
         lock_acquired = self.repo / "lock-acquired"
-        environment = os.environ | self._sitecustomize_env("""
+        release_lock = self.repo / "release-lock"
+        environment = (
+            os.environ
+            | self._sitecustomize_env("""
 import fcntl
 import os
 import time
@@ -199,19 +203,53 @@ def _injected_flock(descriptor, operation):
     if operation & fcntl.LOCK_EX:
         with open(os.environ['LOCK_ACQUIRED'], 'w', encoding='utf-8') as stream:
             stream.write('locked')
-        time.sleep(1.0)
+        deadline = time.monotonic() + 10.0
+        while not os.path.exists(os.environ['RELEASE_LOCK']):
+            if time.monotonic() >= deadline:
+                raise RuntimeError('test lock release was never signaled')
+            time.sleep(0.01)
     return result
 
 fcntl.flock = _injected_flock
-""") | {"LOCK_ACQUIRED": str(lock_acquired)}
+""")
+            | {
+                "LOCK_ACQUIRED": str(lock_acquired),
+                "RELEASE_LOCK": str(release_lock),
+            }
+        )
         first = self._start_cli_process("--update", env=environment)
-        deadline = time.monotonic() + 5
-        while not lock_acquired.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        self.assertTrue(lock_acquired.exists(), "first validator never acquired lock")
-        second = self._start_cli_process()
-        time.sleep(0.1)
-        self.assertIsNone(second.poll(), "second validator bypassed inventory lock")
+        try:
+            deadline = time.monotonic() + 5
+            while not lock_acquired.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(
+                lock_acquired.exists(), "first validator never acquired lock"
+            )
+
+            lock_attempted = self.repo / "lock-attempted"
+            second_environment = self._sitecustomize_env("""
+import fcntl
+import os
+
+_real_flock = fcntl.flock
+
+def _observed_flock(descriptor, operation):
+    with open(os.environ['LOCK_ATTEMPTED'], 'w', encoding='utf-8') as stream:
+        stream.write('attempted')
+    return _real_flock(descriptor, operation)
+
+fcntl.flock = _observed_flock
+""") | {"LOCK_ATTEMPTED": str(lock_attempted)}
+            second = self._start_cli_process(env=second_environment)
+            deadline = time.monotonic() + 5
+            while not lock_attempted.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(
+                lock_attempted.exists(), "second validator never attempted the lock"
+            )
+            self.assertIsNone(second.poll(), "second validator bypassed inventory lock")
+        finally:
+            release_lock.write_text("release", encoding="utf-8")
 
         first_stdout, first_stderr = first.communicate(timeout=5)
         second_stdout, second_stderr = second.communicate(timeout=5)
