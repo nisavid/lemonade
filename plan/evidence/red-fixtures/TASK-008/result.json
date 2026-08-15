@@ -1,0 +1,21 @@
+{
+  "command": [
+    "python3",
+    "test/residency/contract/test_types_public_seam.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "c++",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-008 public residency type contract is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "e7a626685f827ead314743da78d3a8b0daa36334",
+  "task_id": "TASK-008"
+}
