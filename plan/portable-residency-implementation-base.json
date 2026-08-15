@@ -3,6 +3,305 @@
     "commit": "0e5b4ad66cc38805a47a65a2bdc8a557d9cbaefb",
     "tree": "0fc114102b653d0f4296a184f761131cf2a576bf"
   },
+  "implementation_base_bootstrap": {
+    "checkpoint_commit": "8d667ef66585135d5593dc00c6952741358fa5c2",
+    "checkpoint_tree": "dc38b3ed1748b5f89c4e90a8760dcceacfe9065b",
+    "classification": "implementation_base_bootstrap",
+    "fallback_state": {
+      "authority": "legacy_runtime",
+      "status": "active"
+    },
+    "outputs": [
+      {
+        "path": "plan/portable-residency-implementation-base.json",
+        "sha256": "19b63011b7a6e8f5a1750641c95ec5de143be1ba2100111535a44538ebe3b4ad"
+      }
+    ],
+    "task_id": "TASK-005",
+    "validation_results": [
+      {
+        "command": [
+          "python3",
+          "tools/validate_residency_capability_inventory.py"
+        ],
+        "result": "pass"
+      }
+    ]
+  },
+  "later_cell_issues": [
+    {
+      "issue_id": 39,
+      "promotion_unit_id": "H-VULKAN-ADM-GTT-HOST-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/39"
+    },
+    {
+      "issue_id": 40,
+      "promotion_unit_id": "H-VULKAN-PRE-GTT-HOST-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/40"
+    },
+    {
+      "issue_id": 41,
+      "promotion_unit_id": "H-VULKAN-STA-GTT-HOST-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/41"
+    },
+    {
+      "issue_id": 42,
+      "promotion_unit_id": "H-VULKAN-REC-GTT-HOST-OWN-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/42"
+    },
+    {
+      "issue_id": 43,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-LLM-ADM-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/43"
+    },
+    {
+      "issue_id": 44,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-LLM-LFR-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/44"
+    },
+    {
+      "issue_id": 45,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-LLM-STA-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/45"
+    },
+    {
+      "issue_id": 46,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-LLM-REC-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/46"
+    },
+    {
+      "issue_id": 47,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-LLM-UNL-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/47"
+    },
+    {
+      "issue_id": 48,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-LLM-PIN-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/48"
+    },
+    {
+      "issue_id": 49,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-ADM-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/49"
+    },
+    {
+      "issue_id": 50,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-LFR-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/50"
+    },
+    {
+      "issue_id": 51,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-STA-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/51"
+    },
+    {
+      "issue_id": 52,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-REC-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/52"
+    },
+    {
+      "issue_id": 53,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-UNL-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/53"
+    },
+    {
+      "issue_id": 54,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-PIN-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/54"
+    },
+    {
+      "issue_id": 55,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-ADM-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/55"
+    },
+    {
+      "issue_id": 56,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-LFR-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/56"
+    },
+    {
+      "issue_id": 57,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-STA-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/57"
+    },
+    {
+      "issue_id": 58,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-REC-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/58"
+    },
+    {
+      "issue_id": 59,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-UNL-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/59"
+    },
+    {
+      "issue_id": 60,
+      "promotion_unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-PIN-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/60"
+    },
+    {
+      "issue_id": 61,
+      "promotion_unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-ADM-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/61"
+    },
+    {
+      "issue_id": 62,
+      "promotion_unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-LFR-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/62"
+    },
+    {
+      "issue_id": 63,
+      "promotion_unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-STA-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/63"
+    },
+    {
+      "issue_id": 64,
+      "promotion_unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-REC-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/64"
+    },
+    {
+      "issue_id": 65,
+      "promotion_unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-UNL-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/65"
+    },
+    {
+      "issue_id": 66,
+      "promotion_unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-PIN-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/66"
+    },
+    {
+      "issue_id": 67,
+      "promotion_unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-ADM-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/67"
+    },
+    {
+      "issue_id": 68,
+      "promotion_unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-LFR-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/68"
+    },
+    {
+      "issue_id": 69,
+      "promotion_unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-STA-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/69"
+    },
+    {
+      "issue_id": 70,
+      "promotion_unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-REC-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/70"
+    },
+    {
+      "issue_id": 71,
+      "promotion_unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-UNL-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/71"
+    },
+    {
+      "issue_id": 72,
+      "promotion_unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-PIN-v1",
+      "url": "https://github.com/nisavid/lemonade/issues/72"
+    }
+  ],
+  "legacy_inventory": [
+    {
+      "blob_sha256": "5aac0b54db5a377bb7e4e0a9adb871b9179943a16c5e76e4586e0b3af93d8a32",
+      "path": "src/cpp/include/lemon/backends/install_staging.h",
+      "symbol": "commit_staged_install"
+    },
+    {
+      "blob_sha256": "3e541f333c44c71017d4375f9af14529287c653b1b042286ae4597c2638e0ca4",
+      "path": "src/cpp/server/server.cpp",
+      "symbol": "void Server::handle_pull("
+    },
+    {
+      "blob_sha256": "ce0bc134dfb621659cab995d0e5bcfd1fa0700427fa3605bed8ae2337d44d426",
+      "path": "src/cpp/server/backends/backend_registry.cpp",
+      "symbol": "const BackendOps* ops_for("
+    },
+    {
+      "blob_sha256": "86ea156341e5bdab7cfeb8163f1f8eff767ae9e67ce95cd9094d18e18b5bce63",
+      "path": "src/cpp/include/lemon/wrapped_server.h",
+      "symbol": "consume_process_handle_for_cleanup"
+    },
+    {
+      "blob_sha256": "2e71cc4f7b58cea71b07b7d1d268774b4755578c83626f89b056106d3a09584e",
+      "path": "src/cpp/include/lemon/runtime_config.h",
+      "symbol": "max_gpu_memory_occupancy_gb"
+    },
+    {
+      "blob_sha256": "d4505318247133e0511e42af4d662d7900f072a1334760db0c00d1329ba2c5d8",
+      "path": "test/cpp/test_routing_helper_reconcile.cpp",
+      "symbol": "test_reclaim_rearms_when_rescued_before_commit"
+    },
+    {
+      "blob_sha256": "7ba8ff406cb7060cfc7178b2ef1f79c1d01a320f98a163cf4633df4ccf84c48b",
+      "path": "src/cpp/server/gpu_memory_planner.cpp",
+      "symbol": "GpuMemoryAdmissionPlan plan_gpu_memory_admission("
+    },
+    {
+      "blob_sha256": "735346e564f435a5d427f2aaaf3586bb0344bb7f8635197cc6797646f429298e",
+      "path": "src/cpp/include/lemon/utils/process_manager.h",
+      "symbol": "struct ProcessHandle"
+    },
+    {
+      "blob_sha256": "3e541f333c44c71017d4375f9af14529287c653b1b042286ae4597c2638e0ca4",
+      "path": "src/cpp/server/server.cpp",
+      "symbol": "auto register_post ="
+    },
+    {
+      "blob_sha256": "108747ce268939151bb9db0a9cd57bfa706d5f5f51e9965156e10f7b5131033c",
+      "path": "src/cpp/include/lemon/backends/backend_ops.h",
+      "symbol": "select_checkpoint_files"
+    },
+    {
+      "blob_sha256": "82e002c17ecb575dccf838c5a6e1755016dab3a16918acab1ab4c6252e309cca",
+      "path": "src/cpp/server/router.cpp",
+      "symbol": "void Router::evict_server("
+    },
+    {
+      "blob_sha256": "b3893b209476c562d2cde4559b2430202b3e5bce09deecfb322a40b7ead41de5",
+      "path": "src/cpp/server/eviction_engine.cpp",
+      "symbol": "void EvictionEngine::evaluate_servers("
+    },
+    {
+      "blob_sha256": "747a6083e8ee4b8c3133da387bf474b84d24e97cd1222a6bd597c283d961115d",
+      "path": "src/cpp/server/global_vram_monitor.cpp",
+      "symbol": "void GlobalVramMonitor::monitor_loop()"
+    },
+    {
+      "blob_sha256": "811f6adbea8497c2ecb55258ca9d469940cdc9ec806e51b589a19ff8c802493f",
+      "path": "src/cpp/include/lemon/router.h",
+      "symbol": "class RoutingHelperReclaimExecutor"
+    },
+    {
+      "blob_sha256": "82e002c17ecb575dccf838c5a6e1755016dab3a16918acab1ab4c6252e309cca",
+      "path": "src/cpp/server/router.cpp",
+      "symbol": "void Router::prune_stale_routing_helpers_locked() {"
+    },
+    {
+      "blob_sha256": "82e002c17ecb575dccf838c5a6e1755016dab3a16918acab1ab4c6252e309cca",
+      "path": "src/cpp/server/router.cpp",
+      "symbol": "bool Router::reclaim_or_defer_helper_locked(WrappedServer* server) {"
+    },
+    {
+      "blob_sha256": "82e002c17ecb575dccf838c5a6e1755016dab3a16918acab1ab4c6252e309cca",
+      "path": "src/cpp/server/router.cpp",
+      "symbol": "void Router::reclaim_stale_helper_if_idle(const std::string& model_name) {"
+    },
+    {
+      "blob_sha256": "82e002c17ecb575dccf838c5a6e1755016dab3a16918acab1ab4c6252e309cca",
+      "path": "src/cpp/server/router.cpp",
+      "symbol": "void Router::install_reclaim_notifier(WrappedServer* server) {"
+    },
+    {
+      "blob_sha256": "86ea156341e5bdab7cfeb8163f1f8eff767ae9e67ce95cd9094d18e18b5bce63",
+      "path": "src/cpp/include/lemon/wrapped_server.h",
+      "symbol": "bool mark_pending_stale_if_busy() {"
+    },
+    {
+      "blob_sha256": "35f195085ff50d495771082a9ee5ce4deb8b2b7ba0dbbb906f89d5e4cf80e3f3",
+      "path": "src/cpp/server/backends/backend_utils.cpp",
+      "symbol": "exe_path = commit_staged_install(staging_dir, install_dir, spec.binary);"
+    }
+  ],
   "phase_records": [],
   "pre_handoff_records": [
     {
@@ -139,6 +438,161 @@
     "baseline_tree": "ab4933415358c32ab2e912f472e3361542170fbb"
   },
   "schema": "portable_residency_implementation_handoff/v1",
+  "scout_runs": [
+    {
+      "commit": "c4783e47fd7b781824a5080f796c1ebb16994b25",
+      "id": "implementation-base-source-scout",
+      "inputs": [
+        {
+          "path": "src/cpp/include/lemon/backends/install_staging.h",
+          "sha256": "5aac0b54db5a377bb7e4e0a9adb871b9179943a16c5e76e4586e0b3af93d8a32"
+        },
+        {
+          "path": "src/cpp/include/lemon/router.h",
+          "sha256": "811f6adbea8497c2ecb55258ca9d469940cdc9ec806e51b589a19ff8c802493f"
+        },
+        {
+          "path": "src/cpp/include/lemon/backends/backend_ops.h",
+          "sha256": "108747ce268939151bb9db0a9cd57bfa706d5f5f51e9965156e10f7b5131033c"
+        },
+        {
+          "path": "src/cpp/include/lemon/runtime_config.h",
+          "sha256": "2e71cc4f7b58cea71b07b7d1d268774b4755578c83626f89b056106d3a09584e"
+        },
+        {
+          "path": "src/cpp/include/lemon/utils/process_manager.h",
+          "sha256": "735346e564f435a5d427f2aaaf3586bb0344bb7f8635197cc6797646f429298e"
+        },
+        {
+          "path": "src/cpp/include/lemon/wrapped_server.h",
+          "sha256": "86ea156341e5bdab7cfeb8163f1f8eff767ae9e67ce95cd9094d18e18b5bce63"
+        },
+        {
+          "path": "src/cpp/server/backends/backend_registry.cpp",
+          "sha256": "ce0bc134dfb621659cab995d0e5bcfd1fa0700427fa3605bed8ae2337d44d426"
+        },
+        {
+          "path": "src/cpp/server/backends/backend_utils.cpp",
+          "sha256": "35f195085ff50d495771082a9ee5ce4deb8b2b7ba0dbbb906f89d5e4cf80e3f3"
+        },
+        {
+          "path": "src/cpp/server/eviction_engine.cpp",
+          "sha256": "b3893b209476c562d2cde4559b2430202b3e5bce09deecfb322a40b7ead41de5"
+        },
+        {
+          "path": "src/cpp/server/global_vram_monitor.cpp",
+          "sha256": "747a6083e8ee4b8c3133da387bf474b84d24e97cd1222a6bd597c283d961115d"
+        },
+        {
+          "path": "src/cpp/server/gpu_memory_planner.cpp",
+          "sha256": "7ba8ff406cb7060cfc7178b2ef1f79c1d01a320f98a163cf4633df4ccf84c48b"
+        },
+        {
+          "path": "src/cpp/server/router.cpp",
+          "sha256": "82e002c17ecb575dccf838c5a6e1755016dab3a16918acab1ab4c6252e309cca"
+        },
+        {
+          "path": "src/cpp/server/server.cpp",
+          "sha256": "3e541f333c44c71017d4375f9af14529287c653b1b042286ae4597c2638e0ca4"
+        },
+        {
+          "path": "test/cpp/test_routing_helper_reconcile.cpp",
+          "sha256": "d4505318247133e0511e42af4d662d7900f072a1334760db0c00d1329ba2c5d8"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "plan/evidence/phase-0/stable-source-scout.json",
+          "sha256": "7509ef2796c256e436502ce6360ba1361d0f8f8520ebab932534cb06d1f9c1b9"
+        },
+        {
+          "path": "test/test_residency_implementation_base_scout.py",
+          "sha256": "b7e298bb0e2df7429116e61817dc9bbb64f44aca5216ae7fbaf5341c7d8adf8c"
+        }
+      ],
+      "tree": "e3b7510679a28ce489582883cc7d0eec97e1a69e"
+    }
+  ],
+  "source_seam_dispositions": [
+    {
+      "disposition": "reused",
+      "id": "artifact_install_commit",
+      "path": "src/cpp/include/lemon/backends/install_staging.h",
+      "symbol": "commit_staged_install"
+    },
+    {
+      "disposition": "adapted",
+      "id": "artifact_pull_import_delete_cleanup",
+      "path": "src/cpp/server/server.cpp",
+      "symbol": "void Server::handle_pull("
+    },
+    {
+      "disposition": "reused",
+      "id": "backend_ops_dispatch",
+      "path": "src/cpp/server/backends/backend_registry.cpp",
+      "symbol": "const BackendOps* ops_for("
+    },
+    {
+      "disposition": "adapted",
+      "id": "backend_process_lifecycle_hooks",
+      "path": "src/cpp/include/lemon/wrapped_server.h",
+      "symbol": "consume_process_handle_for_cleanup"
+    },
+    {
+      "disposition": "adapted",
+      "id": "configuration_and_legacy_keys",
+      "path": "src/cpp/include/lemon/runtime_config.h",
+      "symbol": "max_gpu_memory_occupancy_gb"
+    },
+    {
+      "disposition": "retained",
+      "id": "existing_residency_tests",
+      "path": "test/cpp/test_routing_helper_reconcile.cpp",
+      "symbol": "test_reclaim_rearms_when_rescued_before_commit"
+    },
+    {
+      "disposition": "replaced",
+      "id": "fork_plan_gpu_memory_admission",
+      "path": "src/cpp/server/gpu_memory_planner.cpp",
+      "symbol": "GpuMemoryAdmissionPlan plan_gpu_memory_admission("
+    },
+    {
+      "disposition": "adapted",
+      "id": "process_ownership_and_release",
+      "path": "src/cpp/include/lemon/utils/process_manager.h",
+      "symbol": "struct ProcessHandle"
+    },
+    {
+      "disposition": "adapted",
+      "id": "public_api_route_mappings",
+      "path": "src/cpp/server/server.cpp",
+      "symbol": "auto register_post ="
+    },
+    {
+      "disposition": "reused",
+      "id": "registry_artifact_selection",
+      "path": "src/cpp/include/lemon/backends/backend_ops.h",
+      "symbol": "select_checkpoint_files"
+    },
+    {
+      "disposition": "replaced",
+      "id": "router_eviction_and_retry",
+      "path": "src/cpp/server/router.cpp",
+      "symbol": "void Router::evict_server("
+    },
+    {
+      "disposition": "replaced",
+      "id": "stable_eviction_engine",
+      "path": "src/cpp/server/eviction_engine.cpp",
+      "symbol": "void EvictionEngine::evaluate_servers("
+    },
+    {
+      "disposition": "replaced",
+      "id": "stable_global_vram_monitor",
+      "path": "src/cpp/server/global_vram_monitor.cpp",
+      "symbol": "void GlobalVramMonitor::monitor_loop()"
+    }
+  ],
   "stable_release": {
     "local_ref": "refs/heads/upstream-stable",
     "local_ref_commit": "93aac619a9df474ae1782f4bd45a0a147d6dd4b5",
