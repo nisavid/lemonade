@@ -1,0 +1,25 @@
+{
+  "command": [
+    "python3",
+    "-m",
+    "unittest",
+    "-q",
+    "test.test_residency_implementation_handoff.ResidencyImplementationHandoffCliTest.test_phase_zero_validates_real_git_identity_and_red_green_history"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "git",
+      "python3",
+      "unittest"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "phase_records[0].task_ids must be ['TASK-093', 'TASK-006', 'TASK-007']"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "04739a08e685a7c82f044c83872df7a76a596c3a",
+  "task_id": "TASK-109"
+}

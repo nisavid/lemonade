@@ -1,0 +1,16 @@
+diff --git c/test/test_residency_implementation_handoff.py w/test/test_residency_implementation_handoff.py
+index 072bcbd3..4d6de308 100644
+--- c/test/test_residency_implementation_handoff.py
++++ w/test/test_residency_implementation_handoff.py
+@@ -362 +362 @@ class HandoffRepository:
+-        for task_id in ("TASK-093", "TASK-006", "TASK-007"):
++        for task_id in ("TASK-093", "TASK-006", "TASK-007", "TASK-108", "TASK-109"):
+@@ -450 +450,7 @@ class HandoffRepository:
+-            "task_ids": ["TASK-093", "TASK-006", "TASK-007"],
++            "task_ids": [
++                "TASK-093",
++                "TASK-006",
++                "TASK-007",
++                "TASK-108",
++                "TASK-109",
++            ],
