@@ -302,7 +302,360 @@
       "symbol": "exe_path = commit_staged_install(staging_dir, install_dir, spec.binary);"
     }
   ],
-  "phase_records": [],
+  "phase_records": [
+    {
+      "phase": 0,
+      "phase_checkpoint_commit": "07da68ec3b025ca9947ca85a87bbea15ce742143",
+      "phase_checkpoint_tree": "f6d33dda819e78ffeb035a8970c3412beff5a91d",
+      "record_digest": "66a17aa059a316743d68776a2180f430639e926cddce33c4882b846086775b9d",
+      "task_evidence": [
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-m",
+              "unittest",
+              "-q",
+              "test.test_residency_implementation_handoff_smoke"
+            ],
+            "commit": "bdd384efd6588b97757927c04f1d00ae084e0837",
+            "result": "pass",
+            "tree": "a3237fc9d41a4cc41e9c5ee4489d48d8627e0b00"
+          },
+          "outputs": [
+            {
+              "path": "test/test_residency_implementation_handoff.py",
+              "sha256": "aac88f7432fc4c297d96ec83aa3a91285a77d7bbbbe7fe20f6cd123c44976613"
+            },
+            {
+              "path": "test/test_residency_implementation_handoff_smoke.py",
+              "sha256": "08e55d80f4fa3a021c1df59be3ffc4638f9532bcd1ddfdfe493d670ba635b0d6"
+            },
+            {
+              "path": "tools/residency_handoff/__init__.py",
+              "sha256": "a699775b836f334b1b0477b89d9d032e6af8b6e45dfdd7e5d69a8aea6b26c3af"
+            },
+            {
+              "path": "tools/residency_handoff/cli.py",
+              "sha256": "eb47751eba8f4c6e2eaf739912d6fc3faa85f013cb46a46f6016bfabf0119dc5"
+            },
+            {
+              "path": "tools/residency_handoff/contract.py",
+              "sha256": "6b9b73f6371401d9a3e5a27ca368112c8e2a590c8e527682d72a94ea6d547502"
+            },
+            {
+              "path": "tools/residency_handoff/validation.py",
+              "sha256": "7436754e2028e61ab916eadf9975d6351fca4988c8f029704c8fdcb0fca66ac7"
+            },
+            {
+              "path": "tools/validate_residency_implementation_handoff.py",
+              "sha256": "b788d2c23010b23fc1f70b579cd886bd63b9e48792e68cd181fead9860667d3e"
+            }
+          ],
+          "red_fixture": {
+            "bundle_sha256": "7c981d8bbdaf46e8ffd40a4e37c2c3e03f347ea93e0b855a2870cbb6cbf71803",
+            "command": [
+              "python3",
+              "-m",
+              "unittest",
+              "-q",
+              "test.test_residency_implementation_handoff_smoke"
+            ],
+            "evidence_commit": "99f7fbcae4cd023d429cdda54a32be6fea21e57f",
+            "evidence_tree": "0865ee907a79de00985727f3c1e3849735631593",
+            "failure_signature": "duplicate object key 'schema'",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-093/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-093/test.patch",
+            "patch_sha256": "2afdf885d289bc7d1d9e3b0dbac1dfbbb83c11dce74b4bbfbb20006104031220",
+            "test_paths": [
+              "test/test_residency_implementation_handoff_smoke.py"
+            ]
+          },
+          "task_base_commit": "8d667ef66585135d5593dc00c6952741358fa5c2",
+          "task_id": "TASK-093"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-m",
+              "unittest",
+              "-q",
+              "test.test_residency_implementation_base_scout"
+            ],
+            "commit": "c4783e47fd7b781824a5080f796c1ebb16994b25",
+            "result": "pass",
+            "tree": "e3b7510679a28ce489582883cc7d0eec97e1a69e"
+          },
+          "outputs": [
+            {
+              "path": "plan/evidence/phase-0/stable-source-scout.json",
+              "sha256": "7509ef2796c256e436502ce6360ba1361d0f8f8520ebab932534cb06d1f9c1b9"
+            },
+            {
+              "path": "test/test_residency_implementation_base_scout.py",
+              "sha256": "b7e298bb0e2df7429116e61817dc9bbb64f44aca5216ae7fbaf5341c7d8adf8c"
+            }
+          ],
+          "red_fixture": {
+            "bundle_sha256": "da04fdf4567a13129856c96ec4e5dc7c86b0d92636df99282417a37ca9c4dcb3",
+            "command": [
+              "python3",
+              "-m",
+              "unittest",
+              "-q",
+              "test.test_residency_implementation_base_scout"
+            ],
+            "evidence_commit": "8dd3b3b51e5db3df56afcdca733e96117860206e",
+            "evidence_tree": "3e9826a68b2141db4b1445075ccee5f68cd7ec7b",
+            "failure_signature": "FileNotFoundError",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-006/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-006/test.patch",
+            "patch_sha256": "0dbb1779dd930fce2494e63d31484e26c8f8b77067b437a423035e0680bd7324",
+            "test_paths": [
+              "test/test_residency_implementation_base_scout.py"
+            ]
+          },
+          "task_base_commit": "bdd384efd6588b97757927c04f1d00ae084e0837",
+          "task_id": "TASK-006"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-m",
+              "unittest",
+              "-q",
+              "test.test_residency_later_promotion_roster"
+            ],
+            "commit": "92b9d7b4ed3b47a0cd6d7c7ac25090c6cd61ec1c",
+            "result": "pass",
+            "tree": "9d84202e900cf828ef939f160f4f4ffe2be4cde9"
+          },
+          "outputs": [
+            {
+              "path": "docs/research/hatchery-campaign-parameters.md",
+              "sha256": "676d04d6b1a56b2b4228e9357a2952cf2205fcfb2f8d8f0b5bd7b4f4a9807d1e"
+            },
+            {
+              "path": "docs/research/portable-residency-capability-inventory.json",
+              "sha256": "63abf38e3013457ccedfb203257bb94d02a31746aa3253ea2b00a3883cb2a72f"
+            },
+            {
+              "path": "docs/research/portable-residency-capability-matrix.md",
+              "sha256": "0b9879510458fb61fd699ee8714158e7de1f4e1b8afde37b16e5e81c515918b3"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "bb92cb2e9875c260257e9ebd1b5e8134a7eb5a38c6531c3f0c264c993e9ae872"
+            },
+            {
+              "path": "plan/evidence/phase-0/later-promotion-issues.json",
+              "sha256": "866f627552e3402562e858ec574b993af6140005328cbc91db89400fd9ca3c15"
+            },
+            {
+              "path": "test/test_residency_capability_inventory_cli.py",
+              "sha256": "c804185544a2e14752958c912e8aac2a9cc003646d4b976cf3468b1a2b0770ea"
+            },
+            {
+              "path": "test/test_residency_capability_inventory_compatibility.py",
+              "sha256": "c04369c70fedddb8711bbdcde31c21d44d38eb875ebebde78c75714ad8367a38"
+            },
+            {
+              "path": "test/test_residency_capability_inventory_policy.py",
+              "sha256": "1a68c3270cc0f26c40c1810e2b6b1d67caf61ebf3d9109588db56d1fa93b9914"
+            },
+            {
+              "path": "test/test_residency_capability_inventory_source.py",
+              "sha256": "81a73ce06b8dee75c476e1b2269ffb00bd4aaa386f83c85e834f12aa6af5d667"
+            },
+            {
+              "path": "test/test_residency_later_promotion_roster.py",
+              "sha256": "98d0afb907042112d760682c78ff8b8c01825794ffe0ffe0b35f0b0ec2a5918f"
+            },
+            {
+              "path": "tools/residency_inventory/documents.py",
+              "sha256": "cdbbb7a8e3234c4b8fbb4105135b03157122269209ad837ef3aa8ce49012ee50"
+            },
+            {
+              "path": "tools/residency_inventory/gates.py",
+              "sha256": "3cc2ec21b2df1f15c85e3f9126b5f484ee37fa9b13a4c28ef2a7d1adc08b2214"
+            },
+            {
+              "path": "tools/residency_inventory/later_roster.py",
+              "sha256": "1767453f296d4c38a6f1a9378feb6b8806d5434244355cd5faf35b905a871e57"
+            },
+            {
+              "path": "tools/residency_inventory/platforms.py",
+              "sha256": "4c62cc15899aab773ff26fbbdd89ab32dfcc208dbcbef518017fc776003c3f90"
+            },
+            {
+              "path": "tools/residency_inventory/policy.py",
+              "sha256": "800acd41a7e57062bc3896640081b16b019b3ac5558cd5dd8fe3bf315a374c38"
+            },
+            {
+              "path": "tools/residency_inventory/profile_contracts.py",
+              "sha256": "661a66f1a85e148232902f982f144b03855033293e72b99b54054f843ed21f43"
+            },
+            {
+              "path": "tools/residency_inventory/promotions.py",
+              "sha256": "d30755c6ccabdd19080c4e974e6f66488c15a7f045e83c24b7e795216b0537f6"
+            },
+            {
+              "path": "tools/residency_inventory/schema.py",
+              "sha256": "a5ca0e0c95d5529ce33fb02e16d17985a7368f3a54ef37c58009317079ddd8e7"
+            }
+          ],
+          "red_fixture": {
+            "bundle_sha256": "3d82fe9219af78c45e4cdaac4f51d7b75e1e3728a3ce14687200f495e2af1595",
+            "command": [
+              "python3",
+              "-m",
+              "unittest",
+              "-q",
+              "test.test_residency_later_promotion_roster"
+            ],
+            "evidence_commit": "2c89d578342cdc032d0df73fcbb76bef8dbe7055",
+            "evidence_tree": "eb80a5a90dadb490d4121d1c2f7e249190d668d6",
+            "failure_signature": "AssertionError: 5 != 6",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-007/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-007/test.patch",
+            "patch_sha256": "79917e6893d03ce5a70f7e677ea6b4c43a4c7687dfb33f0bfba51dd7be3012fb",
+            "test_paths": [
+              "test/test_residency_later_promotion_roster.py"
+            ]
+          },
+          "task_base_commit": "c4783e47fd7b781824a5080f796c1ebb16994b25",
+          "task_id": "TASK-007"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-m",
+              "unittest",
+              "-q",
+              "test.test_residency_implementation_handoff.ResidencyImplementationHandoffCliTest.test_phase_zero_validates_real_git_identity_and_red_green_history"
+            ],
+            "commit": "04739a08e685a7c82f044c83872df7a76a596c3a",
+            "result": "pass",
+            "tree": "af7dbabdfef25dc3187e665905e6a34c7a10b473"
+          },
+          "outputs": [
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "a405b97f11a0aafb72cacf7068c94babe61d3445f8fd80bff015f9edb3411f7e"
+            },
+            {
+              "path": "test/test_residency_implementation_handoff.py",
+              "sha256": "4df02c20eec5302a123a34a87c9e5c288107ebd7a2db50587fc69998230d8bd9"
+            },
+            {
+              "path": "tools/residency_handoff/validation.py",
+              "sha256": "8c25644c533ae7b48cb10606aebe463b070c586461b064328c37d9df6fa0cef0"
+            }
+          ],
+          "red_fixture": {
+            "bundle_sha256": "956f17239ad2910a7a252469fb80f1aea4c63eff9ede128efba55e7c240570b2",
+            "command": [
+              "python3",
+              "-m",
+              "unittest",
+              "-q",
+              "test.test_residency_implementation_handoff.ResidencyImplementationHandoffCliTest.test_phase_zero_validates_real_git_identity_and_red_green_history"
+            ],
+            "evidence_commit": "3acb8fd594642c39ba2ed66f129de316ec977d72",
+            "evidence_tree": "21865353728279362b7bf2b3d9c2529f5df16676",
+            "failure_signature": "fatal: not a git repository",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-108/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-108/test.patch",
+            "patch_sha256": "bb02fc0808a9773a28fa9814f423e04a681a91a4e1f3f4ee1045d4df3bbe9733",
+            "test_paths": [
+              "test/test_residency_implementation_handoff.py"
+            ]
+          },
+          "task_base_commit": "92b9d7b4ed3b47a0cd6d7c7ac25090c6cd61ec1c",
+          "task_id": "TASK-108"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-m",
+              "unittest",
+              "-q",
+              "test.test_residency_implementation_handoff.ResidencyImplementationHandoffCliTest.test_phase_zero_validates_real_git_identity_and_red_green_history"
+            ],
+            "commit": "8bca3ebeb3989d96c2e9168a2cc796db06e21381",
+            "result": "pass",
+            "tree": "9249a7cbbad9b80c707b546c8efe7558c4979f69"
+          },
+          "outputs": [
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "723a30ce3418b2b819f1f8beff78e807074a51dd2ae68e955b546beb9f2bc437"
+            },
+            {
+              "path": "test/test_residency_implementation_handoff.py",
+              "sha256": "247bd2b774918d90e4c04abbe72bcc917ff225378936002e0cac5b655a62a070"
+            },
+            {
+              "path": "tools/residency_handoff/validation.py",
+              "sha256": "0d17b3926a45c71a0c18090dcb2ec011be1cb20c1840bd35e3e2d4b3b0e1aa94"
+            }
+          ],
+          "red_fixture": {
+            "bundle_sha256": "43e96b955654ac20d9fd126541019207a256ef44a2049d9e959cb9500592da48",
+            "command": [
+              "python3",
+              "-m",
+              "unittest",
+              "-q",
+              "test.test_residency_implementation_handoff.ResidencyImplementationHandoffCliTest.test_phase_zero_validates_real_git_identity_and_red_green_history"
+            ],
+            "evidence_commit": "452cae84db080b65000d307af7b073cb73da82ad",
+            "evidence_tree": "48ffdb1f66e58b32ff43f7cf24a38cd4574f1032",
+            "failure_signature": "phase_records[0].task_ids must be ['TASK-093', 'TASK-006', 'TASK-007']",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-109/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-109/test.patch",
+            "patch_sha256": "11de2d70dd892b65777023dbcea716b830e2e1aac068ae81a9e5bef5815cd166",
+            "test_paths": [
+              "test/test_residency_implementation_handoff.py"
+            ]
+          },
+          "task_base_commit": "04739a08e685a7c82f044c83872df7a76a596c3a",
+          "task_id": "TASK-109"
+        }
+      ],
+      "task_ids": [
+        "TASK-093",
+        "TASK-006",
+        "TASK-007",
+        "TASK-108",
+        "TASK-109"
+      ]
+    }
+  ],
   "pre_handoff_records": [
     {
       "checkpoint_commit": "915f85018f37e1cb5c580f004fa2ce2ff1905148",
