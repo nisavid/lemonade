@@ -1,4 +1,9 @@
-"""Crash-consistent updates for generated residency inventory documents."""
+"""Crash-consistent updates for generated residency inventory documents.
+
+Read-only validation is portable. Generated-document updates additionally
+require durable directory synchronization, which is unavailable on Windows;
+the update path therefore fails closed in ``_require_durable_update_support``.
+"""
 
 from __future__ import annotations
 

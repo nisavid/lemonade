@@ -7,7 +7,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .contract import (
     SourceSupportKey,
@@ -24,7 +24,14 @@ from .json_contract import parse_json_object
 MAX_GIT_STDERR_LENGTH = 320
 
 
-def _bounded_git_stderr(error: subprocess.CalledProcessError) -> str:
+class _GitFailure(Protocol):
+    """Minimal shape shared by failed checked and unchecked Git results."""
+
+    returncode: int
+    stderr: str | bytes | None
+
+
+def _bounded_git_stderr(error: _GitFailure) -> str:
     stderr = error.stderr
     if isinstance(stderr, bytes):
         stderr = stderr.decode(errors="replace")

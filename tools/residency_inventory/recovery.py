@@ -37,7 +37,10 @@ EXPECTED_RECOVERY_PROFILES = {
             "model_store"
         ),
         "ownership": "lemonade_serving_process_or_service_only",
-        "verified_release": ["service", "device_claim"],
+        "verified_release": [
+            "serving_process_or_service_membership",
+            "device_claim",
+        ],
     },
 }
 

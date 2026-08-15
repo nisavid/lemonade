@@ -294,8 +294,14 @@ os.replace = _injected_replace
         crashed = self._run_cli("--update", env=environment)
 
         self.assertEqual(crashed.returncode, 73, crashed.stderr)
-        self.assertNotIn("### Stale backend variants", self.matrix_path.read_text())
-        self.assertIn("#### Stale runtime exact cells", self.campaign_path.read_text())
+        self.assertNotIn(
+            "### Stale backend variants",
+            self.matrix_path.read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "#### Stale runtime exact cells",
+            self.campaign_path.read_text(encoding="utf-8"),
+        )
         pending = self._run_cli()
         self.assert_invalid(pending, "pending generated-document update transaction")
 

@@ -424,8 +424,9 @@ def validate_gate_source(
     if path.is_absolute() or ".." in path.parts:
         fail(f"gate_sources.{source_id}.document must be repository-relative")
     try:
-        document = (repo / path).read_text(encoding="utf-8")
-    except OSError as error:
+        with (repo / path).open(encoding="utf-8", newline=None) as stream:
+            document = stream.read()
+    except (OSError, UnicodeDecodeError) as error:
         fail(f"cannot read gate source {document_path}: {error}")
     section = markdown_section(document, section_title, f"gate source {document_path}")
     reject_range_shorthand(section, f"gate source {document_path} section")
