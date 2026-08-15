@@ -10,6 +10,7 @@ from .cells import validate_exact_cells
 from .compatibility import validate_compatibility_contracts
 from .contract import fail, require_exact_keys, require_mapping, require_string_list
 from .gates import PromotionGateRequirement, validate_gates
+from .later_roster import validate_later_promotion_roster
 from .platforms import validate_platform_contracts
 from .policy import PolicyRegistryValidation
 from .profiles import ProfileValidation
@@ -42,6 +43,7 @@ class PromotionValidation:
     exact_cells: list[dict[str, Any]]
     compatibility_contracts: list[dict[str, Any]]
     promotion_roster: dict[str, Any]
+    later_promotion_roster: list[dict[str, Any]]
     flattened_gate_sets: dict[str, list[str]]
     gate_sources: dict[str, dict[str, Any]]
     gate_registry: dict[str, dict[str, Any]]
@@ -55,6 +57,7 @@ def validate_fallback_operation_uses(
     policy: PolicyRegistryValidation,
     exact_cells: list[dict[str, Any]],
     compatibility_contracts: list[dict[str, Any]],
+    later_promotion_roster: list[dict[str, Any]],
 ) -> None:
     uses = {fallback_id: set() for fallback_id in policy.fallback_registry}
     for mapping in policy.fallback_sets.values():
@@ -67,6 +70,9 @@ def validate_fallback_operation_uses(
     for contract in compatibility_contracts:
         for fallback_id in contract["fallbacks"].values():
             uses[fallback_id].add(contract["operation_template"])
+    for unit in later_promotion_roster:
+        for fallback_id in unit["fallbacks"].values():
+            uses[fallback_id].add(unit["selector"]["operation_template"])
     for fallback_id, applicability in policy.fallback_operations.items():
         if set(applicability.operations) != uses[fallback_id]:
             fail(
@@ -111,6 +117,7 @@ def promotion_gate_requirements(
     variants: VariantValidation,
     exact_cells: list[dict[str, Any]],
     compatibility_contracts: list[dict[str, Any]],
+    later_promotion_roster: list[dict[str, Any]],
 ) -> list[PromotionGateRequirement]:
     requirements = [
         PromotionGateRequirement(
@@ -131,6 +138,16 @@ def promotion_gate_requirements(
             gate_set_id=contract["campaign_gate_set"],
         )
         for contract in compatibility_contracts
+    )
+    requirements.extend(
+        PromotionGateRequirement(
+            unit_id=unit["unit_id"],
+            unit_kind="later_runtime",
+            operation=unit["selector"]["operation_template"],
+            suite_set_id=variants.by_id[unit["selector"]["base_variant"]]["suites"],
+            gate_set_id=unit["evidence_gate_set"],
+        )
+        for unit in later_promotion_roster
     )
     return requirements
 
@@ -184,10 +201,26 @@ def validate_promotion_stage(
         exact_cell_ids={cell["cell_id"] for cell in exact_cells},
     )
     compatibility_contracts = compatibility_validation.contracts
+    later_validation = validate_later_promotion_roster(
+        inventory,
+        variants_by_id=variants.by_id,
+        platforms=vocabulary.platforms,
+        operation_sets=policy.operation_sets,
+        constraint_profiles=policy.constraint_profiles,
+        recoveries=policy.recovery_profiles,
+        fallback_registry=policy.fallback_registry,
+        fallback_operations=policy.fallback_operations,
+        profile_registries=profiles.registries,
+        compatibility_contract_ids={
+            contract["contract_id"] for contract in compatibility_contracts
+        },
+    )
+    later_promotion_roster = later_validation.units
     validate_fallback_operation_uses(
         policy,
         exact_cells,
         compatibility_contracts,
+        later_promotion_roster,
     )
     promotion_roster = validate_promotion_roster(
         inventory,
@@ -201,6 +234,7 @@ def validate_promotion_stage(
             variants,
             exact_cells,
             compatibility_contracts,
+            later_promotion_roster,
         ),
         suite_operations=policy.suite_operations,
         normalized_suite_sets=policy.suite_sets,
@@ -209,14 +243,20 @@ def validate_promotion_stage(
         exact_cells=exact_cells,
         compatibility_contracts=compatibility_contracts,
         promotion_roster=promotion_roster,
+        later_promotion_roster=later_promotion_roster,
         flattened_gate_sets=gate_validation.flattened_sets,
         gate_sources=gate_validation.source_bindings,
         gate_registry=gate_validation.registry,
         campaign_base_binding=gate_validation.campaign_base_binding,
-        profile_uses=cell_validation.profile_uses,
+        profile_uses={
+            registry_name: references | later_validation.profile_uses[registry_name]
+            for registry_name, references in cell_validation.profile_uses.items()
+        },
         runtime_binding_uses=cell_validation.runtime_binding_uses,
         fallback_uses=(
-            cell_validation.fallback_uses | compatibility_validation.fallback_uses
+            cell_validation.fallback_uses
+            | compatibility_validation.fallback_uses
+            | later_validation.fallback_uses
         ),
     )
 
@@ -241,6 +281,7 @@ class ProjectionValidation:
     exact_cells: list[dict[str, Any]]
     compatibility_contracts: list[dict[str, Any]]
     promotion_roster: dict[str, Any]
+    later_promotion_roster: list[dict[str, Any]]
 
     def as_mapping(self) -> dict[str, Any]:
         """Return the stable machine projection consumed by both renderers."""
@@ -262,6 +303,7 @@ class ProjectionValidation:
             "exact_cells": self.exact_cells,
             "compatibility_contracts": self.compatibility_contracts,
             "promotion_roster": self.promotion_roster,
+            "later_promotion_roster": self.later_promotion_roster,
         }
 
 
@@ -351,4 +393,5 @@ def validate_closure_stage(
         exact_cells=promotions.exact_cells,
         compatibility_contracts=promotions.compatibility_contracts,
         promotion_roster=promotions.promotion_roster,
+        later_promotion_roster=promotions.later_promotion_roster,
     )

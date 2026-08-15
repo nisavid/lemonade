@@ -103,11 +103,14 @@ class ResidencyCapabilityInventoryCliTest(ResidencyCapabilityInventoryCliCase):
 
         self.assert_invalid(result, "constraint_profiles must equal")
 
-    def test_compatibility_suite_excludes_runtime_artifact_recovery(self) -> None:
+    def test_compatibility_suite_includes_relation_only_artifact_closure(self) -> None:
         suites = self.inventory["suite_sets"]["npu_compatibility"]
+        artifact_gate = self.inventory["gate_registry"]["H-NPU-ART-01"]
 
         self.assertIn("PT-REC", suites)
-        self.assertNotIn("PT-ART", suites)
+        self.assertIn("PT-ART", suites)
+        self.assertEqual(artifact_gate["source"], "hatchery_overlay")
+        self.assertEqual(artifact_gate["suites"], ["PT-ART"])
 
     def test_recovery_suite_distinguishes_runtime_and_relation_proofs(self) -> None:
         recovery_suite = self.inventory["suite_registry"]["PT-REC"]

@@ -1,0 +1,278 @@
+{
+  "schema": "portable_residency_later_promotion_issue_receipts/v1",
+  "repository": "nisavid/lemonade",
+  "issues": [
+    {
+      "unit_id": "H-VULKAN-ADM-GTT-HOST-v1",
+      "issue_id": 39,
+      "node_id": "I_kwDOSdJej88AAAABM6g3HA",
+      "url": "https://github.com/nisavid/lemonade/issues/39",
+      "title": "Implement and qualify H-VULKAN-ADM-GTT-HOST-v1",
+      "body_sha256": "a48ed819258c778bf918c6ac722138916a5a754a2f5878bfbfd73a41e269c2ea"
+    },
+    {
+      "unit_id": "H-VULKAN-PRE-GTT-HOST-v1",
+      "issue_id": 40,
+      "node_id": "I_kwDOSdJej88AAAABM6g6RQ",
+      "url": "https://github.com/nisavid/lemonade/issues/40",
+      "title": "Implement and qualify H-VULKAN-PRE-GTT-HOST-v1",
+      "body_sha256": "f7081644c5d4d540762fb5d61210f08a5ef52bd56af32598f0e06178a2708162"
+    },
+    {
+      "unit_id": "H-VULKAN-STA-GTT-HOST-v1",
+      "issue_id": 41,
+      "node_id": "I_kwDOSdJej88AAAABM6g6jQ",
+      "url": "https://github.com/nisavid/lemonade/issues/41",
+      "title": "Implement and qualify H-VULKAN-STA-GTT-HOST-v1",
+      "body_sha256": "09099a594c1c083168f16bae2f1ded02691ffdebd51d736e2aad5d25b979ded6"
+    },
+    {
+      "unit_id": "H-VULKAN-REC-GTT-HOST-OWN-v1",
+      "issue_id": 42,
+      "node_id": "I_kwDOSdJej88AAAABM6g6wA",
+      "url": "https://github.com/nisavid/lemonade/issues/42",
+      "title": "Implement and qualify H-VULKAN-REC-GTT-HOST-OWN-v1",
+      "body_sha256": "77016880a3036b85edad159bcc28580952359e021a2902aa4d4e5c2ca2437a66"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-LLM-ADM-v1",
+      "issue_id": 43,
+      "node_id": "I_kwDOSdJej88AAAABM6g6_w",
+      "url": "https://github.com/nisavid/lemonade/issues/43",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-LLM-ADM-v1",
+      "body_sha256": "220fd061364a9713f2a712abb78a05ecec38b0c5c1c9925ac6147d78bb56c43c"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-LLM-LFR-v1",
+      "issue_id": 44,
+      "node_id": "I_kwDOSdJej88AAAABM6g7Rg",
+      "url": "https://github.com/nisavid/lemonade/issues/44",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-LLM-LFR-v1",
+      "body_sha256": "9ed45bc02045c6737dc4e23ce57d1cbd8b8d6b1d42824d838728502e52581078"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-LLM-STA-v1",
+      "issue_id": 45,
+      "node_id": "I_kwDOSdJej88AAAABM6g7dQ",
+      "url": "https://github.com/nisavid/lemonade/issues/45",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-LLM-STA-v1",
+      "body_sha256": "e2a7a29d7cab015da3b4ea4ba90a89c1b8db07babb354a94c8b131d9fee1c567"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-LLM-REC-v1",
+      "issue_id": 46,
+      "node_id": "I_kwDOSdJej88AAAABM6g7uA",
+      "url": "https://github.com/nisavid/lemonade/issues/46",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-LLM-REC-v1",
+      "body_sha256": "ab3b592c013f373ee84da0f6bf0d637685dec73f386f93aee5eace83e8077337"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-LLM-UNL-v1",
+      "issue_id": 47,
+      "node_id": "I_kwDOSdJej88AAAABM6g79Q",
+      "url": "https://github.com/nisavid/lemonade/issues/47",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-LLM-UNL-v1",
+      "body_sha256": "ca4e7b84d0076a79a8cb5547021d8435688b771888cb6fc0a756ebf87815b6a7"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-LLM-PIN-v1",
+      "issue_id": 48,
+      "node_id": "I_kwDOSdJej88AAAABM6g8Ig",
+      "url": "https://github.com/nisavid/lemonade/issues/48",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-LLM-PIN-v1",
+      "body_sha256": "b9149f985ed951ffa6e78233dfd14fcbde725c28fe0c871a18e9c3950606bb35"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-ADM-v1",
+      "issue_id": 49,
+      "node_id": "I_kwDOSdJej88AAAABM6g8Ug",
+      "url": "https://github.com/nisavid/lemonade/issues/49",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-EMBEDDING-ADM-v1",
+      "body_sha256": "fcfbacc000edca657e08044da28057020816901674fb58988d0ad3ec0bf87404"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-LFR-v1",
+      "issue_id": 50,
+      "node_id": "I_kwDOSdJej88AAAABM6g8hw",
+      "url": "https://github.com/nisavid/lemonade/issues/50",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-EMBEDDING-LFR-v1",
+      "body_sha256": "40992474b25e126aac94dbe705ed0747ea447d92734ca51e2d17d1535d6339d1"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-STA-v1",
+      "issue_id": 51,
+      "node_id": "I_kwDOSdJej88AAAABM6g8zg",
+      "url": "https://github.com/nisavid/lemonade/issues/51",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-EMBEDDING-STA-v1",
+      "body_sha256": "d90a00d057efe31ce6444b1e6c8d56993069784e0e779c6d7cdb528409311d19"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-REC-v1",
+      "issue_id": 52,
+      "node_id": "I_kwDOSdJej88AAAABM6g9AQ",
+      "url": "https://github.com/nisavid/lemonade/issues/52",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-EMBEDDING-REC-v1",
+      "body_sha256": "07efdb6d04b4b5e0e7532c53566d07795bf426bf951a5cbbe92d0f4002e1802c"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-UNL-v1",
+      "issue_id": 53,
+      "node_id": "I_kwDOSdJej88AAAABM6g9VQ",
+      "url": "https://github.com/nisavid/lemonade/issues/53",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-EMBEDDING-UNL-v1",
+      "body_sha256": "8a9c74bb81bd8b3623aa4a0db9fb9543b68cc8fb7ef25276f3cc4dc8483f928c"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-EMBEDDING-PIN-v1",
+      "issue_id": 54,
+      "node_id": "I_kwDOSdJej88AAAABM6g9rw",
+      "url": "https://github.com/nisavid/lemonade/issues/54",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-EMBEDDING-PIN-v1",
+      "body_sha256": "91da4bea7918e5ed25587b385f9b5d80f4ee22e5aedddd0d2e837ec24d0d64c8"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-ADM-v1",
+      "issue_id": 55,
+      "node_id": "I_kwDOSdJej88AAAABM6g99g",
+      "url": "https://github.com/nisavid/lemonade/issues/55",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-TRANSCRIPTION-ADM-v1",
+      "body_sha256": "819bcbeff4434c39698ca331a6033403d84fcee33b4e915b5d40d4e5c6eb3a36"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-LFR-v1",
+      "issue_id": 56,
+      "node_id": "I_kwDOSdJej88AAAABM6g-NQ",
+      "url": "https://github.com/nisavid/lemonade/issues/56",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-TRANSCRIPTION-LFR-v1",
+      "body_sha256": "3b60c2223dc9c6329d2adabff62c5c38d046eff499307abcbe60c3c6a20de3df"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-STA-v1",
+      "issue_id": 57,
+      "node_id": "I_kwDOSdJej88AAAABM6g-cQ",
+      "url": "https://github.com/nisavid/lemonade/issues/57",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-TRANSCRIPTION-STA-v1",
+      "body_sha256": "84d4fafb048084145a26038f353dc6fd5ac09a38fd6bdfae188239e1833e5cac"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-REC-v1",
+      "issue_id": 58,
+      "node_id": "I_kwDOSdJej88AAAABM6g-og",
+      "url": "https://github.com/nisavid/lemonade/issues/58",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-TRANSCRIPTION-REC-v1",
+      "body_sha256": "51c3c0fccd3e45eee6725e32e74224182338539b9f08eb101057ef14ffbee225"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-UNL-v1",
+      "issue_id": 59,
+      "node_id": "I_kwDOSdJej88AAAABM6g-3g",
+      "url": "https://github.com/nisavid/lemonade/issues/59",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-TRANSCRIPTION-UNL-v1",
+      "body_sha256": "455976e82591a5e3c298f95f49a134470831d146401b07dac6386afaec0ace34"
+    },
+    {
+      "unit_id": "W-XDNA2-FLM-NPU-TRANSCRIPTION-PIN-v1",
+      "issue_id": 60,
+      "node_id": "I_kwDOSdJej88AAAABM6g_HQ",
+      "url": "https://github.com/nisavid/lemonade/issues/60",
+      "title": "Implement and qualify W-XDNA2-FLM-NPU-TRANSCRIPTION-PIN-v1",
+      "body_sha256": "b8b86ee33847782e851649dd5cfe7d809e7eee56e5e5073577144208c114e21e"
+    },
+    {
+      "unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-ADM-v1",
+      "issue_id": 61,
+      "node_id": "I_kwDOSdJej88AAAABM6g_UQ",
+      "url": "https://github.com/nisavid/lemonade/issues/61",
+      "title": "Implement and qualify W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-ADM-v1",
+      "body_sha256": "82e2a423d173bc9f5af5d4404335a75c8a125fa5fbf2fa1ee86a862362d638a0"
+    },
+    {
+      "unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-LFR-v1",
+      "issue_id": 62,
+      "node_id": "I_kwDOSdJej88AAAABM6g_lg",
+      "url": "https://github.com/nisavid/lemonade/issues/62",
+      "title": "Implement and qualify W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-LFR-v1",
+      "body_sha256": "ed2c0b3f552af7742b36202fa05e0841049d7d8ebd492051d2ea80c4044b42c8"
+    },
+    {
+      "unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-STA-v1",
+      "issue_id": 63,
+      "node_id": "I_kwDOSdJej88AAAABM6hAAA",
+      "url": "https://github.com/nisavid/lemonade/issues/63",
+      "title": "Implement and qualify W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-STA-v1",
+      "body_sha256": "8073e31ca4a5b8ba3ff589dc4df9c3afb1f9eb0dc25ab5e3d0e6d29bbbef1b50"
+    },
+    {
+      "unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-REC-v1",
+      "issue_id": 64,
+      "node_id": "I_kwDOSdJej88AAAABM6hARg",
+      "url": "https://github.com/nisavid/lemonade/issues/64",
+      "title": "Implement and qualify W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-REC-v1",
+      "body_sha256": "101d31f9210761b4d2cbee02e429d930e4729969295b8b017d98f91feb093eb3"
+    },
+    {
+      "unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-UNL-v1",
+      "issue_id": 65,
+      "node_id": "I_kwDOSdJej88AAAABM6hAeQ",
+      "url": "https://github.com/nisavid/lemonade/issues/65",
+      "title": "Implement and qualify W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-UNL-v1",
+      "body_sha256": "c8d244264888f9c225a8c169f856acde23837fba78eab87d7777f8c68214dc4e"
+    },
+    {
+      "unit_id": "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-PIN-v1",
+      "issue_id": 66,
+      "node_id": "I_kwDOSdJej88AAAABM6hAvA",
+      "url": "https://github.com/nisavid/lemonade/issues/66",
+      "title": "Implement and qualify W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-PIN-v1",
+      "body_sha256": "5cfd0fa11938032018d8d02f5ced32e84ec6ae60536d7008c3bf1557fa286103"
+    },
+    {
+      "unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-ADM-v1",
+      "issue_id": 67,
+      "node_id": "I_kwDOSdJej88AAAABM6hBBA",
+      "url": "https://github.com/nisavid/lemonade/issues/67",
+      "title": "Implement and qualify W-XDNA2-RYZENAI-LLM-NPU-LLM-ADM-v1",
+      "body_sha256": "8fac4bd40ce8f3fab70678fbbefeab72f482ce9dad2af698f0dbbcb52cedc053"
+    },
+    {
+      "unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-LFR-v1",
+      "issue_id": 68,
+      "node_id": "I_kwDOSdJej88AAAABM6hBOw",
+      "url": "https://github.com/nisavid/lemonade/issues/68",
+      "title": "Implement and qualify W-XDNA2-RYZENAI-LLM-NPU-LLM-LFR-v1",
+      "body_sha256": "f00cbf98cadf15dd3bf170b26a82d2709d72f0e9a7df6cd6217bda945e115f9b"
+    },
+    {
+      "unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-STA-v1",
+      "issue_id": 69,
+      "node_id": "I_kwDOSdJej88AAAABM6hBaQ",
+      "url": "https://github.com/nisavid/lemonade/issues/69",
+      "title": "Implement and qualify W-XDNA2-RYZENAI-LLM-NPU-LLM-STA-v1",
+      "body_sha256": "fc9fbc31e99e08a52ae66a505cf6857aa798bde525d8e8a4c092b8b1cab266c1"
+    },
+    {
+      "unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-REC-v1",
+      "issue_id": 70,
+      "node_id": "I_kwDOSdJej88AAAABM6hBng",
+      "url": "https://github.com/nisavid/lemonade/issues/70",
+      "title": "Implement and qualify W-XDNA2-RYZENAI-LLM-NPU-LLM-REC-v1",
+      "body_sha256": "5ddc50a182c33a1fa8bc72cc525748ddad5d57a5e2aa511217b6787f83d2492c"
+    },
+    {
+      "unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-UNL-v1",
+      "issue_id": 71,
+      "node_id": "I_kwDOSdJej88AAAABM6hB4w",
+      "url": "https://github.com/nisavid/lemonade/issues/71",
+      "title": "Implement and qualify W-XDNA2-RYZENAI-LLM-NPU-LLM-UNL-v1",
+      "body_sha256": "f2dc0aed72f40371c29807fbf58da7a3c158be85d043d829018c8c01392393f2"
+    },
+    {
+      "unit_id": "W-XDNA2-RYZENAI-LLM-NPU-LLM-PIN-v1",
+      "issue_id": 72,
+      "node_id": "I_kwDOSdJej88AAAABM6hCQA",
+      "url": "https://github.com/nisavid/lemonade/issues/72",
+      "title": "Implement and qualify W-XDNA2-RYZENAI-LLM-NPU-LLM-PIN-v1",
+      "body_sha256": "61830b50fff36f64b69d980d126f1f1e3f472770774b100cf0c0f65a374b6915"
+    }
+  ]
+}

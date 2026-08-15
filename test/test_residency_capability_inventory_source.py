@@ -77,7 +77,7 @@ subprocess.run = run
 
         self.assert_invalid(result, "gfx950/nightly")
 
-    def test_schema_version_must_be_five(self) -> None:
+    def test_schema_version_must_be_six(self) -> None:
         def use_old_schema(inventory: dict[str, object]) -> None:
             inventory["schema_version"] = 3
 
@@ -85,7 +85,7 @@ subprocess.run = run
 
         result = self._run_cli("--render")
 
-        self.assert_invalid(result, "schema_version must be 5")
+        self.assert_invalid(result, "schema_version must be 6")
 
     def test_source_baseline_object_must_be_a_commit(self) -> None:
         def select_blob_as_baseline(inventory: dict[str, object]) -> None:
@@ -509,8 +509,8 @@ subprocess.run = run
         source = self.inventory_path.read_text(encoding="utf-8")
         self.inventory_path.write_text(
             source.replace(
-                '  "schema_version": 5,',
-                '  "schema_version": 5,\n  "schema_version": 5,',
+                '  "schema_version": 6,',
+                '  "schema_version": 6,\n  "schema_version": 6,',
                 1,
             ),
             encoding="utf-8",

@@ -251,6 +251,66 @@ class ResidencyCapabilityInventoryCliTest(ResidencyCapabilityInventoryCliCase):
 
         self.assert_invalid(result, "must exactly list the exact cell IDs")
 
+    def test_later_promotion_roster_projects_exactly_34_units(self) -> None:
+        result = self._run_cli("--render")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("### Later promotion roster", result.stdout)
+        self.assertEqual(result.stdout.count("| `H-VULKAN-ADM-GTT-HOST-v1`<br>"), 2)
+        self.assertEqual(result.stdout.count("| `H-VULKAN-PRE-GTT-HOST-v1`<br>"), 2)
+        self.assertEqual(result.stdout.count("| `H-VULKAN-STA-GTT-HOST-v1`<br>"), 2)
+        self.assertEqual(result.stdout.count("| `H-VULKAN-REC-GTT-HOST-OWN-v1`<br>"), 2)
+        self.assertEqual(result.stdout.count("| `W-XDNA2-FLM-NPU-LLM-ADM-v1`<br>"), 2)
+        self.assertEqual(
+            result.stdout.count("| `W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-PIN-v1`<br>"),
+            2,
+        )
+        self.assertEqual(
+            result.stdout.count("| `W-XDNA2-RYZENAI-LLM-NPU-LLM-REC-v1`<br>"),
+            2,
+        )
+
+    def test_later_promotion_roster_rejects_missing_units(self) -> None:
+        self.inventory["later_promotion_roster"].pop()
+        self._write_inventory()
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(result, "must contain exactly the accepted 34 units")
+
+    def test_later_promotion_roster_accepts_a_recorded_issue_id(self) -> None:
+        self.inventory["later_promotion_roster"][0]["issue_id"] = 12345
+        self._write_inventory()
+
+        result = self._run_cli("--render")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.count("| `H-VULKAN-ADM-GTT-HOST-v1`<br>`12345` |"),
+            2,
+        )
+
+    def test_windows_physical_units_cannot_use_synthetic_relation_gates(self) -> None:
+        windows_unit = next(
+            unit
+            for unit in self.inventory["later_promotion_roster"]
+            if unit["unit_id"] == "W-XDNA2-FLM-NPU-LLM-ADM-v1"
+        )
+        windows_unit["evidence_gate_set"] = "xdna2_npu_flm_conflict_v1"
+        self._write_inventory()
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(result, "must equal its accepted identity")
+
+    def test_later_units_cannot_raise_their_capability_ceiling(self) -> None:
+        self.inventory["later_promotion_roster"][0]["evidence_ceiling"] = "validated"
+        self._write_inventory()
+
+        result = self._run_cli("--render")
+
+        self.assert_invalid(result, "must equal its accepted identity")
+
     def test_exact_cell_id_rejects_lockstep_roster_rename(self) -> None:
         def rename_cell_and_roster(inventory: dict[str, object]) -> None:
             cell = inventory["exact_cells"][0]

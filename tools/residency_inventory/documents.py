@@ -40,6 +40,16 @@ def render_fallbacks(fallbacks: dict[str, str]) -> str:
     )
 
 
+def render_mapping(values: dict[str, str]) -> str:
+    return (
+        "<br>".join(
+            f"{render_code(key)} = {render_code(value)}"
+            for key, value in sorted(values.items())
+        )
+        or "—"
+    )
+
+
 def render_profile_semantics(profile: dict[str, Any]) -> str:
     """Render every non-document component of one accepted profile identity."""
 
@@ -322,6 +332,22 @@ def render_inventory(projection: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
+            "### Later promotion roster",
+            "",
+            (
+                "These entries freeze future physical implementation and "
+                "qualification work only. Each remains `unsupported`, `absent`, "
+                "and capped at `modeled`; completing an issue or its physical gate "
+                "set cannot promote it. Raising a unit's ceiling requires an "
+                "explicit new inventory revision."
+            ),
+            "",
+        ]
+    )
+    lines.extend(render_later_promotion_table(projection["later_promotion_roster"]))
+    lines.extend(
+        [
+            "",
             "### Promotion roster",
             "",
             "| Promotion unit kind | IDs |",
@@ -401,6 +427,39 @@ def render_compatibility_contract_table(
     return lines
 
 
+def render_later_promotion_table(units: list[dict[str, Any]]) -> list[str]:
+    lines = [
+        "| Unit ID / issue | Exact selector | Material profiles | Constraints / recovery | Initial state / ceiling | Delivery / evidence gates | Fallbacks / relation contracts | Expected roots |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for unit in units:
+        selector = unit["selector"]
+        issue = "—" if unit["issue_id"] is None else render_code(unit["issue_id"])
+        selector_text = (
+            f"{render_code(selector['base_variant'])} / "
+            f"{render_code(selector['platform'])} / "
+            f"{render_code(selector['backend_channel'])}<br>"
+            f"{render_code(selector['model_type'])} / "
+            f"{render_code(selector['operation_template'])}: "
+            f"{render_code_list(selector['operation_leaves'])}"
+        )
+        state = unit["initial_state"]
+        relation_contracts = render_code_list(unit["compatibility_contracts"])
+        lines.append(
+            f"| {render_code(unit['unit_id'])}<br>{issue} | {selector_text} | "
+            f"{render_mapping(unit['material_profiles'])} | "
+            f"{render_code_list(unit['constraints'])}<br>{render_code(unit['recovery'])} | "
+            f"{render_code(state['capability_level'])} / "
+            f"{render_code(state['delivery_state'])} / "
+            f"{render_code(unit['evidence_ceiling'])} | "
+            f"{render_code(unit['delivery_gate'])}<br>"
+            f"{render_code(unit['evidence_gate_set'])} | "
+            f"{render_fallbacks(unit['fallbacks'])}<br>relations: "
+            f"{relation_contracts} | {render_mapping(unit['expected_roots'])} |"
+        )
+    return lines
+
+
 def render_campaign(projection: dict[str, Any]) -> str:
     return "\n".join(
         [
@@ -413,6 +472,18 @@ def render_campaign(projection: dict[str, Any]) -> str:
         + render_exact_cell_table(projection["exact_cells"])
         + ["", "#### Evidence-only compatibility contract", ""]
         + render_compatibility_contract_table(projection["compatibility_contracts"])
+        + [
+            "",
+            "#### Later physical implementation and qualification roster",
+            "",
+            (
+                "These units remain `unsupported`, `absent`, and capped at "
+                "`modeled`. Issue completion and physical evidence do not raise "
+                "that ceiling; promotion requires an explicit new inventory revision."
+            ),
+            "",
+        ]
+        + render_later_promotion_table(projection["later_promotion_roster"])
         + [CAMPAIGN_END_MARKER]
     )
 

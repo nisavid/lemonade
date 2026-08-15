@@ -28,6 +28,10 @@ EXPECTED_GATE_SOURCE_LOCATORS = {
         "document": "docs/research/hatchery-campaign-parameters.md",
         "section": "Atomic overlay gate definitions",
     },
+    "later_physical": {
+        "document": "docs/research/hatchery-campaign-parameters.md",
+        "section": "Later physical qualification gate definitions",
+    },
 }
 EXPECTED_OVERLAY_GATES = {
     "H-EXT-01",
@@ -37,7 +41,30 @@ EXPECTED_OVERLAY_GATES = {
     "H-NPU-TOP-01",
     "H-NPU-PROT-01",
     "H-NPU-PROT-02",
+    "H-NPU-ART-01",
 } | {f"H-LIV-01{suffix}" for suffix in "abcdefg"}
+EXPECTED_LATER_PHYSICAL_GATES = {
+    "H-VULKAN-TOP-01",
+    "H-VULKAN-CON-01",
+    "H-VULKAN-ART-01",
+    "H-VULKAN-EXP-01",
+    "H-VULKAN-LIV-01",
+    "H-VULKAN-ADM-01",
+    "H-VULKAN-PRE-01",
+    "H-VULKAN-STA-01",
+    "H-VULKAN-REC-01",
+    "W-XDNA2-TOP-01",
+    "W-XDNA2-CON-01",
+    "W-XDNA2-ART-01",
+    "W-XDNA2-EXP-01",
+    "W-XDNA2-LIV-01",
+    "W-XDNA2-ADM-01",
+    "W-XDNA2-LFR-01",
+    "W-XDNA2-STA-01",
+    "W-XDNA2-REC-01",
+    "W-XDNA2-UNL-01",
+    "W-XDNA2-PIN-01",
+}
 GATE_APPLICATIONS = {
     "exact_runtime",
     "exact_synthetic",
@@ -54,6 +81,21 @@ EXPECTED_COMPATIBILITY_GATES = EXPECTED_EVIDENCE_COMMON | {
     "H-NPU-CON-02",
     "H-EVD-01",
     "H-NPU-REC-01",
+    "H-NPU-ART-01",
+}
+EXPECTED_VULKAN_COMMON = {
+    "H-VULKAN-TOP-01",
+    "H-VULKAN-CON-01",
+    "H-VULKAN-ART-01",
+    "H-VULKAN-EXP-01",
+    "H-VULKAN-LIV-01",
+}
+EXPECTED_WINDOWS_PHYSICAL_COMMON = {
+    "W-XDNA2-TOP-01",
+    "W-XDNA2-CON-01",
+    "W-XDNA2-ART-01",
+    "W-XDNA2-EXP-01",
+    "W-XDNA2-LIV-01",
 }
 EXPECTED_RUNTIME_GATE_EXPANSIONS = {
     "hatchery_rocm_adm_v1": EXPECTED_HATCHERY_COMMON
@@ -91,7 +133,22 @@ EXPECTED_RUNTIME_GATE_EXPANSIONS = {
     | {"H-FP-01", "H-STA-01", "H-CON-01", "H-CON-02", "H-EVD-01", "H-REC-01"},
     "hatchery_rocm_rec_v1": EXPECTED_HATCHERY_COMMON
     | {"H-EVD-01", "H-CON-02", "H-REC-01"},
+    "hatchery_vulkan_adm_v1": EXPECTED_VULKAN_COMMON | {"H-VULKAN-ADM-01"},
+    "hatchery_vulkan_pre_v1": EXPECTED_VULKAN_COMMON | {"H-VULKAN-PRE-01"},
+    "hatchery_vulkan_sta_v1": EXPECTED_VULKAN_COMMON | {"H-VULKAN-STA-01"},
+    "hatchery_vulkan_rec_v1": EXPECTED_VULKAN_COMMON | {"H-VULKAN-REC-01"},
 }
+for participant in (
+    "flm_npu_llm",
+    "flm_npu_embedding",
+    "flm_npu_transcription",
+    "whispercpp_npu_transcription",
+    "ryzenai_llm_npu_llm",
+):
+    for operation in ("adm", "lfr", "sta", "rec", "unl", "pin"):
+        EXPECTED_RUNTIME_GATE_EXPANSIONS[
+            f"windows_xdna2_{participant}_{operation}_v1"
+        ] = EXPECTED_WINDOWS_PHYSICAL_COMMON | {f"W-XDNA2-{operation.upper()}-01"}
 EXPECTED_GATE_SUITES = {
     "H-TOP-01": {"PT-ID", "PT-TOP"},
     "H-FP-01": {"PT-FP"},
@@ -115,6 +172,27 @@ EXPECTED_GATE_SUITES = {
     "H-NPU-CON-01": {"PT-CON"},
     "H-NPU-CON-02": {"PT-CON"},
     "H-NPU-REC-01": {"PT-REC"},
+    "H-NPU-ART-01": {"PT-ART"},
+    "H-VULKAN-TOP-01": {"PT-ID", "PT-TOP"},
+    "H-VULKAN-CON-01": {"PT-CON"},
+    "H-VULKAN-ART-01": {"PT-ART"},
+    "H-VULKAN-EXP-01": {"PT-EXP"},
+    "H-VULKAN-LIV-01": {"PT-LIV"},
+    "H-VULKAN-ADM-01": {"PT-FP", "PT-SIG", "PT-ADM"},
+    "H-VULKAN-PRE-01": {"PT-SIG", "PT-PRE"},
+    "H-VULKAN-STA-01": {"PT-FP", "PT-SIG", "PT-STA"},
+    "H-VULKAN-REC-01": {"PT-REC"},
+    "W-XDNA2-TOP-01": {"PT-ID", "PT-TOP"},
+    "W-XDNA2-CON-01": {"PT-CON"},
+    "W-XDNA2-ART-01": {"PT-ART"},
+    "W-XDNA2-EXP-01": {"PT-EXP"},
+    "W-XDNA2-LIV-01": {"PT-LIV"},
+    "W-XDNA2-ADM-01": {"PT-SIG", "PT-NPU"},
+    "W-XDNA2-LFR-01": {"PT-LFR"},
+    "W-XDNA2-STA-01": {"PT-SIG", "PT-STA"},
+    "W-XDNA2-REC-01": {"PT-REC"},
+    "W-XDNA2-UNL-01": {"PT-UNL"},
+    "W-XDNA2-PIN-01": {"PT-PIN"},
     **{f"H-LIV-01{suffix}": {"PT-LIV"} for suffix in "abcdefg"},
 }
 DEFAULT_GATE_APPLICATIONS = frozenset({"exact_runtime"})
@@ -135,6 +213,7 @@ GATE_APPLICATION_OVERRIDES = {
             "H-NPU-PROT-01",
             "H-NPU-PROT-02",
             "H-NPU-REC-01",
+            "H-NPU-ART-01",
         )
     },
     **{f"H-LIV-01{suffix}": frozenset(GATE_APPLICATIONS) for suffix in "abcdefg"},
@@ -210,6 +289,14 @@ EXPECTED_COMPATIBILITY_SAFETY_SEMANTICS = {
             "Return the registered fail-closed compatibility response and preserve "
             "every participant; do not clean up a runtime, replay claims, recover a "
             "participant, or assert live recovery authority."
+        ),
+    ),
+    "H-NPU-ART-01": (
+        "S NPU compatibility source-closure fixture",
+        "Resolve the relation contract's artifact and writer applicability",
+        (
+            "Prove that the relation contract binds no runtime artifact or native "
+            "writer and grants no artifact, process, cleanup, or release authority."
         ),
     ),
 }
@@ -328,7 +415,7 @@ def parse_gate_definition(source_id: str, row_index: int, line: str) -> GateDefi
     gate_id, fixture, raw_applications, trigger, required_result = _table_cells(
         line, f"gate source {source_id} row {row_index}"
     )
-    if re.fullmatch(r"H-[A-Z]+(?:-[A-Z]+)*-[0-9]+[a-z]?", gate_id) is None:
+    if re.fullmatch(r"(?:H|W)-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]+[a-z]?", gate_id) is None:
         fail(f"gate source {source_id} row {row_index} has invalid gate ID")
     if not fixture or not trigger or not required_result:
         fail(f"gate source {source_id} gate {gate_id} has an empty semantic field")
@@ -447,8 +534,11 @@ def validate_gate_definition_closure(
     """Validate source ownership, semantics, and accepted applications together."""
 
     expected_ids = {
-        "hatchery_base": set(EXPECTED_GATE_SUITES) - EXPECTED_OVERLAY_GATES,
+        "hatchery_base": set(EXPECTED_GATE_SUITES)
+        - EXPECTED_OVERLAY_GATES
+        - EXPECTED_LATER_PHYSICAL_GATES,
         "hatchery_overlay": EXPECTED_OVERLAY_GATES,
+        "later_physical": EXPECTED_LATER_PHYSICAL_GATES,
     }
     for source_id, definitions in parsed.items():
         if set(definitions) != expected_ids[source_id]:
@@ -480,7 +570,7 @@ def validate_gate_sources(
 ) -> tuple[dict[str, dict[str, GateDefinition]], dict[str, dict[str, Any]]]:
     require_registry_keys(gate_sources, "gate_sources")
     if set(gate_sources) != set(EXPECTED_GATE_SOURCE_LOCATORS):
-        fail("gate_sources must contain exactly hatchery_base and hatchery_overlay")
+        fail("gate_sources must contain exactly the accepted source bindings")
     parsed: dict[str, dict[str, GateDefinition]] = {}
     normalized_sources: dict[str, dict[str, Any]] = {}
     for source_id, raw_source in gate_sources.items():
@@ -641,22 +731,33 @@ def validate_gate_registry(
 
 def validate_gate_set_contract(
     flattened: dict[str, list[str]],
-) -> tuple[set[str], set[str]]:
+) -> tuple[set[str], set[str], set[str], set[str]]:
     """Validate common and operation-specific gate-set expansions."""
 
-    for common_set_id in ("evidence_common_v1", "hatchery_common_v1"):
+    for common_set_id in (
+        "evidence_common_v1",
+        "hatchery_common_v1",
+        "hatchery_vulkan_common_v1",
+        "windows_xdna2_physical_common_v1",
+    ):
         if common_set_id not in flattened:
             fail(f"gate_sets must define {common_set_id}")
     evidence_common = set(flattened["evidence_common_v1"])
     hatchery_common = set(flattened["hatchery_common_v1"])
+    vulkan_common = set(flattened["hatchery_vulkan_common_v1"])
+    windows_common = set(flattened["windows_xdna2_physical_common_v1"])
     if evidence_common != EXPECTED_EVIDENCE_COMMON:
         fail("evidence_common_v1 must equal the accepted evidence-common gates")
     if hatchery_common != EXPECTED_HATCHERY_COMMON:
         fail("hatchery_common_v1 must equal evidence_common_v1 plus H-TOP-01")
+    if vulkan_common != EXPECTED_VULKAN_COMMON:
+        fail("hatchery_vulkan_common_v1 must equal its accepted physical gates")
+    if windows_common != EXPECTED_WINDOWS_PHYSICAL_COMMON:
+        fail("windows_xdna2_physical_common_v1 must equal its accepted physical gates")
     for gate_set_id, expected_gates in EXPECTED_RUNTIME_GATE_EXPANSIONS.items():
         if set(flattened.get(gate_set_id, [])) != expected_gates:
             fail(f"gate set {gate_set_id} must equal its accepted runtime expansion")
-    return evidence_common, hatchery_common
+    return evidence_common, hatchery_common, vulkan_common, windows_common
 
 
 def validate_compatibility_gate_atoms(
@@ -709,6 +810,8 @@ def validate_promotion_requirement(
     gate_suites: dict[str, set[str]],
     evidence_common: set[str],
     hatchery_common: set[str],
+    vulkan_common: set[str],
+    windows_common: set[str],
     suite_operations: dict[str, OperationApplicability],
     normalized_suite_sets: dict[str, list[str]],
 ) -> set[str]:
@@ -725,10 +828,8 @@ def validate_promotion_requirement(
             f"{requirement.suite_set_id}"
         )
     unit_gates = set(flattened[requirement.gate_set_id])
-    is_exact_cell = requirement.unit_kind == "exact_cell"
-    required_application = (
-        "exact_runtime" if is_exact_cell else "compatibility_synthetic"
-    )
+    is_runtime = requirement.unit_kind in {"exact_cell", "later_runtime"}
+    required_application = "exact_runtime" if is_runtime else "compatibility_synthetic"
     ineligible_gates = sorted(
         gate_id
         for gate_id in unit_gates
@@ -739,10 +840,20 @@ def validate_promotion_requirement(
             f"promotion unit {requirement.unit_id} uses gates ineligible for "
             f"{required_application}: {ineligible_gates}"
         )
-    common_set_id = "hatchery_common_v1" if is_exact_cell else "evidence_common_v1"
-    required_common = (
-        hatchery_common if is_exact_cell else evidence_common | {"H-NPU-TOP-01"}
-    )
+    if requirement.unit_kind == "exact_cell":
+        common_set_id = "hatchery_common_v1"
+        required_common = hatchery_common
+    elif requirement.unit_kind == "compatibility_contract":
+        common_set_id = "evidence_common_v1"
+        required_common = evidence_common | {"H-NPU-TOP-01"}
+    elif requirement.unit_id.startswith("H-VULKAN-"):
+        common_set_id = "hatchery_vulkan_common_v1"
+        required_common = vulkan_common
+    elif requirement.unit_id.startswith("W-XDNA2-"):
+        common_set_id = "windows_xdna2_physical_common_v1"
+        required_common = windows_common
+    else:
+        fail(f"promotion unit {requirement.unit_id} has an unknown runtime gate family")
     if common_set_id not in dependencies[requirement.gate_set_id]:
         fail(
             f"promotion unit {requirement.unit_id} does not inherit required "
@@ -780,7 +891,9 @@ def validate_gates(
 
     gate_sets = require_mapping(inventory.get("gate_sets"), "gate_sets")
     flattened, dependencies = flatten_gate_sets(gate_sets, gate_registry)
-    evidence_common, hatchery_common = validate_gate_set_contract(flattened)
+    evidence_common, hatchery_common, vulkan_common, windows_common = (
+        validate_gate_set_contract(flattened)
+    )
     used_gate_sets: set[str] = set()
     used_atoms: set[str] = set()
     for requirement in requirements:
@@ -792,6 +905,8 @@ def validate_gates(
             gate_suites=gate_suites,
             evidence_common=evidence_common,
             hatchery_common=hatchery_common,
+            vulkan_common=vulkan_common,
+            windows_common=windows_common,
             suite_operations=suite_operations,
             normalized_suite_sets=normalized_suite_sets,
         )

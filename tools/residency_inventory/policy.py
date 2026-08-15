@@ -123,6 +123,7 @@ EXPECTED_SUITE_SETS = {
         "PT-UNL",
         "PT-PIN",
         "PT-CON",
+        "PT-ART",
         "PT-EXP",
         "PT-LIV",
     },

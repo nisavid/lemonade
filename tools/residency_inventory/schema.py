@@ -61,6 +61,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "exact_cells",
     "compatibility_contracts",
     "promotion_roster",
+    "later_promotion_roster",
     "exclusions",
     "coverage_policy",
 }
@@ -111,8 +112,8 @@ def validate_vocabulary_stage(
     """Validate the envelope, frozen inputs, enums, and platform registry shape."""
 
     require_exact_keys(inventory, EXPECTED_TOP_LEVEL_KEYS, "inventory")
-    if inventory.get("schema_version") != 5:
-        fail("schema_version must be 5")
+    if inventory.get("schema_version") != 6:
+        fail("schema_version must be 6")
 
     source = validate_source_closure(repo, inventory)
     provider_keys, topology_rules = validate_provider_and_topology_rules(

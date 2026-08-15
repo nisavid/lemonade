@@ -14,6 +14,22 @@ HATCHERY_SHARED_GTT_ATOM: SourceSupportKey = (
     "gfx1151",
     "stable",
 )
+HATCHERY_VULKAN_SHARED_GTT_ATOM: SourceSupportKey = (
+    "llamacpp",
+    "vulkan",
+    "linux",
+    "amd_gpu",
+    "*",
+    "single",
+)
+
+VULKAN_PROFILE_DOCUMENT = {
+    "locator": (
+        "docs/research/hatchery-campaign-parameters.md"
+        "#later-hatchery-vulkan-material-profile"
+    ),
+    "sha256": "131fa1292b7e017a474dc6c5398b4575e578df1a1477671052e0866deab3dc33",
+}
 
 ACCEPTED_HARDWARE_PROFILE_IDENTITIES: dict[str, dict[str, Any]] = {
     "hatchery-gfx1151-shared-gtt-v1": {
@@ -32,7 +48,16 @@ ACCEPTED_HARDWARE_PROFILE_IDENTITIES: dict[str, dict[str, Any]] = {
         "required_runtime_bindings": frozenset(
             {"device_identity", "driver_runtime_closure"}
         ),
-    }
+    },
+    "hatchery-gfx1151-vulkan-shared-gtt-v1": {
+        "base_topology": "provider_resolved",
+        "topology": "shared_gtt",
+        "source_support": HATCHERY_VULKAN_SHARED_GTT_ATOM,
+        "evidence_document": VULKAN_PROFILE_DOCUMENT,
+        "required_runtime_bindings": frozenset(
+            {"device_identity", "driver_runtime_closure"}
+        ),
+    },
 }
 
 ACCEPTED_CONFIGURATION_PROFILE_IDENTITIES: dict[str, dict[str, Any]] = {
@@ -47,7 +72,11 @@ ACCEPTED_CONFIGURATION_PROFILE_IDENTITIES: dict[str, dict[str, Any]] = {
                 "fb8da2962ff9070cc172995806f81ccf6c1ada267bd75f4edab9a29d7fb3cdda"
             ),
         },
-    }
+    },
+    "profile-free-residency-estimation-vulkan-v1-text-only": {
+        "model_types": frozenset({"llm"}),
+        "document": VULKAN_PROFILE_DOCUMENT,
+    },
 }
 
 ACCEPTED_WORKLOAD_PROFILE_IDENTITIES: dict[str, dict[str, Any]] = {
@@ -61,7 +90,10 @@ ACCEPTED_WORKLOAD_PROFILE_IDENTITIES: dict[str, dict[str, Any]] = {
                 "27840de0b38f113c13edcee700f4c27a7916a8d6888e10d966ffe39b11124aea"
             ),
         }
-    }
+    },
+    "hatchery-vulkan-text-generation-campaign-v1": {
+        "document": VULKAN_PROFILE_DOCUMENT,
+    },
 }
 
 ACCEPTED_PREDICTOR_RULE_IDENTITIES: dict[str, dict[str, Any]] = {
@@ -76,7 +108,11 @@ ACCEPTED_PREDICTOR_RULE_IDENTITIES: dict[str, dict[str, Any]] = {
                 "a3184cf7a6c3e436ce41e11dee30ca1c7c780ac01374125d3880f6c46f46aef9"
             ),
         },
-    }
+    },
+    "hatchery-llamacpp-vulkan-profile-free-v1": {
+        "confidence_target": "validated_predictor",
+        "document": VULKAN_PROFILE_DOCUMENT,
+    },
 }
 
 ACCEPTED_OBSERVATION_CONTRACT_IDENTITIES: dict[str, dict[str, Any]] = {
@@ -91,7 +127,11 @@ ACCEPTED_OBSERVATION_CONTRACT_IDENTITIES: dict[str, dict[str, Any]] = {
                 "c43642e3ef985ee02d2e2e42d6a8ee8ac3e6f40703b88de97931fb91b43e501f"
             ),
         },
-    }
+    },
+    "hatchery-vulkan-gtt-host-observation-v1": {
+        "constraints": frozenset({"gpu_shared_residency", "host_memavailable_floor"}),
+        "document": VULKAN_PROFILE_DOCUMENT,
+    },
 }
 
 ACCEPTED_PROFILE_IDENTITIES = {

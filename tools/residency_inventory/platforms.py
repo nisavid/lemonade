@@ -17,6 +17,7 @@ from .contract import (
 from .profile_contracts import (
     ACCEPTED_HARDWARE_PROFILE_IDENTITIES,
     HATCHERY_SHARED_GTT_ATOM,
+    HATCHERY_VULKAN_SHARED_GTT_ATOM,
 )
 from .source import FrozenSourceClosure, source_support_from_mapping
 
@@ -239,7 +240,8 @@ def validate_hardware_profiles(
             profile["topology"], f"hardware_profiles.{profile_id}.topology"
         )
         if topology != base_topology and not (
-            atom == HATCHERY_SHARED_GTT_ATOM and topology == "shared_gtt"
+            atom in {HATCHERY_SHARED_GTT_ATOM, HATCHERY_VULKAN_SHARED_GTT_ATOM}
+            and topology == "shared_gtt"
         ):
             fail(
                 f"hardware profile {profile_id} uses an unauthorized topology refinement"

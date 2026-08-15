@@ -126,7 +126,17 @@ class ResidencyCapabilityInventoryCliTest(ResidencyCapabilityInventoryCliCase):
         self.assertIn("### Flattened campaign gate sets", result.stdout)
         self.assertIn("### Compatibility promotion contracts", result.stdout)
         self.assertIn("### Promotion roster", result.stdout)
-        self.assertEqual(result.stdout.count("`H-NPU-FLM-CONFLICT-XDNA2-v1`"), 3)
+        self.assertEqual(
+            sum(
+                line.startswith("| `H-NPU-FLM-CONFLICT-XDNA2-v1` |")
+                for line in result.stdout.splitlines()
+            ),
+            2,
+        )
+        self.assertIn(
+            "| Compatibility contracts | `H-NPU-FLM-CONFLICT-XDNA2-v1` |",
+            result.stdout,
+        )
         self.assertEqual(self.matrix_path.read_bytes(), matrix_before)
         self.assertEqual(self.campaign_path.read_bytes(), campaign_before)
 
