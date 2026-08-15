@@ -62,14 +62,27 @@ def _record_digest(record: dict[str, object]) -> str:
     )
 
 
+def _directory_digest(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(
+        candidate for candidate in root.rglob("*") if candidate.is_file()
+    ):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 class HandoffRepository:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, object_format: str = "sha1"):
         self.root = root
+        self.object_format = object_format
         self.manifest_path = (
             root / "plan" / "portable-residency-implementation-base.json"
         )
         self.manifest: dict[str, object] = {}
-        self._git("init", "-q")
+        self._git("init", "-q", f"--object-format={object_format}")
         self._git("config", "user.name", "Handoff Test")
         self._git("config", "user.email", "handoff@example.invalid")
 
@@ -159,12 +172,24 @@ class HandoffRepository:
         ]
         output_path = f"outputs/{task_id}.txt"
         test_source = (
+            "import subprocess\n"
             "import unittest\n"
             "from pathlib import Path\n"
             "\n"
             "class HandoffProbe(unittest.TestCase):\n"
-            "    def test_output_exists(self):\n"
+            "    def test_output_and_pinned_tree_resolve(self):\n"
             f"        self.assertEqual(Path({output_path!r}).read_text(encoding='utf-8'), 'ready\\n')\n"
+            "        result = subprocess.run(\n"
+            f"            ['git', 'rev-parse', '{task_base}^{{tree}}'],\n"
+            "            capture_output=True, text=True, check=False,\n"
+            "        )\n"
+            "        self.assertEqual(result.returncode, 0, result.stderr)\n"
+            "        object_format = subprocess.run(\n"
+            "            ['git', 'rev-parse', '--show-object-format'],\n"
+            "            capture_output=True, text=True, check=False,\n"
+            "        )\n"
+            "        self.assertEqual(object_format.returncode, 0, object_format.stderr)\n"
+            f"        self.assertEqual(object_format.stdout.strip(), {self.object_format!r})\n"
         )
         patch = self._new_file_patch(test_path, test_source)
         if add_undeclared_test_path:
@@ -489,16 +514,18 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
 
     def test_phase_zero_validates_real_git_identity_and_red_green_history(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            fixture = HandoffRepository(Path(directory))
+            fixture = HandoffRepository(Path(directory), object_format="sha256")
             fixture.build()
+            source_digest = _directory_digest(fixture.root)
 
             result = fixture.run_validator()
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            result.stdout,
-            "portable residency implementation handoff: phase 0 valid\n",
-        )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(_directory_digest(fixture.root), source_digest)
+            self.assertEqual(
+                result.stdout,
+                "portable residency implementation handoff: phase 0 valid\n",
+            )
 
     def test_phase_record_digest_is_content_addressed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

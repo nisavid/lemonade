@@ -123,6 +123,12 @@ REQUIRED_SEAMS = {
 }
 
 
+def _without_git_environment() -> dict[str, str]:
+    return {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
+
+
 class GitRepository:
     def __init__(self, root: Path):
         self.root = root.resolve()
@@ -199,6 +205,40 @@ class GitRepository:
                 ):
                     fail(f"unsafe path in Git archive: {member.name!r}")
             source.extractall(destination, filter="data")
+
+        environment = _without_git_environment()
+        object_format = str(self.run("rev-parse", "--show-object-format")).strip()
+        if object_format not in {"sha1", "sha256"}:
+            fail(f"unsupported source repository object format {object_format!r}")
+        object_path = Path(str(self.run("rev-parse", "--git-path", "objects")).strip())
+        if not object_path.is_absolute():
+            object_path = self.root / object_path
+        initialized = subprocess.run(
+            ["git", "init", "-q", f"--object-format={object_format}"],
+            cwd=destination,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+        )
+        if initialized.returncode:
+            fail(f"cannot initialize replay repository: {initialized.stderr.strip()}")
+        alternates = destination / ".git" / "objects" / "info" / "alternates"
+        alternates.write_text(f"{object_path.resolve()}\n", encoding="utf-8")
+        for arguments in (
+            ("update-ref", "--no-deref", "HEAD", commit),
+            ("read-tree", commit),
+        ):
+            prepared = subprocess.run(
+                ["git", *arguments],
+                cwd=destination,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            if prepared.returncode:
+                fail("cannot prepare replay repository: " f"{prepared.stderr.strip()}")
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:
@@ -720,7 +760,13 @@ def _run_at_commit(
             patch_path = checkout / ".handoff-red.patch"
             patch_path.write_bytes(patch)
             applied = subprocess.run(
-                ["git", "apply", str(patch_path)],
+                [
+                    "git",
+                    "apply",
+                    "--whitespace=nowarn",
+                    "--unidiff-zero",
+                    str(patch_path),
+                ],
                 cwd=checkout,
                 capture_output=True,
                 text=True,
@@ -737,7 +783,7 @@ def _run_at_commit(
                 text=True,
                 check=False,
                 timeout=120,
-                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                env={**_without_git_environment(), "PYTHONDONTWRITEBYTECODE": "1"},
             )
         except subprocess.TimeoutExpired:
             fail(f"fixture command timed out: {command!r}")
@@ -759,7 +805,14 @@ def _patch_paths(patch: bytes, label: str) -> list[str]:
         patch_path = Path(directory) / "fixture.patch"
         patch_path.write_bytes(patch)
         result = subprocess.run(
-            ["git", "apply", "--numstat", str(patch_path)],
+            [
+                "git",
+                "apply",
+                "--whitespace=nowarn",
+                "--unidiff-zero",
+                "--numstat",
+                str(patch_path),
+            ],
             cwd=directory,
             capture_output=True,
             text=True,
@@ -976,7 +1029,13 @@ def _validate_task_evidence(
         patch_file = reconstructed / ".handoff.patch"
         patch_file.write_bytes(patch)
         applied = subprocess.run(
-            ["git", "apply", str(patch_file)],
+            [
+                "git",
+                "apply",
+                "--whitespace=nowarn",
+                "--unidiff-zero",
+                str(patch_file),
+            ],
             cwd=reconstructed,
             capture_output=True,
             text=True,
