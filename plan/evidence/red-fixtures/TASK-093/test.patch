@@ -1,0 +1,50 @@
+diff --git a/test/test_residency_implementation_handoff_smoke.py b/test/test_residency_implementation_handoff_smoke.py
+new file mode 100644
+--- /dev/null
++++ b/test/test_residency_implementation_handoff_smoke.py
+@@ -0,0 +1,45 @@
++"""Public smoke test for the residency handoff validator."""
++
++from __future__ import annotations
++
++import subprocess
++import sys
++import tempfile
++import unittest
++from pathlib import Path
++
++REPO_ROOT = Path(__file__).resolve().parents[1]
++VALIDATOR = REPO_ROOT / "tools" / "validate_residency_implementation_handoff.py"
++
++
++class ResidencyImplementationHandoffSmokeTest(unittest.TestCase):
++    def test_duplicate_json_key_fails_closed_without_a_traceback(self) -> None:
++        with tempfile.TemporaryDirectory() as directory:
++            manifest = Path(directory) / "handoff.json"
++            manifest.write_text(
++                '{"schema":"portable_residency_implementation_handoff/v1",'
++                '"schema":"portable_residency_implementation_handoff/v1"}\n',
++                encoding="utf-8",
++            )
++            result = subprocess.run(
++                [
++                    sys.executable,
++                    str(VALIDATOR),
++                    "--manifest",
++                    str(manifest),
++                    "--phase",
++                    "0",
++                ],
++                cwd=REPO_ROOT,
++                capture_output=True,
++                text=True,
++                check=False,
++            )
++
++        self.assertEqual(result.returncode, 2)
++        self.assertIn("duplicate object key 'schema'", result.stderr)
++        self.assertNotIn("Traceback", result.stderr)
++
++
++if __name__ == "__main__":
++    unittest.main()
