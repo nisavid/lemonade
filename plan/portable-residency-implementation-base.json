@@ -1,0 +1,152 @@
+{
+  "implementation_base": {
+    "commit": "0e5b4ad66cc38805a47a65a2bdc8a557d9cbaefb",
+    "tree": "0fc114102b653d0f4296a184f761131cf2a576bf"
+  },
+  "phase_records": [],
+  "pre_handoff_records": [
+    {
+      "checkpoint_commit": "915f85018f37e1cb5c580f004fa2ce2ff1905148",
+      "checkpoint_tree": "5a2f5f8b54922afe3538b0fcb746b89036c95ba8",
+      "classification": "research_refresh",
+      "fallback_state": {
+        "authority": "legacy_runtime",
+        "status": "active"
+      },
+      "outputs": [
+        {
+          "path": "docs/research/portable-residency-capability-inventory.json",
+          "sha256": "fd1c6ea3380a816480fb0c10ada4ffbbb027958ae3168f6c819ddf81a801eb30"
+        }
+      ],
+      "source_relation": {
+        "implementation_base_commit": "0e5b4ad66cc38805a47a65a2bdc8a557d9cbaefb",
+        "kind": "implementation_base_ancestor"
+      },
+      "task_id": "TASK-001",
+      "validation_results": [
+        {
+          "command": [
+            "python3",
+            "tools/validate_residency_capability_inventory.py"
+          ],
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "checkpoint_commit": "915f85018f37e1cb5c580f004fa2ce2ff1905148",
+      "checkpoint_tree": "5a2f5f8b54922afe3538b0fcb746b89036c95ba8",
+      "classification": "research_refresh",
+      "fallback_state": {
+        "authority": "legacy_runtime",
+        "status": "active"
+      },
+      "outputs": [
+        {
+          "path": "docs/research/portable-residency-capability-inventory.json",
+          "sha256": "fd1c6ea3380a816480fb0c10ada4ffbbb027958ae3168f6c819ddf81a801eb30"
+        },
+        {
+          "path": "tools/residency_inventory/source.py",
+          "sha256": "cca8350b2579ad56d2ea56a0b9863fef082761390fe478628fe8cca5366dab76"
+        }
+      ],
+      "source_relation": {
+        "implementation_base_commit": "0e5b4ad66cc38805a47a65a2bdc8a557d9cbaefb",
+        "kind": "implementation_base_ancestor"
+      },
+      "task_id": "TASK-002",
+      "validation_results": [
+        {
+          "command": [
+            "python3",
+            "tools/validate_residency_capability_inventory.py"
+          ],
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "checkpoint_commit": "915f85018f37e1cb5c580f004fa2ce2ff1905148",
+      "checkpoint_tree": "5a2f5f8b54922afe3538b0fcb746b89036c95ba8",
+      "classification": "research_refresh",
+      "fallback_state": {
+        "authority": "legacy_runtime",
+        "status": "active"
+      },
+      "outputs": [
+        {
+          "path": "test/test_residency_capability_inventory_source.py",
+          "sha256": "2957171b2c21e6dc088c10933f80306657c78bc2da4eb4449db9fdec9528429b"
+        }
+      ],
+      "source_relation": {
+        "implementation_base_commit": "0e5b4ad66cc38805a47a65a2bdc8a557d9cbaefb",
+        "kind": "implementation_base_ancestor"
+      },
+      "task_id": "TASK-003",
+      "validation_results": [
+        {
+          "command": [
+            "python3",
+            "-m",
+            "unittest",
+            "-q",
+            "test.test_residency_capability_inventory_source"
+          ],
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "checkpoint_commit": "915f85018f37e1cb5c580f004fa2ce2ff1905148",
+      "checkpoint_tree": "5a2f5f8b54922afe3538b0fcb746b89036c95ba8",
+      "classification": "research_refresh",
+      "fallback_state": {
+        "authority": "legacy_runtime",
+        "status": "active"
+      },
+      "outputs": [
+        {
+          "path": "docs/research/hatchery-campaign-parameters.md",
+          "sha256": "9ba5b08b239dc0fb6edd1198aafc33c8909164dca4909510d479d3274655adcc"
+        },
+        {
+          "path": "docs/research/portable-residency-capability-matrix.md",
+          "sha256": "2abea1d3e378c7c76ac58d1e21b2e21200dd6da0fb0513ba4d047863fc462cba"
+        }
+      ],
+      "source_relation": {
+        "implementation_base_commit": "0e5b4ad66cc38805a47a65a2bdc8a557d9cbaefb",
+        "kind": "implementation_base_ancestor"
+      },
+      "task_id": "TASK-004",
+      "validation_results": [
+        {
+          "command": [
+            "python3",
+            "tools/validate_residency_capability_inventory.py",
+            "--render"
+          ],
+          "result": "pass"
+        }
+      ]
+    }
+  ],
+  "research_closure": {
+    "baseline_commit": "a505bbc702cc1fcd44ef73c44defabc98c36d505",
+    "baseline_tree": "ab4933415358c32ab2e912f472e3361542170fbb"
+  },
+  "schema": "portable_residency_implementation_handoff/v1",
+  "stable_release": {
+    "local_ref": "refs/heads/upstream-stable",
+    "local_ref_commit": "93aac619a9df474ae1782f4bd45a0a147d6dd4b5",
+    "origin_ref": "refs/remotes/origin/upstream-stable",
+    "origin_ref_commit": "93aac619a9df474ae1782f4bd45a0a147d6dd4b5",
+    "peeled_commit": "93aac619a9df474ae1782f4bd45a0a147d6dd4b5",
+    "release_url": "https://github.com/lemonade-sdk/lemonade/releases/tag/v11.6.0",
+    "tag": "v11.6.0",
+    "tag_object": null
+  }
+}
