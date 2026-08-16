@@ -122,14 +122,14 @@ runs:
             exit 1
         }
 
-        # Check for key binaries
-        $expectedBinaries = @(
+        $expectedItems = @(
             "bin\LemonadeServer.exe",
-            "bin\lemonade.exe"
+            "bin\lemonade.exe",
+            "bin\resources\residency_profiles.json"
         )
 
         $missingItems = @()
-        foreach ($item in $expectedBinaries) {
+        foreach ($item in $expectedItems) {
             $fullPath = Join-Path $installPath $item
             if (-not (Test-Path $fullPath)) {
                 $missingItems += $item

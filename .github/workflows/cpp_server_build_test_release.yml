@@ -1456,10 +1456,12 @@ jobs:
 
           test -f /opt/bin/lemonade
           test -f /opt/bin/lemond
+          test -f /opt/share/lemonade-server/resources/residency_profiles.json
 
           /opt/bin/lemonade --version
           /opt/bin/lemond --version
 
+          rpm -qpl "$RPM_FILE" | grep -Fx "/opt/share/lemonade-server/resources/residency_profiles.json"
           rpm -qpl "$RPM_FILE" | grep -Fx "/usr/lib/systemd/user/lemond.service"
           rpm -qpl --dump "$RPM_FILE" \
             | grep -E '^/usr/lib/systemd/user/lemond\.service ' \
@@ -1660,6 +1662,7 @@ jobs:
               "$archiveDir\resources\server_models.json",
               "$archiveDir\resources\backend_versions.json",
               "$archiveDir\resources\defaults.json",
+              "$archiveDir\resources\residency_profiles.json",
               "$archiveDir\resources\toolDefinitions.json"
           )
           $failures = @()

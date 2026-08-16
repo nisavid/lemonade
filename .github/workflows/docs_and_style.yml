@@ -54,10 +54,20 @@ jobs:
           test "$(git cat-file -t 'a505bbc702cc1fcd44ef73c44defabc98c36d505')" = commit
           test "$(git cat-file -t 'a505bbc702cc1fcd44ef73c44defabc98c36d505:src/cpp/include/lemon/model_types.h')" = blob
           test "$(git rev-parse 'a505bbc702cc1fcd44ef73c44defabc98c36d505:src/cpp/include/lemon/model_types.h')" = 3084d17ec13564c506e09e12433c015bfb0f1ab7
+      - name: Install portable residency contract dependencies
+        run: python -m pip install jsonschema
       - name: Validate portable residency inventory
         run: python tools/validate_residency_capability_inventory.py
       - name: Test portable residency inventory validator
         run: python -m unittest discover -s test -p 'test_residency_capability_inventory_*.py'
+      - name: Test generated portable residency contract
+        run: python -W error test/residency/contract/test_generated_contract.py
+      - name: Check generated portable residency contract
+        run: python tools/generate_residency_contract.py --check
+      - name: Validate portable residency delivery wiring
+        run: python -S test/residency/contract/test_delivery_public_seam.py
+      - name: Verify portable residency generated outputs are clean
+        run: git diff --exit-code
 
   backend-docs-drift:
     # The backend reference doc (docs/dev/backends-reference.md) is generated from

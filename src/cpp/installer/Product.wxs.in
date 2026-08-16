@@ -201,6 +201,10 @@
         <File Id="backend_versions.json" Source="$(var.BuildDir)\Release\resources\backend_versions.json" KeyPath="yes" />
       </Component>
 
+      <Component Id="ResidencyProfilesJson" Directory="ResourcesDir" Guid="795214fb-206b-582e-b2f8-b25814935415">
+        <File Id="residency_profiles.json" Source="$(var.BuildDir)\Release\resources\residency_profiles.json" KeyPath="yes" />
+      </Component>
+
       <Component Id="DefaultsJson" Directory="ResourcesDir" Guid="0b2d4f6a-7c8e-49f1-a2b3-c4d5e6f70819">
         <File Id="defaults.json" Source="$(var.BuildDir)\Release\resources\defaults.json" KeyPath="yes" />
       </Component>

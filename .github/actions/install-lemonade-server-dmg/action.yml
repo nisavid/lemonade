@@ -63,6 +63,8 @@ runs:
         BIN_PATH="${{ steps.install.outputs.bin-path }}"
         echo "Verifying installation at: $BIN_PATH"
 
+        test -f "/Library/Application Support/Lemonade/resources/residency_profiles.json"
+
         if [ -x "$BIN_PATH/lemond" ]; then
             echo "Found: lemond"
             "$BIN_PATH/lemond" --version
