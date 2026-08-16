@@ -1,0 +1,24 @@
+{
+  "command": [
+    "python3",
+    "-S",
+    "test/residency/contract/test_cross_component_matrix_public_seam.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "c++",
+      "mbedcrypto",
+      "nlohmann-json",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-013 residency cross-component matrix is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "fdc3cec7ec20bcac1f904b5135b23b3ba3cf8b68",
+  "task_id": "TASK-013"
+}
