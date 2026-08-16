@@ -1427,6 +1427,8 @@ jobs:
     env:
       LEMONADE_VERSION: ${{ needs.build-lemonade-rpm.outputs.version }}
     steps:
+      - uses: actions/checkout@v5
+
       - name: Download Lemonade .rpm Package
         uses: actions/download-artifact@v7
         with:
@@ -1436,7 +1438,7 @@ jobs:
       - name: Install and verify Lemonade (.rpm)
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           RPM_FILE="lemonade-server-${LEMONADE_VERSION}-fc${{ matrix.fedora-version }}.${{ matrix.rpm-arch }}.rpm"
 
@@ -1445,6 +1447,12 @@ jobs:
               ls -la *.rpm 2>/dev/null || echo "No .rpm files found in current directory"
               exit 1
           fi
+
+          CATALOG_MEMBER="/opt/share/lemonade-server/resources/residency_profiles.json"
+          CATALOG_MEMBERS=$(rpm -qpl "$RPM_FILE" | grep -E '(^|/)residency_profiles\.json$')
+          CATALOG_MEMBER_COUNT=$(printf '%s\n' "$CATALOG_MEMBERS" | wc -l)
+          test "$CATALOG_MEMBER_COUNT" -eq 1
+          test "$CATALOG_MEMBERS" = "$CATALOG_MEMBER"
 
           dnf install -y shadow-utils "$RPM_FILE"
 
@@ -1457,6 +1465,11 @@ jobs:
           test -f /opt/bin/lemonade
           test -f /opt/bin/lemond
           test -f /opt/share/lemonade-server/resources/residency_profiles.json
+          CATALOG_FILES=$(find "/opt" -type f -name 'residency_profiles.json')
+          CATALOG_FILE_COUNT=$(printf '%s\n' "$CATALOG_FILES" | wc -l)
+          test "$CATALOG_FILE_COUNT" -eq 1
+          test "$CATALOG_FILES" = "/opt/share/lemonade-server/resources/residency_profiles.json"
+          cmp -s "$CATALOG_FILES" "$GITHUB_WORKSPACE/src/cpp/resources/residency_profiles.json"
 
           /opt/bin/lemonade --version
           /opt/bin/lemond --version
@@ -1640,6 +1653,8 @@ jobs:
     env:
       LEMONADE_VERSION: ${{ needs.build-lemonade-embeddable-windows.outputs.version }}
     steps:
+      - uses: actions/checkout@v5
+
       - name: Download embeddable archive
         uses: actions/download-artifact@v4
         with:
@@ -1652,7 +1667,36 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           $archiveDir = "lemonade-embeddable-$($env:LEMONADE_VERSION)-windows-x64"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead("$archiveDir.zip")
+          try {
+              $catalogArchivePath = "$archiveDir/resources/residency_profiles.json"
+              $catalogEntries = @($archive.Entries | Where-Object { [System.IO.Path]::GetFileName($_.FullName) -eq "residency_profiles.json" })
+              if ($catalogEntries.Count -ne 1) {
+                  throw "Expected exactly one residency catalog in $archiveDir.zip; found $($catalogEntries.Count)."
+              }
+              if ($catalogEntries[0].FullName -ne $catalogArchivePath) {
+                  throw "Residency catalog is not at $catalogArchivePath in $archiveDir.zip."
+              }
+          } finally {
+              $archive.Dispose()
+          }
           Expand-Archive -Path "$archiveDir.zip" -DestinationPath .
+
+          $catalogFiles = @(Get-ChildItem -LiteralPath $archiveDir -Recurse -File -Filter "residency_profiles.json")
+          if ($catalogFiles.Count -ne 1) {
+              throw "Expected exactly one residency catalog under $archiveDir; found $($catalogFiles.Count)."
+          }
+          $canonicalCatalog = [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path "$archiveDir\resources\residency_profiles.json"))
+          if ($catalogFiles[0].FullName -ne $canonicalCatalog) {
+              throw "Residency catalog is not at $canonicalCatalog."
+          }
+          $sourceCatalog = Join-Path $env:GITHUB_WORKSPACE "src\cpp\resources\residency_profiles.json"
+          $packagedHash = (Get-FileHash -LiteralPath $catalogFiles[0].FullName -Algorithm SHA256).Hash
+          $sourceHash = (Get-FileHash -LiteralPath $sourceCatalog -Algorithm SHA256).Hash
+          if ($packagedHash -ne $sourceHash) {
+              throw "Extracted residency catalog bytes differ from the source catalog."
+          }
 
           # Verify expected files
           $expected = @(

@@ -21,13 +21,24 @@ runs:
         LEMONADE_VERSION: ${{ inputs.version }}
         PLATFORM: ${{ inputs.platform }}
       run: |
-        set -e
+        set -euo pipefail
 
         ARCHIVE="lemonade-embeddable-${LEMONADE_VERSION}-${PLATFORM}.tar.gz"
         test -f "$ARCHIVE"
+        DIR="lemonade-embeddable-${LEMONADE_VERSION}-${PLATFORM}"
+        CATALOG_MEMBER="$DIR/resources/residency_profiles.json"
+        CATALOG_MEMBERS=$(tar tzf "$ARCHIVE" | grep -E '(^|/)residency_profiles\.json$')
+        CATALOG_MEMBER_COUNT=$(printf '%s\n' "$CATALOG_MEMBERS" | wc -l)
+        test "$CATALOG_MEMBER_COUNT" -eq 1
+        test "$CATALOG_MEMBERS" = "$CATALOG_MEMBER"
+
         tar xzf "$ARCHIVE"
 
-        DIR="lemonade-embeddable-${LEMONADE_VERSION}-${PLATFORM}"
+        CATALOG_FILES=$(find "$DIR" -type f -name 'residency_profiles.json')
+        CATALOG_FILE_COUNT=$(printf '%s\n' "$CATALOG_FILES" | wc -l)
+        test "$CATALOG_FILE_COUNT" -eq 1
+        test "$CATALOG_FILES" = "$DIR/resources/residency_profiles.json"
+        cmp -s "$CATALOG_FILES" "$GITHUB_WORKSPACE/src/cpp/resources/residency_profiles.json"
 
         # Verify expected files exist
         test -f "$DIR/lemond"

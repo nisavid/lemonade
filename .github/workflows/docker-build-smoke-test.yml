@@ -39,6 +39,16 @@ jobs:
             -p 13305:13305 \
             lemonade:test
 
+      - name: Verify residency catalog
+        run: |
+          set -euo pipefail
+          CATALOG_FILES=$(docker exec lemonade-test find /opt/lemonade -type f -name 'residency_profiles.json')
+          CATALOG_FILE_COUNT=$(printf '%s\n' "$CATALOG_FILES" | wc -l)
+          test "$CATALOG_FILE_COUNT" -eq 1
+          test "$CATALOG_FILES" = "/opt/lemonade/resources/residency_profiles.json"
+          docker cp "lemonade-test:$CATALOG_FILES" "$RUNNER_TEMP/residency_profiles.json"
+          cmp -s "$RUNNER_TEMP/residency_profiles.json" "$GITHUB_WORKSPACE/src/cpp/resources/residency_profiles.json"
+
       - name: Wait for server to be ready
         run: |
           echo "Waiting for Lemonade to start..."

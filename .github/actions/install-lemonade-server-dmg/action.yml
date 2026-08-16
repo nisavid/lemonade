@@ -32,7 +32,7 @@ runs:
       id: install
       shell: bash
       run: |
-        set -e
+        set -euo pipefail
 
         echo "Looking for .pkg file..."
 
@@ -45,6 +45,21 @@ runs:
         fi
 
         echo "Installing: $PKG_FILE"
+        CATALOG_MEMBER="Library/Application Support/Lemonade/resources/residency_profiles.json"
+        PKG_PAYLOAD_FILES=$(pkgutil --payload-files "$PKG_FILE")
+        CATALOG_MEMBERS=$(printf '%s\n' "$PKG_PAYLOAD_FILES" | grep -E '(^|/)residency_profiles\.json$')
+        CATALOG_MEMBER_COUNT=$(printf '%s\n' "$CATALOG_MEMBERS" | wc -l)
+        test "$CATALOG_MEMBER_COUNT" -eq 1
+        test "$CATALOG_MEMBERS" = "$CATALOG_MEMBER"
+
+        PKG_EXPAND_PATH="$RUNNER_TEMP/lemonade-pkg-expanded-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        test ! -e "$PKG_EXPAND_PATH"
+        pkgutil --expand-full "$PKG_FILE" "$PKG_EXPAND_PATH"
+        CATALOG_PAYLOAD_FILES=$(find "$PKG_EXPAND_PATH" -type f -path '*/Library/Application Support/Lemonade/resources/residency_profiles.json')
+        CATALOG_PAYLOAD_COUNT=$(printf '%s\n' "$CATALOG_PAYLOAD_FILES" | wc -l)
+        test "$CATALOG_PAYLOAD_COUNT" -eq 1
+        cmp -s "$CATALOG_PAYLOAD_FILES" "$GITHUB_WORKSPACE/src/cpp/resources/residency_profiles.json"
+
         sudo installer -pkg "$PKG_FILE" -target /
         echo "Installation complete"
 
@@ -58,12 +73,17 @@ runs:
     - name: Verify installation
       shell: bash
       run: |
-        set -e
+        set -euo pipefail
 
         BIN_PATH="${{ steps.install.outputs.bin-path }}"
         echo "Verifying installation at: $BIN_PATH"
 
         test -f "/Library/Application Support/Lemonade/resources/residency_profiles.json"
+        CATALOG_FILES=$(find "/Library/Application Support/Lemonade" -type f -name 'residency_profiles.json')
+        CATALOG_FILE_COUNT=$(printf '%s\n' "$CATALOG_FILES" | wc -l)
+        test "$CATALOG_FILE_COUNT" -eq 1
+        test "$CATALOG_FILES" = "/Library/Application Support/Lemonade/resources/residency_profiles.json"
+        cmp -s "$CATALOG_FILES" "$GITHUB_WORKSPACE/src/cpp/resources/residency_profiles.json"
 
         if [ -x "$BIN_PATH/lemond" ]; then
             echo "Found: lemond"

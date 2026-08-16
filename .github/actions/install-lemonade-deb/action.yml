@@ -40,7 +40,7 @@ runs:
       id: extract
       shell: bash
       run: |
-        set -e
+        set -euo pipefail
 
         VERSION="${{ inputs.version }}"
         EXTRACT_PATH="${{ inputs.extract-path }}"
@@ -55,6 +55,12 @@ runs:
         fi
 
         echo "Extracting .deb package: $DEB_FILE"
+
+        CATALOG_MEMBER="./usr/share/lemonade-server/resources/residency_profiles.json"
+        CATALOG_MEMBERS=$(dpkg-deb --fsys-tarfile "$DEB_FILE" | tar -tf - | grep -E '(^|/)residency_profiles\.json$')
+        CATALOG_MEMBER_COUNT=$(printf '%s\n' "$CATALOG_MEMBERS" | wc -l)
+        test "$CATALOG_MEMBER_COUNT" -eq 1
+        test "$CATALOG_MEMBERS" = "$CATALOG_MEMBER"
 
         # This action extracts the .deb instead of installing it system-wide.
         # Install the package's declared runtime dependencies first, otherwise
@@ -78,6 +84,11 @@ runs:
         mkdir -p "$EXTRACT_PATH"
         dpkg-deb -x "$DEB_FILE" "$EXTRACT_PATH"
         test -f "$EXTRACT_PATH/usr/share/lemonade-server/resources/residency_profiles.json"
+        CATALOG_FILES=$(find "$EXTRACT_PATH" -type f -name 'residency_profiles.json')
+        CATALOG_FILE_COUNT=$(printf '%s\n' "$CATALOG_FILES" | wc -l)
+        test "$CATALOG_FILE_COUNT" -eq 1
+        test "$CATALOG_FILES" = "$EXTRACT_PATH/usr/share/lemonade-server/resources/residency_profiles.json"
+        cmp -s "$CATALOG_FILES" "$GITHUB_WORKSPACE/src/cpp/resources/residency_profiles.json"
 
         # Copy resources to user's local share (path_utils.cpp checks here)
         mkdir -p ~/.local/share/lemonade-server

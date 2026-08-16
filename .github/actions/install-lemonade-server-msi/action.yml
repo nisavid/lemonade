@@ -147,6 +147,24 @@ runs:
             exit 1
         }
 
+        $catalogFiles = @(Get-ChildItem -LiteralPath $installPath -Recurse -File -Filter "residency_profiles.json")
+        if ($catalogFiles.Count -ne 1) {
+            Write-Host "ERROR: Expected exactly one residency catalog under $installPath; found $($catalogFiles.Count)." -ForegroundColor Red
+            exit 1
+        }
+        $canonicalCatalog = [System.IO.Path]::GetFullPath((Join-Path $installPath "bin\resources\residency_profiles.json"))
+        if ($catalogFiles[0].FullName -ne $canonicalCatalog) {
+            Write-Host "ERROR: Residency catalog is not at $canonicalCatalog." -ForegroundColor Red
+            exit 1
+        }
+        $sourceCatalog = Join-Path $env:GITHUB_WORKSPACE "src\cpp\resources\residency_profiles.json"
+        $packagedHash = (Get-FileHash -LiteralPath $catalogFiles[0].FullName -Algorithm SHA256).Hash
+        $sourceHash = (Get-FileHash -LiteralPath $sourceCatalog -Algorithm SHA256).Hash
+        if ($packagedHash -ne $sourceHash) {
+            Write-Host "ERROR: Installed residency catalog bytes differ from the source catalog." -ForegroundColor Red
+            exit 1
+        }
+
         Write-Host "Installation directory verification successful!" -ForegroundColor Green
 
     - name: Verify Server Version
