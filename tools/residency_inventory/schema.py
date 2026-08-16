@@ -17,6 +17,7 @@ from .contract import (
     require_registry_keys,
     require_string_list,
 )
+from .contract_registry import validate_contract_registry
 from .platforms import validate_provider_and_topology_rules
 from .policy import validate_policy_registry_stage
 from .profiles import validate_profile_stage
@@ -32,6 +33,7 @@ from .variants import (
 
 EXPECTED_TOP_LEVEL_KEYS = {
     "schema_version",
+    "contract_registry",
     "source_support_baseline",
     "campaign_base_binding",
     "source_file_blobs",
@@ -95,6 +97,7 @@ class VocabularyValidation:
     """Frozen source facts plus the closed schema vocabularies they constrain."""
 
     source: FrozenSourceClosure
+    contract_registry: dict[str, Any]
     provider_keys: dict[str, str]
     topology_rules: dict[str, str]
     capabilities: set[str]
@@ -112,9 +115,10 @@ def validate_vocabulary_stage(
     """Validate the envelope, frozen inputs, enums, and platform registry shape."""
 
     require_exact_keys(inventory, EXPECTED_TOP_LEVEL_KEYS, "inventory")
-    if inventory.get("schema_version") != 6:
-        fail("schema_version must be 6")
+    if inventory.get("schema_version") != 7:
+        fail("schema_version must be 7")
 
+    contract_registry = validate_contract_registry(inventory.get("contract_registry"))
     source = validate_source_closure(repo, inventory)
     provider_keys, topology_rules = validate_provider_and_topology_rules(
         inventory, source
@@ -173,6 +177,7 @@ def validate_vocabulary_stage(
     }
     return VocabularyValidation(
         source=source,
+        contract_registry=contract_registry,
         provider_keys=provider_keys,
         topology_rules=topology_rules,
         capabilities=capabilities,

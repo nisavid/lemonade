@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from .cells import validate_exact_cells
 from .compatibility import validate_compatibility_contracts
 from .contract import fail, require_exact_keys, require_mapping, require_string_list
+from .contract_registry import validate_contract_promotion_closure
 from .gates import PromotionGateRequirement, validate_gates
 from .later_roster import validate_later_promotion_roster
 from .platforms import validate_platform_contracts
@@ -26,6 +27,7 @@ class Vocabulary(Protocol):
     """Closed source and enum attributes consumed by promotion validation."""
 
     source: FrozenSourceClosure
+    contract_registry: dict[str, Any]
     provider_keys: dict[str, str]
     topology_rules: dict[str, str]
     capabilities: set[str]
@@ -216,6 +218,12 @@ def validate_promotion_stage(
         },
     )
     later_promotion_roster = later_validation.units
+    validate_contract_promotion_closure(
+        exact_cells=exact_cells,
+        compatibility_contracts=compatibility_contracts,
+        later_promotion_roster=later_promotion_roster,
+        fallback_ids=set(policy.fallback_registry),
+    )
     validate_fallback_operation_uses(
         policy,
         exact_cells,
@@ -267,6 +275,8 @@ class ProjectionValidation:
 
     source_support_baseline: str
     source_tree_objects: dict[str, str]
+    contract_registry: dict[str, Any]
+    fallback_registry: dict[str, Any]
     variants: list[dict[str, Any]]
     exclusions: list[dict[str, Any]]
     profile_semantics: dict[str, dict[str, Any]]
@@ -289,6 +299,8 @@ class ProjectionValidation:
         return {
             "source_support_baseline": self.source_support_baseline,
             "source_tree_objects": self.source_tree_objects,
+            "contract_registry": self.contract_registry,
+            "fallback_registry": self.fallback_registry,
             "variants": self.variants,
             "exclusions": self.exclusions,
             "profile_semantics": self.profile_semantics,
@@ -379,6 +391,8 @@ def validate_closure_stage(
     return ProjectionValidation(
         source_support_baseline=vocabulary.source.baseline,
         source_tree_objects=vocabulary.source.tree_objects,
+        contract_registry=vocabulary.contract_registry,
+        fallback_registry=policy.fallback_registry,
         variants=variants.variants,
         exclusions=exclusions.exclusions,
         profile_semantics=profiles.registries,

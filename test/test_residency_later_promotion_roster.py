@@ -126,7 +126,7 @@ The authoritative contract is `later_promotion_roster` in `docs/research/portabl
 class ResidencyLaterPromotionRosterTest(unittest.TestCase):
     def test_exact_units_are_bound_to_unique_created_issues(self) -> None:
         inventory = _load_json(INVENTORY)
-        self.assertEqual(inventory["schema_version"], 6)
+        self.assertEqual(inventory["schema_version"], 7)
 
         roster = inventory["later_promotion_roster"]
         self.assertIsInstance(roster, list)

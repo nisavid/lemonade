@@ -1,5 +1,4968 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
+  "contract_registry": {
+    "schema": "residency.explanation/1.0",
+    "mode_registry": {
+      "configured_intent_sources": [
+        "fixed_policy",
+        "default",
+        "operator",
+        "migration"
+      ],
+      "configured_intents": {
+        "admission": {
+          "values": [
+            "predictive_memory_capacity"
+          ],
+          "sources": [
+            "fixed_policy"
+          ]
+        },
+        "pressure": {
+          "values": [
+            "automatic",
+            "report_only",
+            "disabled"
+          ],
+          "sources": [
+            "default",
+            "operator",
+            "migration"
+          ]
+        },
+        "startup": {
+          "values": [
+            "load_saved_pins",
+            "disabled"
+          ],
+          "sources": [
+            "default",
+            "operator",
+            "migration"
+          ]
+        },
+        "recovery": {
+          "values": [
+            "restore_lifecycle_readiness"
+          ],
+          "sources": [
+            "fixed_policy"
+          ]
+        }
+      },
+      "effective_modes": {
+        "admission": [
+          "capacity_planned",
+          "backend_enforced",
+          "count_limited",
+          "refused"
+        ],
+        "pressure": [
+          "automatic_reclamation",
+          "report_only",
+          "disabled"
+        ],
+        "startup": [
+          "automatic_grouped",
+          "disabled",
+          "blocked"
+        ],
+        "recovery": [
+          "ready",
+          "cleanup_only",
+          "blocked"
+        ]
+      },
+      "footprint_confidence": [
+        "enforced_complete",
+        "validated_predictor",
+        "calibrated_instance",
+        "incomplete",
+        "unknown"
+      ],
+      "signal_evidence_states": [
+        "valid",
+        "missing",
+        "stale",
+        "unhealthy",
+        "incoherent",
+        "superseded"
+      ]
+    },
+    "operation_registry": {
+      "families": {
+        "resource_lifecycle": [
+          "admission",
+          "explicit_unload",
+          "force_unload",
+          "pressure_reclamation",
+          "startup_load",
+          "service_termination",
+          "dead_backend_pruning",
+          "same_epoch_recovery_cleanup",
+          "prior_epoch_owner_cleanup",
+          "artifact_scope_recovery_cleanup"
+        ],
+        "resident_state": [
+          "saved_pin_mutation",
+          "runtime_pin_mutation",
+          "legacy_pin_batch",
+          "resident_state_recovery_cleanup"
+        ]
+      },
+      "aliases": {
+        "all_operations": [
+          "admission",
+          "explicit_unload",
+          "force_unload",
+          "pressure_reclamation",
+          "startup_load",
+          "service_termination",
+          "dead_backend_pruning",
+          "same_epoch_recovery_cleanup",
+          "prior_epoch_owner_cleanup",
+          "artifact_scope_recovery_cleanup",
+          "saved_pin_mutation",
+          "runtime_pin_mutation",
+          "legacy_pin_batch",
+          "resident_state_recovery_cleanup"
+        ],
+        "all_resource_operations": [
+          "admission",
+          "explicit_unload",
+          "force_unload",
+          "pressure_reclamation",
+          "startup_load",
+          "service_termination",
+          "dead_backend_pruning",
+          "same_epoch_recovery_cleanup",
+          "prior_epoch_owner_cleanup",
+          "artifact_scope_recovery_cleanup"
+        ],
+        "recovery_capable_resource_operations": [
+          "admission",
+          "explicit_unload",
+          "force_unload",
+          "pressure_reclamation",
+          "startup_load",
+          "service_termination",
+          "dead_backend_pruning",
+          "same_epoch_recovery_cleanup",
+          "prior_epoch_owner_cleanup"
+        ],
+        "recovery_capable_operations": [
+          "admission",
+          "explicit_unload",
+          "force_unload",
+          "pressure_reclamation",
+          "startup_load",
+          "service_termination",
+          "dead_backend_pruning",
+          "same_epoch_recovery_cleanup",
+          "prior_epoch_owner_cleanup",
+          "saved_pin_mutation",
+          "runtime_pin_mutation",
+          "legacy_pin_batch",
+          "resident_state_recovery_cleanup"
+        ],
+        "terminally_quarantinable_resource_operations": [
+          "admission",
+          "explicit_unload",
+          "force_unload",
+          "pressure_reclamation",
+          "startup_load",
+          "service_termination",
+          "dead_backend_pruning",
+          "same_epoch_recovery_cleanup",
+          "prior_epoch_owner_cleanup"
+        ],
+        "all_resident_state_operations": [
+          "saved_pin_mutation",
+          "runtime_pin_mutation",
+          "legacy_pin_batch",
+          "resident_state_recovery_cleanup"
+        ],
+        "planned_resource_operations": [
+          "admission",
+          "pressure_reclamation",
+          "startup_load",
+          "same_epoch_recovery_cleanup",
+          "prior_epoch_owner_cleanup"
+        ],
+        "capacity_consuming_operations": [
+          "admission",
+          "startup_load"
+        ],
+        "resource_action_operations": [
+          "admission",
+          "explicit_unload",
+          "force_unload",
+          "pressure_reclamation",
+          "startup_load",
+          "service_termination",
+          "dead_backend_pruning",
+          "same_epoch_recovery_cleanup",
+          "prior_epoch_owner_cleanup",
+          "artifact_scope_recovery_cleanup"
+        ],
+        "automatic_protected_operations": [
+          "admission",
+          "pressure_reclamation",
+          "startup_load"
+        ],
+        "live_use_protected_operations": [
+          "admission",
+          "explicit_unload",
+          "pressure_reclamation",
+          "startup_load",
+          "service_termination",
+          "same_epoch_recovery_cleanup"
+        ],
+        "readiness_dependent_operations": [
+          "admission",
+          "pressure_reclamation",
+          "startup_load"
+        ]
+      },
+      "phases": [
+        "evaluating",
+        "waiting_for_evidence",
+        "waiting_for_in_use",
+        "reserved",
+        "executing",
+        "closing",
+        "recovery_required",
+        "terminal"
+      ],
+      "terminal_outcomes": [
+        "succeeded",
+        "refused",
+        "failed",
+        "cancelled",
+        "superseded",
+        "partially_succeeded",
+        "quarantined"
+      ],
+      "action_results": [
+        "succeeded",
+        "failed",
+        "cancelled",
+        "ambiguous"
+      ],
+      "target_dispositions": [
+        "verified_intact",
+        "verified_released",
+        "quarantined"
+      ]
+    },
+    "reason_envelope_registry": {
+      "operation_revision": {
+        "schema_type": "operation_revision",
+        "reason_codes": [
+          "residency_operation_succeeded",
+          "residency_persistence_failed",
+          "residency_recovery_required",
+          "residency_quarantined",
+          "residency_startup_rollback_incomplete",
+          "residency_service_termination_incomplete",
+          "residency_dead_backend_prune_incomplete",
+          "residency_recovery_not_ready",
+          "residency_cancelled",
+          "residency_plan_invalidated",
+          "residency_footprint_confidence_insufficient",
+          "residency_capability_unsupported",
+          "residency_evidence_missing",
+          "residency_evidence_stale",
+          "residency_evidence_unhealthy",
+          "residency_evidence_incoherent",
+          "residency_evidence_superseded",
+          "slots_pinned_error",
+          "router_residency_conflict",
+          "residency_protected_pinned",
+          "residency_protected_in_use",
+          "residency_force_fence_failed",
+          "residency_capacity_insufficient",
+          "residency_plan_infeasible",
+          "residency_startup_set_infeasible",
+          "residency_planning_deadline_exceeded",
+          "residency_critical_pressure_refusal",
+          "residency_action_failed",
+          "residency_partial_outcome",
+          "residency_pressure_unresolved",
+          "residency_operation_budget_exhausted",
+          "residency_attempt_budget_exhausted",
+          "residency_fallback_selected",
+          "residency_unconditional_pin_write_deprecated"
+        ]
+      },
+      "request_error": {
+        "schema_type": "request_error",
+        "reason_codes": [
+          "residency_precondition_required",
+          "residency_precondition_failed",
+          "residency_deprecated_configuration_key",
+          "residency_configuration_scope_mismatch",
+          "residency_configuration_conflict",
+          "residency_pin_migration_conflict",
+          "residency_legacy_memory_limit_ambiguous",
+          "residency_authority_storage_unavailable",
+          "residency_authority_unavailable",
+          "residency_authority_degraded",
+          "residency_idempotency_key_required",
+          "residency_idempotency_conflict",
+          "residency_coordinator_expired",
+          "residency_artifact_writer_fenced",
+          "residency_model_identity_fenced",
+          "residency_capability_unsupported",
+          "residency_artifact_import_not_found",
+          "residency_artifact_import_expired",
+          "residency_artifact_import_conflict",
+          "residency_artifact_import_invalid",
+          "residency_artifact_import_storage_unavailable",
+          "residency_reserved_registration_name",
+          "residency_model_identity_conflict",
+          "residency_model_identity_source_ineligible",
+          "residency_model_replacement_requires_release",
+          "residency_explanation_storage_unavailable",
+          "residency_operation_rate_limited",
+          "residency_status_capability_required",
+          "residency_status_capability_invalid",
+          "residency_status_capability_expired",
+          "residency_status_authorization_forbidden",
+          "residency_recovery_not_ready",
+          "residency_artifact_quarantine_not_found",
+          "residency_artifact_quarantine_expired",
+          "model_not_found",
+          "model_not_loaded_or_loading",
+          "residency_resident_unavailable",
+          "residency_operation_not_found",
+          "residency_operation_expired"
+        ]
+      },
+      "resource_diagnostic": {
+        "schema_type": "resource_diagnostic",
+        "reason_codes": [
+          "residency_configuration_conflict",
+          "residency_pin_migration_conflict",
+          "residency_legacy_memory_limit_ambiguous",
+          "residency_legacy_eviction_options_require_review",
+          "residency_legacy_gtt_hint_ignored",
+          "residency_limit_exceeded_after_reconfiguration",
+          "residency_count_limit_exceeded_after_reconfiguration",
+          "residency_authority_persistence_failed",
+          "residency_authority_unavailable"
+        ]
+      },
+      "authority_transaction_result": {
+        "schema_type": "authority_transaction_result",
+        "reason_codes": [
+          "residency_authority_persistence_failed",
+          "residency_configuration_conflict"
+        ]
+      },
+      "coordinator_step_result": {
+        "schema_type": "coordinator_step_result",
+        "reason_codes": [
+          "residency_artifact_writer_fenced",
+          "residency_model_identity_fenced",
+          "residency_artifact_acquisition_failed",
+          "residency_capability_unsupported",
+          "residency_persistence_failed",
+          "residency_configuration_conflict",
+          "residency_model_artifact_delete_failed",
+          "residency_model_identity_delete_failed",
+          "residency_artifact_writer_quiescence_failed",
+          "residency_coordinator_source_changed"
+        ]
+      },
+      "response_diagnostic": {
+        "schema_type": "response_diagnostic",
+        "reason_codes": [
+          "residency_legacy_admin_key_fallback_deprecated",
+          "residency_unmanaged_artifact_compatibility"
+        ]
+      },
+      "artifact_writer_job_revision": {
+        "schema_type": "artifact_writer_job_revision",
+        "reason_codes": [
+          "residency_artifact_writer_failed",
+          "residency_artifact_writer_superseded_by_model_delete",
+          "residency_artifact_import_expired",
+          "residency_artifact_import_invalid",
+          "residency_artifact_import_failed",
+          "residency_artifact_import_cleanup_incomplete"
+        ]
+      },
+      "artifact_writer_request_result": {
+        "schema_type": "artifact_writer_request_result",
+        "reason_codes": [
+          "residency_artifact_writer_failed",
+          "residency_artifact_writer_superseded_by_model_delete",
+          "residency_artifact_import_expired",
+          "residency_artifact_import_invalid",
+          "residency_artifact_import_failed",
+          "residency_artifact_import_cleanup_incomplete"
+        ]
+      }
+    },
+    "request_context_registry": [
+      "pin_preference_read",
+      "pin_preference_write",
+      "runtime_pin_read",
+      "runtime_pin_write",
+      "model_load_write",
+      "model_load_saved_pin_write",
+      "model_unload_write",
+      "model_force_unload_write",
+      "model_delete_write",
+      "ollama_model_delete_write",
+      "artifact_writer_write",
+      "artifact_identity_writer_write",
+      "artifact_import_read",
+      "model_identity_read",
+      "model_identity_write",
+      "legacy_pins_read",
+      "legacy_pins_write",
+      "residency_snapshot_read",
+      "residency_operation_read",
+      "residency_operation_status_read",
+      "residency_artifact_quarantine_read",
+      "residency_artifact_quarantine_status_read",
+      "residency_artifact_quarantine_cleanup_write",
+      "residency_configuration_read",
+      "residency_configuration_write",
+      "residency_migration_read",
+      "residency_migration_write",
+      "residency_authority_bootstrap_write",
+      "residency_service_termination_write",
+      "health_read",
+      "params_read",
+      "params_write",
+      "internal_config_read",
+      "internal_set_write",
+      "internal_pin_write",
+      "internal_shutdown_write",
+      "internal_cleanup_cache_write"
+    ],
+    "request_stage_registry": [
+      "begin",
+      "upload",
+      "commit",
+      "abort",
+      "adopt",
+      "registration_download",
+      "legacy_local_import"
+    ],
+    "reason_registry": {
+      "residency_operation_succeeded": {
+        "category_id": "success",
+        "presentation_id": "p_success",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 0,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "explicit_unload",
+                  "force_unload",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "service_termination",
+                  "dead_backend_pruning",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup",
+                  "artifact_scope_recovery_cleanup",
+                  "saved_pin_mutation",
+                  "runtime_pin_mutation",
+                  "legacy_pin_batch",
+                  "resident_state_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "terminal:succeeded:primary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "succeeded"
+                ],
+                "status": 200
+              }
+            ],
+            "endpoint_success_overrides": [
+              201,
+              204
+            ]
+          }
+        }
+      },
+      "residency_persistence_failed": {
+        "category_id": "persistence",
+        "presentation_id": "p_persistence",
+        "detail_schema_id": "d_storage",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 0,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "explicit_unload",
+                  "force_unload",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "service_termination",
+                  "dead_backend_pruning",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "closing:null:primary|secondary",
+                  "recovery_required:null:primary|secondary",
+                  "terminal:failed|quarantined:primary|secondary"
+                ]
+              },
+              {
+                "operation_kinds": [
+                  "artifact_scope_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "closing:null:primary|secondary",
+                  "terminal:failed|partially_succeeded:primary|secondary"
+                ]
+              },
+              {
+                "operation_kinds": [
+                  "saved_pin_mutation",
+                  "runtime_pin_mutation",
+                  "legacy_pin_batch",
+                  "resident_state_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "closing:null:primary|secondary",
+                  "recovery_required:null:primary|secondary",
+                  "terminal:failed:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "failed",
+                  "quarantined",
+                  "partially_succeeded"
+                ],
+                "status": 500
+              }
+            ]
+          },
+          "coordinator_step_result": {
+            "priority_band": 0,
+            "step_kinds": [
+              "recipe_options_persistence"
+            ],
+            "results": [
+              "failed"
+            ],
+            "contexts": [
+              "model_load_write",
+              "model_load_saved_pin_write"
+            ],
+            "http_status": 500,
+            "primary_required": true
+          }
+        }
+      },
+      "residency_explanation_storage_unavailable": {
+        "category_id": "persistence",
+        "presentation_id": "p_persistence",
+        "detail_schema_id": "d_storage",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "pin_preference_write",
+              "runtime_pin_write",
+              "model_load_write",
+              "model_load_saved_pin_write",
+              "model_unload_write",
+              "model_force_unload_write",
+              "model_delete_write",
+              "ollama_model_delete_write",
+              "legacy_pins_write",
+              "internal_pin_write",
+              "residency_artifact_quarantine_cleanup_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 507
+          }
+        }
+      },
+      "residency_authority_persistence_failed": {
+        "category_id": "persistence",
+        "presentation_id": "p_persistence",
+        "detail_schema_id": "d_authority",
+        "envelopes": {
+          "resource_diagnostic": {
+            "priority_band": 0,
+            "contexts": [],
+            "contexts_by_authority_kind": {
+              "configuration": [
+                "residency_configuration_read",
+                "residency_migration_read",
+                "params_read",
+                "internal_config_read",
+                "pin_preference_read",
+                "legacy_pins_read",
+                "model_identity_read",
+                "residency_snapshot_read",
+                "health_read"
+              ],
+              "pin_preference": [
+                "pin_preference_read",
+                "legacy_pins_read",
+                "residency_snapshot_read",
+                "health_read"
+              ]
+            },
+            "authority_states": [
+              "degraded_prior_root"
+            ]
+          },
+          "authority_transaction_result": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_configuration_write",
+              "residency_migration_write",
+              "residency_authority_bootstrap_write",
+              "internal_set_write"
+            ],
+            "result": "failed",
+            "http_status": 500,
+            "primary_required": true
+          }
+        }
+      },
+      "residency_authority_storage_unavailable": {
+        "category_id": "persistence",
+        "presentation_id": "p_persistence",
+        "detail_schema_id": "d_authority",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_configuration_write",
+              "residency_migration_write",
+              "residency_authority_bootstrap_write",
+              "internal_set_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 500,
+            "boundary": "before_begin_authority_transaction"
+          }
+        }
+      },
+      "residency_authority_unavailable": {
+        "category_id": "persistence",
+        "presentation_id": "p_persistence",
+        "detail_schema_id": "d_authority",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "pin_preference_read",
+              "pin_preference_write",
+              "runtime_pin_write",
+              "model_load_write",
+              "model_load_saved_pin_write",
+              "model_delete_write",
+              "ollama_model_delete_write",
+              "model_identity_read",
+              "model_identity_write",
+              "legacy_pins_read",
+              "legacy_pins_write",
+              "residency_configuration_read",
+              "residency_configuration_write",
+              "residency_migration_read",
+              "residency_migration_write",
+              "params_read",
+              "params_write",
+              "internal_config_read",
+              "internal_set_write",
+              "internal_pin_write"
+            ],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "begin",
+                "upload",
+                "commit",
+                "adopt",
+                "registration_download",
+                "legacy_local_import"
+              ]
+            },
+            "http_status": 503,
+            "authority_states": [
+              "absent"
+            ]
+          },
+          "resource_diagnostic": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_snapshot_read",
+              "health_read"
+            ],
+            "authority_states": [
+              "absent"
+            ],
+            "subject_generation": null
+          }
+        }
+      },
+      "residency_authority_degraded": {
+        "category_id": "persistence",
+        "presentation_id": "p_persistence",
+        "detail_schema_id": "d_authority",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "pin_preference_read",
+              "pin_preference_write",
+              "runtime_pin_write",
+              "model_load_write",
+              "model_load_saved_pin_write",
+              "model_delete_write",
+              "ollama_model_delete_write",
+              "model_identity_read",
+              "model_identity_write",
+              "legacy_pins_read",
+              "legacy_pins_write",
+              "residency_configuration_read",
+              "residency_configuration_write",
+              "residency_migration_read",
+              "residency_migration_write",
+              "params_read",
+              "params_write",
+              "internal_config_read",
+              "internal_set_write",
+              "internal_pin_write"
+            ],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "begin",
+                "upload",
+                "commit",
+                "adopt",
+                "registration_download",
+                "legacy_local_import"
+              ]
+            },
+            "http_status": 503,
+            "authority_states": [
+              "degraded_prior_root"
+            ]
+          }
+        }
+      },
+      "residency_recovery_required": {
+        "category_id": "recovery",
+        "presentation_id": "p_recovery",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 0,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "explicit_unload",
+                  "force_unload",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "service_termination",
+                  "dead_backend_pruning",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup",
+                  "saved_pin_mutation",
+                  "runtime_pin_mutation",
+                  "legacy_pin_batch",
+                  "resident_state_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "recovery_required:null:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "phases": [
+                  "recovery_required"
+                ],
+                "status": 503
+              }
+            ]
+          }
+        }
+      },
+      "residency_startup_rollback_incomplete": {
+        "category_id": "recovery",
+        "presentation_id": "p_recovery",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 0,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "startup_load"
+                ],
+                "legal_states": [
+                  "closing:null:primary|secondary",
+                  "recovery_required:null:primary|secondary",
+                  "terminal:partially_succeeded|quarantined:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "partially_succeeded",
+                  "quarantined"
+                ],
+                "status": 500
+              }
+            ]
+          }
+        }
+      },
+      "residency_service_termination_incomplete": {
+        "category_id": "recovery",
+        "presentation_id": "p_recovery",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 0,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "service_termination"
+                ],
+                "legal_states": [
+                  "closing:null:primary|secondary",
+                  "recovery_required:null:primary|secondary",
+                  "terminal:failed|partially_succeeded|quarantined:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "failed",
+                  "partially_succeeded",
+                  "quarantined"
+                ],
+                "status": 500
+              }
+            ]
+          }
+        }
+      },
+      "residency_dead_backend_prune_incomplete": {
+        "category_id": "recovery",
+        "presentation_id": "p_recovery",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 0,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "dead_backend_pruning"
+                ],
+                "legal_states": [
+                  "closing:null:primary|secondary",
+                  "recovery_required:null:primary|secondary",
+                  "terminal:failed|partially_succeeded|quarantined:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "failed",
+                  "partially_succeeded",
+                  "quarantined"
+                ],
+                "status": 500
+              }
+            ]
+          }
+        }
+      },
+      "residency_recovery_not_ready": {
+        "category_id": "recovery",
+        "presentation_id": "p_recovery",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 0,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load"
+                ],
+                "legal_states": [
+                  "evaluating:null:primary|secondary",
+                  "terminal:refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 503
+              }
+            ]
+          },
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_artifact_quarantine_cleanup_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 503
+          }
+        }
+      },
+      "residency_quarantined": {
+        "category_id": "integrity",
+        "presentation_id": "p_integrity",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 0,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "explicit_unload",
+                  "force_unload",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "service_termination",
+                  "dead_backend_pruning",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "recovery_required:null:primary|secondary",
+                  "terminal:quarantined:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "quarantined"
+                ],
+                "status": 500
+              }
+            ]
+          }
+        }
+      },
+      "residency_cancelled": {
+        "category_id": "lifecycle",
+        "presentation_id": "p_lifecycle",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 1,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "explicit_unload",
+                  "force_unload",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "service_termination",
+                  "dead_backend_pruning",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup",
+                  "artifact_scope_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "evaluating|waiting_for_evidence|waiting_for_in_use|reserved|executing|closing:null:primary|secondary",
+                  "terminal:cancelled|partially_succeeded:primary|secondary"
+                ]
+              },
+              {
+                "operation_kinds": [
+                  "admission",
+                  "explicit_unload",
+                  "force_unload",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "service_termination",
+                  "dead_backend_pruning",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "recovery_required:null:secondary"
+                ]
+              },
+              {
+                "operation_kinds": [
+                  "saved_pin_mutation",
+                  "runtime_pin_mutation",
+                  "legacy_pin_batch",
+                  "resident_state_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "evaluating|closing:null:primary|secondary",
+                  "recovery_required:null:secondary",
+                  "terminal:cancelled:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "cancelled"
+                ],
+                "status": 409
+              },
+              {
+                "terminal_outcomes": [
+                  "partially_succeeded"
+                ],
+                "status": 500
+              }
+            ]
+          }
+        }
+      },
+      "residency_plan_invalidated": {
+        "category_id": "lifecycle",
+        "presentation_id": "p_lifecycle",
+        "detail_schema_id": "d_generation",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 1,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "evaluating|waiting_for_evidence|waiting_for_in_use|reserved|executing|closing:null:primary|secondary",
+                  "terminal:superseded|partially_succeeded:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "superseded"
+                ],
+                "status": 409
+              },
+              {
+                "terminal_outcomes": [
+                  "partially_succeeded"
+                ],
+                "status": 500
+              }
+            ]
+          }
+        }
+      },
+      "residency_coordinator_source_changed": {
+        "category_id": "lifecycle",
+        "presentation_id": "p_lifecycle",
+        "detail_schema_id": "d_generation",
+        "envelopes": {
+          "coordinator_step_result": {
+            "priority_band": 0,
+            "step_kinds": [
+              "artifact_acquisition",
+              "artifact_writer_quiescence",
+              "model_artifact_delete",
+              "model_identity_delete"
+            ],
+            "results": [
+              "superseded"
+            ],
+            "contexts": [
+              "model_load_write",
+              "model_load_saved_pin_write",
+              "model_delete_write",
+              "ollama_model_delete_write"
+            ],
+            "http_status": null,
+            "primary_required": true,
+            "http_mappings": [
+              {
+                "contexts": [
+                  "model_load_write",
+                  "model_load_saved_pin_write"
+                ],
+                "status": 409
+              },
+              {
+                "contexts": [
+                  "model_delete_write",
+                  "ollama_model_delete_write"
+                ],
+                "accumulated_effect": [
+                  "no_effect"
+                ],
+                "status": 409
+              },
+              {
+                "contexts": [
+                  "model_delete_write",
+                  "ollama_model_delete_write"
+                ],
+                "accumulated_effect": [
+                  "verified_effect",
+                  "ambiguous"
+                ],
+                "status": 500
+              }
+            ]
+          }
+        }
+      },
+      "residency_footprint_confidence_insufficient": {
+        "category_id": "capability",
+        "presentation_id": "p_capability",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 2,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load"
+                ],
+                "legal_states": [
+                  "evaluating:null:primary|secondary",
+                  "terminal:refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 422
+              }
+            ]
+          }
+        }
+      },
+      "residency_capability_unsupported": {
+        "category_id": "capability",
+        "presentation_id": "p_capability",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 2,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load"
+                ],
+                "legal_states": [
+                  "evaluating:null:primary|secondary",
+                  "terminal:refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 422
+              }
+            ]
+          },
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "artifact_writer_write",
+              "model_delete_write",
+              "ollama_model_delete_write"
+            ],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "legacy_local_import"
+              ]
+            },
+            "http_status": 422,
+            "compatibility_epoch": "at_or_after_announced_api_major_boundary"
+          },
+          "coordinator_step_result": {
+            "priority_band": 0,
+            "step_kinds": [
+              "artifact_acquisition"
+            ],
+            "results": [
+              "failed"
+            ],
+            "contexts": [
+              "model_load_write",
+              "model_load_saved_pin_write"
+            ],
+            "http_status": 422,
+            "primary_required": true,
+            "effect_dispositions": [
+              "no_effect"
+            ]
+          }
+        }
+      },
+      "residency_evidence_missing": {
+        "category_id": "evidence",
+        "presentation_id": "p_evidence",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 2,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "evaluating|waiting_for_evidence:null:primary|secondary",
+                  "terminal:refused|superseded:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused",
+                  "superseded"
+                ],
+                "status": 503
+              }
+            ]
+          }
+        }
+      },
+      "residency_evidence_stale": {
+        "category_id": "evidence",
+        "presentation_id": "p_evidence",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 2,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "evaluating|waiting_for_evidence:null:primary|secondary",
+                  "terminal:refused|superseded:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused",
+                  "superseded"
+                ],
+                "status": 503
+              }
+            ]
+          }
+        }
+      },
+      "residency_evidence_unhealthy": {
+        "category_id": "evidence",
+        "presentation_id": "p_evidence",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 2,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "evaluating|waiting_for_evidence:null:primary|secondary",
+                  "terminal:refused|superseded:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused",
+                  "superseded"
+                ],
+                "status": 503
+              }
+            ]
+          }
+        }
+      },
+      "residency_evidence_incoherent": {
+        "category_id": "evidence",
+        "presentation_id": "p_evidence",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 2,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "evaluating|waiting_for_evidence:null:primary|secondary",
+                  "terminal:refused|superseded:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused",
+                  "superseded"
+                ],
+                "status": 503
+              }
+            ]
+          }
+        }
+      },
+      "residency_evidence_superseded": {
+        "category_id": "evidence",
+        "presentation_id": "p_evidence",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 2,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "evaluating|waiting_for_evidence:null:primary|secondary",
+                  "terminal:refused|superseded:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused",
+                  "superseded"
+                ],
+                "status": 503
+              }
+            ]
+          }
+        }
+      },
+      "slots_pinned_error": {
+        "category_id": "protection",
+        "presentation_id": "p_protection",
+        "detail_schema_id": "d_compatibility",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 3,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission"
+                ],
+                "legal_states": [
+                  "evaluating:null:primary|secondary",
+                  "terminal:refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 409
+              }
+            ]
+          }
+        }
+      },
+      "residency_protected_pinned": {
+        "category_id": "protection",
+        "presentation_id": "p_protection",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 3,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load"
+                ],
+                "legal_states": [
+                  "evaluating:null:primary|secondary",
+                  "terminal:refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 409
+              }
+            ]
+          }
+        }
+      },
+      "residency_protected_in_use": {
+        "category_id": "protection",
+        "presentation_id": "p_protection",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 3,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "explicit_unload",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "service_termination",
+                  "same_epoch_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "evaluating|waiting_for_in_use:null:primary|secondary",
+                  "terminal:refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 409
+              }
+            ]
+          }
+        }
+      },
+      "residency_force_fence_failed": {
+        "category_id": "protection",
+        "presentation_id": "p_protection",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 3,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "force_unload"
+                ],
+                "legal_states": [
+                  "evaluating|waiting_for_in_use:null:primary|secondary",
+                  "terminal:refused|failed:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 409
+              },
+              {
+                "terminal_outcomes": [
+                  "failed"
+                ],
+                "status": 500
+              }
+            ]
+          }
+        }
+      },
+      "residency_artifact_writer_fenced": {
+        "category_id": "protection",
+        "presentation_id": "p_protection",
+        "detail_schema_id": "d_fence",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "artifact_writer_write",
+              "artifact_identity_writer_write",
+              "model_delete_write",
+              "ollama_model_delete_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 409
+          },
+          "coordinator_step_result": {
+            "priority_band": 0,
+            "step_kinds": [
+              "artifact_acquisition"
+            ],
+            "results": [
+              "failed"
+            ],
+            "contexts": [
+              "model_load_write",
+              "model_load_saved_pin_write"
+            ],
+            "http_status": 409,
+            "primary_required": true,
+            "effect_dispositions": [
+              "no_effect"
+            ]
+          }
+        }
+      },
+      "residency_model_identity_fenced": {
+        "category_id": "protection",
+        "presentation_id": "p_protection",
+        "detail_schema_id": "d_fence",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "model_identity_write",
+              "artifact_identity_writer_write",
+              "model_delete_write",
+              "ollama_model_delete_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 409
+          },
+          "coordinator_step_result": {
+            "priority_band": 0,
+            "step_kinds": [
+              "artifact_acquisition"
+            ],
+            "results": [
+              "failed"
+            ],
+            "contexts": [
+              "model_load_write",
+              "model_load_saved_pin_write"
+            ],
+            "http_status": 409,
+            "primary_required": true,
+            "effect_dispositions": [
+              "no_effect"
+            ]
+          }
+        }
+      },
+      "router_residency_conflict": {
+        "category_id": "compatibility",
+        "presentation_id": "p_compatibility",
+        "detail_schema_id": "d_compatibility",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 3,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission"
+                ],
+                "legal_states": [
+                  "evaluating:null:primary|secondary",
+                  "terminal:refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 409
+              }
+            ]
+          }
+        }
+      },
+      "residency_unconditional_pin_write_deprecated": {
+        "category_id": "compatibility",
+        "presentation_id": "p_compatibility",
+        "detail_schema_id": "d_compatibility",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 6,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "saved_pin_mutation"
+                ],
+                "legal_states": [
+                  "evaluating|closing:null:secondary",
+                  "terminal:succeeded:secondary"
+                ]
+              }
+            ],
+            "http_mappings": [],
+            "secondary_only": true
+          }
+        }
+      },
+      "residency_unmanaged_artifact_compatibility": {
+        "category_id": "compatibility",
+        "presentation_id": "p_compatibility",
+        "detail_schema_id": "d_compatibility",
+        "envelopes": {
+          "response_diagnostic": {
+            "priority_band": 0,
+            "endpoint_rows": [
+              {
+                "context": "artifact_identity_writer_write",
+                "stage": "legacy_local_import"
+              },
+              {
+                "context": "model_delete_write",
+                "shape": "unmanaged_external"
+              },
+              {
+                "context": "ollama_model_delete_write",
+                "shape": "unmanaged_external"
+              }
+            ],
+            "compatibility_epoch": "before_announced_api_major_boundary",
+            "required_projection": "protocol_safe_header"
+          }
+        }
+      },
+      "residency_idempotency_conflict": {
+        "category_id": "compatibility",
+        "presentation_id": "p_compatibility",
+        "detail_schema_id": "d_idempotency",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "model_load_write",
+              "model_load_saved_pin_write",
+              "model_delete_write",
+              "ollama_model_delete_write"
+            ],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "begin",
+                "upload",
+                "commit",
+                "abort",
+                "adopt"
+              ]
+            },
+            "http_status": 409
+          }
+        }
+      },
+      "residency_capacity_insufficient": {
+        "category_id": "capacity",
+        "presentation_id": "p_capacity",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 4,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "startup_load"
+                ],
+                "legal_states": [
+                  "evaluating:null:primary|secondary",
+                  "terminal:refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 409
+              }
+            ]
+          }
+        }
+      },
+      "residency_limit_exceeded_after_reconfiguration": {
+        "category_id": "capacity",
+        "presentation_id": "p_capacity",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "resource_diagnostic": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_configuration_read",
+              "residency_configuration_write",
+              "residency_snapshot_read"
+            ]
+          }
+        }
+      },
+      "residency_count_limit_exceeded_after_reconfiguration": {
+        "category_id": "capacity",
+        "presentation_id": "p_capacity",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "resource_diagnostic": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_configuration_read",
+              "residency_configuration_write",
+              "residency_snapshot_read"
+            ]
+          }
+        }
+      },
+      "residency_plan_infeasible": {
+        "category_id": "feasibility",
+        "presentation_id": "p_feasibility",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 4,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "evaluating:null:primary|secondary",
+                  "terminal:refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 409
+              }
+            ]
+          }
+        }
+      },
+      "residency_startup_set_infeasible": {
+        "category_id": "feasibility",
+        "presentation_id": "p_feasibility",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 4,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "startup_load"
+                ],
+                "legal_states": [
+                  "evaluating:null:primary|secondary",
+                  "terminal:refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 409
+              }
+            ]
+          }
+        }
+      },
+      "residency_planning_deadline_exceeded": {
+        "category_id": "scheduling",
+        "presentation_id": "p_scheduling",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 4,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "evaluating|waiting_for_in_use:null:primary|secondary",
+                  "terminal:refused|failed:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused",
+                  "failed"
+                ],
+                "status": 503
+              }
+            ]
+          }
+        }
+      },
+      "residency_operation_budget_exhausted": {
+        "category_id": "scheduling",
+        "presentation_id": "p_scheduling",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 5,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "explicit_unload",
+                  "force_unload",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "service_termination",
+                  "dead_backend_pruning",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup",
+                  "artifact_scope_recovery_cleanup",
+                  "saved_pin_mutation",
+                  "runtime_pin_mutation",
+                  "legacy_pin_batch",
+                  "resident_state_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "closing:null:primary|secondary",
+                  "terminal:refused|failed|superseded:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused",
+                  "failed",
+                  "superseded"
+                ],
+                "status": 503
+              }
+            ]
+          }
+        }
+      },
+      "residency_attempt_budget_exhausted": {
+        "category_id": "scheduling",
+        "presentation_id": "p_scheduling",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 5,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup",
+                  "artifact_scope_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "closing:null:primary|secondary",
+                  "terminal:failed|partially_succeeded:primary|secondary"
+                ]
+              },
+              {
+                "operation_kinds": [
+                  "resident_state_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "closing:null:primary|secondary",
+                  "terminal:failed:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "failed",
+                  "partially_succeeded"
+                ],
+                "status": 500
+              }
+            ]
+          }
+        }
+      },
+      "residency_critical_pressure_refusal": {
+        "category_id": "pressure",
+        "presentation_id": "p_pressure",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 4,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load"
+                ],
+                "legal_states": [
+                  "evaluating:null:primary|secondary",
+                  "terminal:refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "refused"
+                ],
+                "status": 503
+              }
+            ]
+          }
+        }
+      },
+      "residency_pressure_unresolved": {
+        "category_id": "pressure",
+        "presentation_id": "p_pressure",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 5,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "pressure_reclamation"
+                ],
+                "legal_states": [
+                  "evaluating|closing:null:primary|secondary",
+                  "terminal:failed|refused:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "failed",
+                  "refused"
+                ],
+                "status": 503
+              }
+            ]
+          }
+        }
+      },
+      "residency_action_failed": {
+        "category_id": "action",
+        "presentation_id": "p_action",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 5,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "explicit_unload",
+                  "force_unload",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "service_termination",
+                  "dead_backend_pruning",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup",
+                  "artifact_scope_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "executing|closing:null:primary|secondary",
+                  "terminal:failed|partially_succeeded:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "failed",
+                  "partially_succeeded"
+                ],
+                "status": 500
+              }
+            ]
+          }
+        }
+      },
+      "residency_partial_outcome": {
+        "category_id": "action",
+        "presentation_id": "p_action",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 5,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "explicit_unload",
+                  "force_unload",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "service_termination",
+                  "dead_backend_pruning",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup",
+                  "artifact_scope_recovery_cleanup"
+                ],
+                "legal_states": [
+                  "closing:null:primary|secondary",
+                  "terminal:partially_succeeded:primary|secondary"
+                ]
+              }
+            ],
+            "http_mappings": [
+              {
+                "terminal_outcomes": [
+                  "partially_succeeded"
+                ],
+                "status": 500
+              }
+            ]
+          }
+        }
+      },
+      "residency_artifact_acquisition_failed": {
+        "category_id": "action",
+        "presentation_id": "p_action",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "coordinator_step_result": {
+            "priority_band": 0,
+            "step_kinds": [
+              "artifact_acquisition"
+            ],
+            "results": [
+              "failed",
+              "recovery_required"
+            ],
+            "contexts": [
+              "model_load_write",
+              "model_load_saved_pin_write"
+            ],
+            "http_status": 500,
+            "primary_required": true
+          }
+        }
+      },
+      "residency_artifact_writer_failed": {
+        "category_id": "action",
+        "presentation_id": "p_action",
+        "detail_schema_id": "d_writer",
+        "envelopes": {
+          "artifact_writer_job_revision": {
+            "priority_band": 0,
+            "causes": [
+              "native_failed",
+              "client_cancelled"
+            ],
+            "normalized_states": [
+              "terminal_failed"
+            ],
+            "native_families": [
+              "generic_job",
+              "download_job",
+              "ollama_pull_stream",
+              "public_sse_writer",
+              "public_blocking_writer",
+              "staged_import_writer"
+            ],
+            "primary_required": true,
+            "resume_allowed": false
+          },
+          "artifact_writer_request_result": {
+            "priority_band": 0,
+            "results": [
+              "failed",
+              "cancelled"
+            ],
+            "native_families": [
+              "generic_job",
+              "download_job",
+              "ollama_pull_stream",
+              "public_sse_writer",
+              "public_blocking_writer",
+              "staged_import_writer"
+            ],
+            "primary_required": true
+          }
+        }
+      },
+      "residency_artifact_writer_superseded_by_model_delete": {
+        "category_id": "action",
+        "presentation_id": "p_action",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "artifact_writer_job_revision": {
+            "priority_band": 0,
+            "causes": [
+              "superseded_by_model_delete"
+            ],
+            "normalized_states": [
+              "terminal_superseded"
+            ],
+            "native_families": [
+              "generic_job",
+              "download_job",
+              "ollama_pull_stream",
+              "public_sse_writer",
+              "public_blocking_writer",
+              "staged_import_writer"
+            ],
+            "primary_required": true,
+            "resume_allowed": false
+          },
+          "artifact_writer_request_result": {
+            "priority_band": 0,
+            "results": [
+              "superseded_by_model_delete"
+            ],
+            "native_families": [
+              "generic_job",
+              "download_job",
+              "ollama_pull_stream",
+              "public_sse_writer",
+              "public_blocking_writer",
+              "staged_import_writer"
+            ],
+            "primary_required": true
+          }
+        }
+      },
+      "residency_artifact_writer_quiescence_failed": {
+        "category_id": "action",
+        "presentation_id": "p_action",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "coordinator_step_result": {
+            "priority_band": 0,
+            "step_kinds": [
+              "artifact_writer_quiescence"
+            ],
+            "results": [
+              "failed",
+              "recovery_required"
+            ],
+            "contexts": [
+              "model_delete_write",
+              "ollama_model_delete_write"
+            ],
+            "http_status": 500,
+            "primary_required": true
+          }
+        }
+      },
+      "residency_model_artifact_delete_failed": {
+        "category_id": "action",
+        "presentation_id": "p_action",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "coordinator_step_result": {
+            "priority_band": 0,
+            "step_kinds": [
+              "model_artifact_delete"
+            ],
+            "results": [
+              "failed",
+              "recovery_required"
+            ],
+            "contexts": [
+              "model_delete_write",
+              "ollama_model_delete_write"
+            ],
+            "http_status": 500,
+            "primary_required": true
+          }
+        }
+      },
+      "residency_model_identity_delete_failed": {
+        "category_id": "action",
+        "presentation_id": "p_action",
+        "detail_schema_id": "d_action",
+        "envelopes": {
+          "coordinator_step_result": {
+            "priority_band": 0,
+            "step_kinds": [
+              "model_identity_delete"
+            ],
+            "results": [
+              "failed",
+              "recovery_required"
+            ],
+            "contexts": [
+              "model_delete_write",
+              "ollama_model_delete_write"
+            ],
+            "http_status": 500,
+            "primary_required": true
+          }
+        }
+      },
+      "residency_precondition_required": {
+        "category_id": "precondition",
+        "presentation_id": "p_precondition",
+        "detail_schema_id": "d_generation",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "pin_preference_write",
+              "runtime_pin_write",
+              "model_load_saved_pin_write",
+              "residency_artifact_quarantine_cleanup_write",
+              "residency_configuration_write",
+              "residency_migration_write",
+              "residency_authority_bootstrap_write"
+            ],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "begin",
+                "upload",
+                "commit",
+                "abort",
+                "adopt"
+              ]
+            },
+            "http_status": 428
+          }
+        }
+      },
+      "residency_precondition_failed": {
+        "category_id": "precondition",
+        "presentation_id": "p_precondition",
+        "detail_schema_id": "d_generation",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "pin_preference_write",
+              "runtime_pin_write",
+              "model_load_saved_pin_write",
+              "residency_artifact_quarantine_cleanup_write",
+              "residency_configuration_write",
+              "residency_migration_write",
+              "residency_authority_bootstrap_write"
+            ],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "begin",
+                "upload",
+                "commit",
+                "abort",
+                "adopt"
+              ]
+            },
+            "http_status": 412
+          }
+        }
+      },
+      "residency_idempotency_key_required": {
+        "category_id": "precondition",
+        "presentation_id": "p_precondition",
+        "detail_schema_id": "d_idempotency",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "begin",
+                "upload",
+                "commit",
+                "abort",
+                "adopt"
+              ]
+            },
+            "http_status": 400
+          }
+        }
+      },
+      "residency_deprecated_configuration_key": {
+        "category_id": "configuration",
+        "presentation_id": "p_configuration",
+        "detail_schema_id": "d_migration",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_configuration_write",
+              "params_write",
+              "internal_set_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 400
+          }
+        }
+      },
+      "residency_configuration_scope_mismatch": {
+        "category_id": "configuration",
+        "presentation_id": "p_configuration",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "params_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 400
+          }
+        }
+      },
+      "residency_configuration_conflict": {
+        "category_id": "configuration",
+        "presentation_id": "p_configuration",
+        "detail_schema_id": "d_generation",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "pin_preference_write",
+              "legacy_pins_write",
+              "model_load_saved_pin_write",
+              "residency_authority_bootstrap_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 409
+          },
+          "resource_diagnostic": {
+            "priority_band": 0,
+            "contexts": [
+              "pin_preference_read",
+              "residency_configuration_read",
+              "residency_migration_read",
+              "residency_snapshot_read"
+            ]
+          },
+          "authority_transaction_result": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_configuration_write",
+              "residency_migration_write",
+              "residency_authority_bootstrap_write",
+              "internal_set_write"
+            ],
+            "result": "conflict",
+            "http_status": 409,
+            "primary_required": true
+          },
+          "coordinator_step_result": {
+            "priority_band": 0,
+            "step_kinds": [
+              "recipe_options_persistence"
+            ],
+            "results": [
+              "superseded"
+            ],
+            "contexts": [
+              "model_load_write",
+              "model_load_saved_pin_write"
+            ],
+            "http_status": 409,
+            "primary_required": true
+          }
+        }
+      },
+      "residency_pin_migration_conflict": {
+        "category_id": "migration",
+        "presentation_id": "p_migration",
+        "detail_schema_id": "d_migration",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "pin_preference_write",
+              "legacy_pins_write",
+              "model_load_saved_pin_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 409
+          },
+          "resource_diagnostic": {
+            "priority_band": 0,
+            "contexts": [
+              "pin_preference_read",
+              "residency_migration_read",
+              "residency_snapshot_read"
+            ]
+          }
+        }
+      },
+      "residency_legacy_memory_limit_ambiguous": {
+        "category_id": "migration",
+        "presentation_id": "p_migration",
+        "detail_schema_id": "d_migration",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "model_load_write",
+              "model_load_saved_pin_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 409
+          },
+          "resource_diagnostic": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_migration_read",
+              "residency_configuration_read",
+              "residency_snapshot_read"
+            ]
+          }
+        }
+      },
+      "residency_legacy_eviction_options_require_review": {
+        "category_id": "migration",
+        "presentation_id": "p_migration",
+        "detail_schema_id": "d_migration",
+        "envelopes": {
+          "resource_diagnostic": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_migration_read",
+              "residency_configuration_read",
+              "residency_snapshot_read"
+            ]
+          }
+        }
+      },
+      "residency_legacy_gtt_hint_ignored": {
+        "category_id": "migration",
+        "presentation_id": "p_migration",
+        "detail_schema_id": "d_migration",
+        "envelopes": {
+          "resource_diagnostic": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_migration_read",
+              "residency_configuration_read",
+              "residency_snapshot_read"
+            ]
+          }
+        }
+      },
+      "model_not_found": {
+        "category_id": "model_identity",
+        "presentation_id": "p_model_identity",
+        "detail_schema_id": "d_model",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "pin_preference_read",
+              "pin_preference_write",
+              "runtime_pin_read",
+              "runtime_pin_write",
+              "model_load_write",
+              "model_load_saved_pin_write",
+              "model_unload_write",
+              "model_force_unload_write",
+              "model_delete_write",
+              "ollama_model_delete_write",
+              "model_identity_read",
+              "legacy_pins_read",
+              "legacy_pins_write"
+            ],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "adopt"
+              ]
+            },
+            "http_status": 404,
+            "endpoint_overrides": [
+              {
+                "context": "model_delete_write",
+                "status": 422
+              }
+            ]
+          }
+        }
+      },
+      "residency_reserved_registration_name": {
+        "category_id": "model_identity",
+        "presentation_id": "p_model_identity_conflict",
+        "detail_schema_id": "d_identity",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "begin",
+                "commit",
+                "adopt",
+                "registration_download"
+              ]
+            },
+            "http_status": 409,
+            "endpoint_overrides": [
+              {
+                "context": "artifact_identity_writer_write",
+                "stage": "registration_download",
+                "status": 400
+              }
+            ]
+          }
+        }
+      },
+      "residency_model_identity_conflict": {
+        "category_id": "model_identity",
+        "presentation_id": "p_model_identity_conflict",
+        "detail_schema_id": "d_identity",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "begin",
+                "commit",
+                "adopt",
+                "registration_download"
+              ]
+            },
+            "http_status": 409
+          }
+        }
+      },
+      "residency_model_identity_source_ineligible": {
+        "category_id": "model_identity",
+        "presentation_id": "p_model_identity_conflict",
+        "detail_schema_id": "d_identity",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "adopt"
+              ]
+            },
+            "http_status": 409
+          }
+        }
+      },
+      "residency_model_replacement_requires_release": {
+        "category_id": "model_identity",
+        "presentation_id": "p_model_identity_conflict",
+        "detail_schema_id": "d_identity",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "commit",
+                "adopt",
+                "registration_download"
+              ]
+            },
+            "http_status": 409
+          }
+        }
+      },
+      "model_not_loaded_or_loading": {
+        "category_id": "resident_state",
+        "presentation_id": "p_resident_state",
+        "detail_schema_id": "d_model",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "legacy_pins_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 400
+          }
+        }
+      },
+      "residency_resident_unavailable": {
+        "category_id": "resident_state",
+        "presentation_id": "p_resident_state",
+        "detail_schema_id": "d_model",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "runtime_pin_read",
+              "runtime_pin_write",
+              "model_unload_write",
+              "model_force_unload_write",
+              "internal_pin_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 404
+          }
+        }
+      },
+      "residency_operation_not_found": {
+        "category_id": "lookup",
+        "presentation_id": "p_lookup",
+        "detail_schema_id": "d_lookup",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_operation_read",
+              "residency_operation_status_read"
+            ],
+            "staged_contexts": {},
+            "http_status": 404
+          }
+        }
+      },
+      "residency_operation_expired": {
+        "category_id": "lookup",
+        "presentation_id": "p_lookup",
+        "detail_schema_id": "d_lookup",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_operation_read",
+              "residency_operation_status_read"
+            ],
+            "staged_contexts": {},
+            "http_status": 410
+          }
+        }
+      },
+      "residency_coordinator_expired": {
+        "category_id": "lookup",
+        "presentation_id": "p_record_lookup",
+        "detail_schema_id": "d_lookup",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "model_load_write",
+              "model_load_saved_pin_write",
+              "model_delete_write",
+              "ollama_model_delete_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 410
+          }
+        }
+      },
+      "residency_artifact_quarantine_not_found": {
+        "category_id": "lookup",
+        "presentation_id": "p_record_lookup",
+        "detail_schema_id": "d_lookup",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_artifact_quarantine_read",
+              "residency_artifact_quarantine_status_read",
+              "residency_artifact_quarantine_cleanup_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 404
+          }
+        }
+      },
+      "residency_artifact_quarantine_expired": {
+        "category_id": "lookup",
+        "presentation_id": "p_record_lookup",
+        "detail_schema_id": "d_lookup",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_artifact_quarantine_read",
+              "residency_artifact_quarantine_status_read",
+              "residency_artifact_quarantine_cleanup_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 410
+          }
+        }
+      },
+      "residency_artifact_import_not_found": {
+        "category_id": "artifact_import",
+        "presentation_id": "p_artifact_import",
+        "detail_schema_id": "d_lookup",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "artifact_import_read"
+            ],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "upload",
+                "commit",
+                "abort"
+              ]
+            },
+            "http_status": 404
+          }
+        }
+      },
+      "residency_artifact_import_expired": {
+        "category_id": "artifact_import",
+        "presentation_id": "p_artifact_import",
+        "detail_schema_id": "d_lookup",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "artifact_import_read"
+            ],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "begin",
+                "upload",
+                "commit",
+                "abort",
+                "adopt"
+              ]
+            },
+            "http_status": 410,
+            "receipt_replay": true
+          },
+          "artifact_writer_job_revision": {
+            "priority_band": 0,
+            "causes": [
+              "staged_import_expired"
+            ],
+            "normalized_states": [
+              "terminal_failed"
+            ],
+            "native_families": [
+              "staged_import_writer"
+            ],
+            "primary_required": true,
+            "resume_allowed": false
+          },
+          "artifact_writer_request_result": {
+            "priority_band": 0,
+            "results": [
+              "expired"
+            ],
+            "native_families": [
+              "staged_import_writer"
+            ],
+            "primary_required": true
+          }
+        }
+      },
+      "residency_artifact_import_conflict": {
+        "category_id": "artifact_import",
+        "presentation_id": "p_artifact_import",
+        "detail_schema_id": "d_import",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "upload",
+                "commit",
+                "abort"
+              ]
+            },
+            "http_status": 409
+          }
+        }
+      },
+      "residency_artifact_import_invalid": {
+        "category_id": "artifact_import",
+        "presentation_id": "p_artifact_import",
+        "detail_schema_id": "d_import",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "begin",
+                "upload",
+                "commit",
+                "adopt"
+              ]
+            },
+            "http_status": 422
+          },
+          "artifact_writer_job_revision": {
+            "priority_band": 0,
+            "causes": [
+              "staged_import_validation_failed"
+            ],
+            "normalized_states": [
+              "terminal_failed"
+            ],
+            "native_families": [
+              "staged_import_writer"
+            ],
+            "primary_required": true,
+            "resume_allowed": false
+          },
+          "artifact_writer_request_result": {
+            "priority_band": 0,
+            "results": [
+              "failed"
+            ],
+            "native_families": [
+              "staged_import_writer"
+            ],
+            "primary_required": true
+          }
+        }
+      },
+      "residency_artifact_import_storage_unavailable": {
+        "category_id": "artifact_import",
+        "presentation_id": "p_artifact_import",
+        "detail_schema_id": "d_storage",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [],
+            "staged_contexts": {
+              "artifact_identity_writer_write": [
+                "begin",
+                "adopt"
+              ]
+            },
+            "http_status": 507
+          }
+        }
+      },
+      "residency_artifact_import_failed": {
+        "category_id": "artifact_import",
+        "presentation_id": "p_artifact_import",
+        "detail_schema_id": "d_import",
+        "envelopes": {
+          "artifact_writer_job_revision": {
+            "priority_band": 0,
+            "causes": [
+              "staged_import_failed"
+            ],
+            "normalized_states": [
+              "terminal_failed"
+            ],
+            "native_families": [
+              "staged_import_writer"
+            ],
+            "primary_required": true,
+            "resume_allowed": false,
+            "effect_dispositions": [
+              "no_effect",
+              "verified_effect"
+            ]
+          },
+          "artifact_writer_request_result": {
+            "priority_band": 0,
+            "results": [
+              "failed"
+            ],
+            "native_families": [
+              "staged_import_writer"
+            ],
+            "primary_required": true,
+            "http_status": 500
+          }
+        }
+      },
+      "residency_artifact_import_cleanup_incomplete": {
+        "category_id": "artifact_import",
+        "presentation_id": "p_artifact_import",
+        "detail_schema_id": "d_import",
+        "envelopes": {
+          "artifact_writer_job_revision": {
+            "priority_band": 0,
+            "causes": [
+              "staged_import_cleanup_incomplete"
+            ],
+            "normalized_states": [
+              "terminal_failed"
+            ],
+            "native_families": [
+              "staged_import_writer"
+            ],
+            "primary_required": true,
+            "resume_allowed": false,
+            "effect_dispositions": [
+              "ambiguous"
+            ],
+            "publish_dispositions": [
+              "unknown"
+            ],
+            "quarantine_record_required": true
+          },
+          "artifact_writer_request_result": {
+            "priority_band": 0,
+            "results": [
+              "quarantined"
+            ],
+            "native_families": [
+              "staged_import_writer"
+            ],
+            "primary_required": true
+          }
+        }
+      },
+      "residency_fallback_selected": {
+        "category_id": "policy",
+        "presentation_id": "p_policy",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "operation_revision": {
+            "priority_band": 6,
+            "contexts": [
+              {
+                "operation_kinds": [
+                  "admission",
+                  "pressure_reclamation",
+                  "startup_load",
+                  "same_epoch_recovery_cleanup",
+                  "prior_epoch_owner_cleanup"
+                ],
+                "legal_states": [
+                  "associated_primary_state:secondary"
+                ]
+              }
+            ],
+            "http_mappings": [],
+            "secondary_only": true
+          }
+        }
+      },
+      "residency_legacy_admin_key_fallback_deprecated": {
+        "category_id": "authentication",
+        "presentation_id": "p_authentication",
+        "detail_schema_id": "d_compatibility",
+        "envelopes": {
+          "response_diagnostic": {
+            "priority_band": 0,
+            "endpoint_alias": "all_upstream_internal_routes",
+            "compatibility_epoch": "before_announced_api_major_boundary",
+            "required_projection": "protocol_safe_header"
+          }
+        }
+      },
+      "residency_status_capability_required": {
+        "category_id": "authentication",
+        "presentation_id": "p_status_authentication",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_operation_status_read",
+              "residency_artifact_quarantine_status_read"
+            ],
+            "staged_contexts": {},
+            "http_status": 401
+          }
+        }
+      },
+      "residency_status_capability_invalid": {
+        "category_id": "authentication",
+        "presentation_id": "p_status_authentication",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_operation_status_read",
+              "residency_artifact_quarantine_status_read"
+            ],
+            "staged_contexts": {},
+            "http_status": 401
+          }
+        }
+      },
+      "residency_status_capability_expired": {
+        "category_id": "authentication",
+        "presentation_id": "p_status_authentication",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_operation_status_read",
+              "residency_artifact_quarantine_status_read"
+            ],
+            "staged_contexts": {},
+            "http_status": 401
+          }
+        }
+      },
+      "residency_status_authorization_forbidden": {
+        "category_id": "authentication",
+        "presentation_id": "p_status_authentication",
+        "detail_schema_id": "d_none",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "residency_operation_status_read",
+              "residency_artifact_quarantine_status_read"
+            ],
+            "staged_contexts": {},
+            "http_status": 403
+          }
+        }
+      },
+      "residency_operation_rate_limited": {
+        "category_id": "rate_limit",
+        "presentation_id": "p_rate_limit",
+        "detail_schema_id": "d_rate",
+        "envelopes": {
+          "request_error": {
+            "priority_band": 0,
+            "contexts": [
+              "pin_preference_write",
+              "runtime_pin_write",
+              "model_load_write",
+              "model_load_saved_pin_write",
+              "model_unload_write",
+              "model_force_unload_write",
+              "model_delete_write",
+              "ollama_model_delete_write",
+              "legacy_pins_write",
+              "internal_pin_write"
+            ],
+            "staged_contexts": {},
+            "http_status": 429,
+            "required_headers": [
+              "Retry-After"
+            ]
+          }
+        }
+      }
+    },
+    "presentation_registry": {
+      "p_success": {
+        "category_id": "success",
+        "severity": "info",
+        "title": "Operation succeeded",
+        "default_message": "The residency operation succeeded."
+      },
+      "p_persistence": {
+        "category_id": "persistence",
+        "severity": "error",
+        "title": "Persistence unavailable",
+        "default_message": "Required residency state could not be persisted."
+      },
+      "p_recovery": {
+        "category_id": "recovery",
+        "severity": "error",
+        "title": "Recovery required",
+        "default_message": "Residency recovery is required before normal lifecycle work can continue."
+      },
+      "p_integrity": {
+        "category_id": "integrity",
+        "severity": "critical",
+        "title": "Residency quarantined",
+        "default_message": "Residency state is quarantined pending recovery."
+      },
+      "p_lifecycle": {
+        "category_id": "lifecycle",
+        "severity": "warning",
+        "title": "Lifecycle changed",
+        "default_message": "The residency lifecycle operation was interrupted or superseded."
+      },
+      "p_capability": {
+        "category_id": "capability",
+        "severity": "error",
+        "title": "Capability unavailable",
+        "default_message": "The required residency capability is unavailable."
+      },
+      "p_evidence": {
+        "category_id": "evidence",
+        "severity": "error",
+        "title": "Evidence unavailable",
+        "default_message": "Required residency evidence is not currently usable."
+      },
+      "p_protection": {
+        "category_id": "protection",
+        "severity": "warning",
+        "title": "Resident protected",
+        "default_message": "A resident protection rule prevents the requested action."
+      },
+      "p_compatibility": {
+        "category_id": "compatibility",
+        "severity": "warning",
+        "title": "Compatibility constraint",
+        "default_message": "A compatibility rule affects the requested operation."
+      },
+      "p_capacity": {
+        "category_id": "capacity",
+        "severity": "warning",
+        "title": "Capacity unavailable",
+        "default_message": "The requested residency capacity is unavailable."
+      },
+      "p_feasibility": {
+        "category_id": "feasibility",
+        "severity": "warning",
+        "title": "Plan infeasible",
+        "default_message": "No complete safe residency plan is currently feasible."
+      },
+      "p_scheduling": {
+        "category_id": "scheduling",
+        "severity": "warning",
+        "title": "Scheduling limit reached",
+        "default_message": "The residency coordinator could not proceed within its bound."
+      },
+      "p_pressure": {
+        "category_id": "pressure",
+        "severity": "error",
+        "title": "Pressure unresolved",
+        "default_message": "Memory pressure could not be safely resolved."
+      },
+      "p_action": {
+        "category_id": "action",
+        "severity": "error",
+        "title": "Action incomplete",
+        "default_message": "A residency action did not complete successfully."
+      },
+      "p_precondition": {
+        "category_id": "precondition",
+        "severity": "warning",
+        "title": "Precondition failed",
+        "default_message": "The request precondition is missing or no longer current."
+      },
+      "p_configuration": {
+        "category_id": "configuration",
+        "severity": "error",
+        "title": "Configuration conflict",
+        "default_message": "The residency configuration request conflicts with current authority."
+      },
+      "p_migration": {
+        "category_id": "migration",
+        "severity": "warning",
+        "title": "Migration attention required",
+        "default_message": "Residency migration state requires review or resolution."
+      },
+      "p_model_identity": {
+        "category_id": "model_identity",
+        "severity": "warning",
+        "title": "Model not found",
+        "default_message": "The requested model is not known."
+      },
+      "p_model_identity_conflict": {
+        "category_id": "model_identity",
+        "severity": "warning",
+        "title": "Model identity unavailable",
+        "default_message": "The requested model identity cannot be published in its current state."
+      },
+      "p_resident_state": {
+        "category_id": "resident_state",
+        "severity": "warning",
+        "title": "Resident unavailable",
+        "default_message": "The requested live resident state is unavailable."
+      },
+      "p_lookup": {
+        "category_id": "lookup",
+        "severity": "warning",
+        "title": "Operation unavailable",
+        "default_message": "The requested residency operation record is unavailable."
+      },
+      "p_record_lookup": {
+        "category_id": "lookup",
+        "severity": "warning",
+        "title": "Residency record unavailable",
+        "default_message": "The requested residency request record is no longer available."
+      },
+      "p_artifact_import": {
+        "category_id": "artifact_import",
+        "severity": "warning",
+        "title": "Artifact import unavailable",
+        "default_message": "The staged artifact import could not complete in its current state."
+      },
+      "p_policy": {
+        "category_id": "policy",
+        "severity": "info",
+        "title": "Fallback selected",
+        "default_message": "A declared residency fallback was selected."
+      },
+      "p_authentication": {
+        "category_id": "authentication",
+        "severity": "warning",
+        "title": "Legacy authorization",
+        "default_message": "A deprecated authorization compatibility rule was used."
+      },
+      "p_status_authentication": {
+        "category_id": "authentication",
+        "severity": "warning",
+        "title": "Status authorization required",
+        "default_message": "A valid residency status capability or admin authorization is required."
+      },
+      "p_rate_limit": {
+        "category_id": "rate_limit",
+        "severity": "warning",
+        "title": "Operation rate limited",
+        "default_message": "The residency operation allowance is temporarily exhausted."
+      }
+    },
+    "detail_schema_registry": {
+      "d_none": {
+        "required_fields": [],
+        "optional_fields": [],
+        "fields": {}
+      },
+      "d_authority": {
+        "required_fields": [
+          "authority_kind",
+          "failure_class"
+        ],
+        "optional_fields": [
+          "last_authoritative_generation",
+          "failed_attempt_generation",
+          "retry_after_ms"
+        ],
+        "fields": {
+          "authority_kind": {
+            "type": "enum",
+            "values": [
+              "configuration",
+              "pin_preference"
+            ],
+            "audience": "regular_admin"
+          },
+          "last_authoritative_generation": {
+            "type": "opaque",
+            "max_bytes": 128,
+            "audience": "regular_admin"
+          },
+          "failed_attempt_generation": {
+            "type": "opaque",
+            "max_bytes": 128,
+            "audience": "regular_admin"
+          },
+          "retry_after_ms": {
+            "type": "uint64",
+            "audience": "regular_admin"
+          },
+          "failure_class": {
+            "type": "enum",
+            "values": [
+              "uninitialized",
+              "discovery",
+              "journal",
+              "fsync",
+              "validation",
+              "publication",
+              "source_changed"
+            ],
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_generation": {
+        "required_fields": [],
+        "optional_fields": [
+          "authority_kind",
+          "expected_generation",
+          "observed_generation",
+          "source_path_id"
+        ],
+        "fields": {
+          "authority_kind": {
+            "type": "enum",
+            "values": [
+              "configuration",
+              "pin_preference",
+              "recipe_options",
+              "resident",
+              "model_identity",
+              "artifact_store",
+              "artifact_writer"
+            ],
+            "audience": "regular_admin"
+          },
+          "expected_generation": {
+            "type": "opaque",
+            "max_bytes": 128,
+            "audience": "admin"
+          },
+          "observed_generation": {
+            "type": "opaque",
+            "max_bytes": 128,
+            "audience": "admin"
+          },
+          "source_path_id": {
+            "type": "enum",
+            "values": [
+              "configuration",
+              "pin_preference",
+              "recipe_options",
+              "resident",
+              "model_identity",
+              "alias",
+              "artifact_identity",
+              "artifact_store",
+              "artifact_writer"
+            ],
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_storage": {
+        "required_fields": [
+          "store_kind",
+          "retryable"
+        ],
+        "optional_fields": [
+          "quota_scope"
+        ],
+        "fields": {
+          "store_kind": {
+            "type": "enum",
+            "values": [
+              "authority",
+              "operation",
+              "coordinator",
+              "capability",
+              "recipe_options",
+              "model_artifact",
+              "artifact_import_session",
+              "artifact_staging"
+            ],
+            "audience": "regular_admin"
+          },
+          "quota_scope": {
+            "type": "enum",
+            "values": [
+              "principal",
+              "global",
+              "emergency",
+              "safety"
+            ],
+            "audience": "regular_admin"
+          },
+          "retryable": {
+            "type": "boolean",
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_rate": {
+        "required_fields": [
+          "retry_after_ms",
+          "allowance_scope"
+        ],
+        "optional_fields": [],
+        "fields": {
+          "retry_after_ms": {
+            "type": "uint64",
+            "audience": "regular_admin"
+          },
+          "allowance_scope": {
+            "type": "enum",
+            "values": [
+              "credential_principal",
+              "global"
+            ],
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_model": {
+        "required_fields": [],
+        "optional_fields": [
+          "canonical_model_id",
+          "resident_generation"
+        ],
+        "fields": {
+          "canonical_model_id": {
+            "type": "utf8",
+            "max_bytes": 512,
+            "audience": "regular_admin"
+          },
+          "resident_generation": {
+            "type": "opaque",
+            "max_bytes": 128,
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_lookup": {
+        "required_fields": [
+          "record_kind"
+        ],
+        "optional_fields": [
+          "expires_at",
+          "forgotten_at"
+        ],
+        "fields": {
+          "record_kind": {
+            "type": "enum",
+            "values": [
+              "operation",
+              "load_coordinator",
+              "model_delete_coordinator",
+              "artifact_quarantine",
+              "artifact_import"
+            ],
+            "audience": "regular_admin"
+          },
+          "expires_at": {
+            "type": "rfc3339",
+            "audience": "regular_admin"
+          },
+          "forgotten_at": {
+            "type": "rfc3339",
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_idempotency": {
+        "required_fields": [
+          "record_kind"
+        ],
+        "optional_fields": [
+          "existing_request_id",
+          "stage"
+        ],
+        "fields": {
+          "record_kind": {
+            "type": "enum",
+            "values": [
+              "load_coordinator",
+              "model_delete_coordinator",
+              "artifact_import"
+            ],
+            "audience": "regular_admin"
+          },
+          "existing_request_id": {
+            "type": "opaque",
+            "max_bytes": 128,
+            "audience": "regular_admin"
+          },
+          "stage": {
+            "type": "enum",
+            "values": [
+              "begin",
+              "upload",
+              "commit",
+              "abort",
+              "adopt"
+            ],
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_migration": {
+        "required_fields": [
+          "migration_id",
+          "conflict_class"
+        ],
+        "optional_fields": [
+          "authority_generation"
+        ],
+        "fields": {
+          "migration_id": {
+            "type": "enum",
+            "values": [
+              "legacy_eviction_policy_v1",
+              "legacy_memory_limit_v1",
+              "legacy_dgpu_gtt_v1",
+              "legacy_pins_v1"
+            ],
+            "audience": "regular_admin"
+          },
+          "authority_generation": {
+            "type": "opaque",
+            "max_bytes": 128,
+            "audience": "regular_admin"
+          },
+          "conflict_class": {
+            "type": "enum",
+            "values": [
+              "prepared_source_changed",
+              "semantic_ambiguity",
+              "retired_key",
+              "review_required",
+              "ignored_hint"
+            ],
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_action": {
+        "required_fields": [
+          "failure_class"
+        ],
+        "optional_fields": [
+          "action_kind"
+        ],
+        "fields": {
+          "action_kind": {
+            "type": "closed_action_kind",
+            "audience": "regular_admin"
+          },
+          "failure_class": {
+            "type": "enum",
+            "values": [
+              "backend",
+              "fence",
+              "release_verification",
+              "deadline",
+              "budget",
+              "artifact_delete",
+              "identity_delete",
+              "unknown"
+            ],
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_compatibility": {
+        "required_fields": [
+          "compatibility_rule"
+        ],
+        "optional_fields": [
+          "boundary_id"
+        ],
+        "fields": {
+          "boundary_id": {
+            "type": "closed_endpoint_boundary",
+            "audience": "regular_admin"
+          },
+          "compatibility_rule": {
+            "type": "enum",
+            "values": [
+              "slot_pool",
+              "device_exclusivity",
+              "unconditional_pin_write",
+              "legacy_admin_fallback",
+              "unmanaged_artifact"
+            ],
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_fence": {
+        "required_fields": [
+          "fence_kind",
+          "owner_kind"
+        ],
+        "optional_fields": [
+          "canonical_model_id",
+          "retry_after_ms",
+          "owner_id"
+        ],
+        "fields": {
+          "fence_kind": {
+            "type": "enum",
+            "values": [
+              "artifact_writer",
+              "model_identity"
+            ],
+            "audience": "regular_admin"
+          },
+          "canonical_model_id": {
+            "type": "utf8",
+            "max_bytes": 512,
+            "audience": "regular_admin"
+          },
+          "retry_after_ms": {
+            "type": "uint64",
+            "audience": "regular_admin"
+          },
+          "owner_kind": {
+            "type": "enum",
+            "values": [
+              "artifact_writer",
+              "load_coordinator",
+              "model_delete_coordinator",
+              "staged_import_session",
+              "artifact_quarantine"
+            ],
+            "audience": "regular_admin"
+          },
+          "owner_id": {
+            "type": "opaque",
+            "max_bytes": 128,
+            "audience": "admin"
+          }
+        }
+      },
+      "d_import": {
+        "required_fields": [
+          "stage",
+          "failure_class"
+        ],
+        "optional_fields": [
+          "import_id"
+        ],
+        "fields": {
+          "import_id": {
+            "type": "opaque",
+            "max_bytes": 128,
+            "audience": "regular_admin"
+          },
+          "stage": {
+            "type": "enum",
+            "values": [
+              "begin",
+              "upload",
+              "commit",
+              "abort",
+              "adopt",
+              "expiry"
+            ],
+            "audience": "regular_admin"
+          },
+          "failure_class": {
+            "type": "enum",
+            "values": [
+              "state_conflict",
+              "chunk_conflict",
+              "manifest",
+              "size",
+              "digest",
+              "source_unstable",
+              "io",
+              "fsync",
+              "deadline",
+              "cleanup",
+              "publication"
+            ],
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_writer": {
+        "required_fields": [
+          "native_family",
+          "failure_class"
+        ],
+        "optional_fields": [],
+        "fields": {
+          "native_family": {
+            "type": "enum_ref",
+            "ref": "http_auth_registry.native_families",
+            "audience": "regular_admin"
+          },
+          "failure_class": {
+            "type": "enum",
+            "values": [
+              "network",
+              "backend",
+              "client_cancelled",
+              "io",
+              "protocol",
+              "unknown"
+            ],
+            "audience": "regular_admin"
+          }
+        }
+      },
+      "d_identity": {
+        "required_fields": [
+          "conflict_class"
+        ],
+        "optional_fields": [
+          "identity_role",
+          "source_class",
+          "ownership_class",
+          "binding_classes",
+          "resident_generation"
+        ],
+        "fields": {
+          "conflict_class": {
+            "type": "enum",
+            "values": [
+              "reserved_registration_name",
+              "identity_kind",
+              "source_ineligible",
+              "lifecycle_binding"
+            ],
+            "audience": "regular_admin"
+          },
+          "identity_role": {
+            "type": "enum",
+            "values": [
+              "source",
+              "target"
+            ],
+            "audience": "regular_admin"
+          },
+          "source_class": {
+            "type": "enum",
+            "values": [
+              "registered",
+              "imported",
+              "builtin"
+            ],
+            "audience": "regular_admin"
+          },
+          "ownership_class": {
+            "type": "enum",
+            "values": [
+              "managed",
+              "unmanaged_external"
+            ],
+            "audience": "regular_admin"
+          },
+          "binding_classes": {
+            "type": "enum_array",
+            "values": [
+              "resident",
+              "resident_use",
+              "startup",
+              "plan",
+              "recovery",
+              "quarantine"
+            ],
+            "min_items": 0,
+            "max_items": 6,
+            "audience": "regular_admin"
+          },
+          "resident_generation": {
+            "type": "opaque",
+            "max_bytes": 128,
+            "audience": "admin"
+          }
+        }
+      }
+    },
+    "retention_registry": {
+      "operation": {
+        "active_expires": false,
+        "recovery_required_expires": false,
+        "terminal_detail_seconds": 86400,
+        "forgotten_after_terminal_seconds": 604800
+      },
+      "artifact_quarantine": {
+        "pending_expires": false,
+        "attempt_expires": false,
+        "cleared_detail_seconds": 86400,
+        "forgotten_after_clear_seconds": 604800
+      },
+      "staged_import": {
+        "terminal_detail_seconds": 86400,
+        "forgotten_after_terminal_seconds": 604800
+      },
+      "status_capability": {
+        "lifetime_seconds": 86400,
+        "refresh_window_seconds": 3600,
+        "overlap_seconds": 3600
+      }
+    },
+    "http_auth_registry": {
+      "authority_kinds": [
+        "configuration",
+        "pin_preference"
+      ],
+      "authority_states": [
+        "healthy",
+        "absent",
+        "degraded_prior_root"
+      ],
+      "authority_stages": [
+        "configuration",
+        "model_identity",
+        "artifact_writer",
+        "recipe_options",
+        "lifecycle"
+      ],
+      "artifact_writer_origins": [
+        "artifact_route",
+        "load_coordinator"
+      ],
+      "native_families": [
+        "generic_job",
+        "download_job",
+        "ollama_pull_stream",
+        "public_sse_writer",
+        "public_blocking_writer",
+        "staged_import_writer"
+      ],
+      "authorization_modes": [
+        "regular",
+        "admin",
+        "residency_status_capability",
+        "residency_quarantine_status_capability",
+        "loopback_compatibility"
+      ],
+      "operation_http": {
+        "accepted_nonterminal": 202,
+        "recovery_required": 503,
+        "known_read": 200,
+        "tombstone": 410,
+        "unknown_or_forgotten": 404
+      },
+      "compatibility_epoch": "pre_announced_api_major_boundary",
+      "resource_vocabularies": {
+        "authority_transaction_results": [
+          "succeeded",
+          "failed",
+          "conflict"
+        ],
+        "coordinator_step_kinds": [
+          "artifact_acquisition",
+          "recipe_options_persistence",
+          "artifact_writer_quiescence",
+          "model_artifact_delete",
+          "model_identity_delete"
+        ],
+        "coordinator_step_results": [
+          "not_requested",
+          "not_started",
+          "succeeded",
+          "failed",
+          "superseded",
+          "recovery_required"
+        ],
+        "effect_dispositions": [
+          "no_effect",
+          "verified_effect",
+          "ambiguous"
+        ],
+        "publish_dispositions": [
+          "prevented",
+          "published_expected",
+          "unknown"
+        ],
+        "writer_normalized_states": [
+          "active",
+          "terminal_success",
+          "terminal_superseded",
+          "terminal_failed"
+        ],
+        "writer_causes": [
+          "none",
+          "native_failed",
+          "client_cancelled",
+          "superseded_by_model_delete",
+          "staged_import_expired",
+          "staged_import_validation_failed",
+          "staged_import_failed",
+          "staged_import_cleanup_incomplete"
+        ],
+        "writer_request_results": [
+          "completed",
+          "failed",
+          "cancelled",
+          "expired",
+          "quarantined",
+          "superseded_by_model_delete"
+        ],
+        "staged_import_states": [
+          "prepared",
+          "uploading",
+          "verifying",
+          "publishing",
+          "closing",
+          "terminal"
+        ],
+        "staged_import_terminal_results": [
+          "committed",
+          "aborted",
+          "expired",
+          "failed",
+          "quarantined"
+        ],
+        "quarantine_states": [
+          "cleanup_pending",
+          "attempt_in_progress",
+          "cleared"
+        ],
+        "quarantine_origins": [
+          "load_acquisition",
+          "model_delete",
+          "staged_import_abort",
+          "staged_import_publish",
+          "staged_import_adopt"
+        ],
+        "quarantine_resolution_intents": [
+          "preserve_baseline",
+          "complete_publish",
+          "complete_delete"
+        ],
+        "resolution_marker_kinds": [
+          "none",
+          "artifact_publish_irreversible",
+          "model_delete_requested"
+        ],
+        "identity_targets": [
+          "preserve_baseline",
+          "publish_target",
+          "delete_target"
+        ],
+        "baseline_states": [
+          "present",
+          "absent"
+        ],
+        "identity_artifact_dispositions": [
+          "unknown",
+          "baseline_present_verified",
+          "baseline_absent_verified",
+          "target_published",
+          "target_deleted"
+        ],
+        "staging_dispositions": [
+          "not_applicable",
+          "unknown",
+          "removed"
+        ]
+      }
+    },
+    "schema_registry": {
+      "artifact_quarantine_record": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/artifact_quarantine_record.schema.json",
+        "schema_type": "residency.artifact_quarantine_record/1.0",
+        "fields": {
+          "schema": {
+            "type": "schema_literal",
+            "required": true,
+            "value": "residency.explanation/1.0"
+          },
+          "artifact_quarantine_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "record_generation": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "etag": {
+            "type": "strong_etag",
+            "required": true
+          },
+          "state": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.quarantine_states"
+          },
+          "origin": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.quarantine_origins"
+          },
+          "resolution_intent": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.quarantine_resolution_intents"
+          },
+          "resolution_evidence": {
+            "type": "object",
+            "required": true
+          },
+          "model_scope_key": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "artifact_scope_key": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "identity_scopes": {
+            "type": "identity_scope_array",
+            "required": true,
+            "min_items": 1,
+            "max_items": 2,
+            "canonical_sorted": true
+          },
+          "artifact_baseline": {
+            "type": "tagged_baseline",
+            "required": true
+          },
+          "artifact_target": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.identity_targets"
+          },
+          "artifact_disposition": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.identity_artifact_dispositions"
+          },
+          "staging_disposition": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.staging_dispositions"
+          },
+          "native_writer_references": {
+            "type": "opaque_array",
+            "required": true
+          },
+          "maximum_plausible_states": {
+            "type": "object",
+            "required": true
+          },
+          "cause": {
+            "type": "reason",
+            "required": false
+          },
+          "coordinator_id": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "session_id": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "current_attempt_id": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "next_eligible_retry": {
+            "type": "rfc3339",
+            "required": true
+          },
+          "updated_at": {
+            "type": "rfc3339",
+            "required": true
+          },
+          "expires_at": {
+            "type": "nullable_rfc3339",
+            "required": true
+          }
+        },
+        "conditionals": [
+          {
+            "if": {
+              "field": "state",
+              "equals": "attempt_in_progress"
+            },
+            "require": [
+              "current_attempt_id"
+            ]
+          },
+          {
+            "if": {
+              "field": "state",
+              "in": [
+                "cleanup_pending",
+                "attempt_in_progress"
+              ]
+            },
+            "require_null": [
+              "expires_at"
+            ]
+          },
+          {
+            "if": {
+              "field": "state",
+              "equals": "cleared"
+            },
+            "require_nonnull": [
+              "expires_at"
+            ]
+          },
+          {
+            "assert": {
+              "field": "resolution_intent",
+              "selected_by": [
+                "origin",
+                "resolution_evidence"
+              ]
+            }
+          }
+        ]
+      },
+      "artifact_writer_job_revision": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/artifact_writer_job_revision.schema.json",
+        "schema_type": "residency.artifact_writer_job_revision/1.0",
+        "fields": {
+          "schema": {
+            "type": "schema_literal",
+            "required": true,
+            "value": "residency.explanation/1.0"
+          },
+          "writer_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "writer_generation": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "native_family": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.native_families"
+          },
+          "native_state_ref": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "artifact_scope_key": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "normalized_state": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.writer_normalized_states"
+          },
+          "cause": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.writer_causes"
+          },
+          "resume_allowed": {
+            "type": "boolean",
+            "required": true
+          },
+          "effect_disposition": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.effect_dispositions"
+          },
+          "publish_disposition": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.publish_dispositions"
+          },
+          "coordinator_id": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "session_id": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "artifact_quarantine_record_id": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "reasons": {
+            "type": "reason_array",
+            "required": true,
+            "ordered": true
+          }
+        },
+        "conditionals": [
+          {
+            "if": {
+              "field": "normalized_state",
+              "equals": "terminal_success"
+            },
+            "require_values": {
+              "cause": "none",
+              "resume_allowed": false
+            },
+            "require_empty": [
+              "reasons"
+            ]
+          },
+          {
+            "if": {
+              "field": "normalized_state",
+              "in": [
+                "terminal_failed",
+                "terminal_superseded"
+              ]
+            },
+            "require_nonempty": [
+              "reasons"
+            ]
+          },
+          {
+            "if": {
+              "field": "cause",
+              "equals": "staged_import_cleanup_incomplete"
+            },
+            "require": [
+              "artifact_quarantine_record_id"
+            ],
+            "require_values": {
+              "effect_disposition": "ambiguous",
+              "publish_disposition": "unknown"
+            }
+          }
+        ]
+      },
+      "artifact_writer_request_result": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/artifact_writer_request_result.schema.json",
+        "schema_type": "residency.artifact_writer_request_result/1.0",
+        "fields": {
+          "schema": {
+            "type": "schema_literal",
+            "required": true,
+            "value": "residency.explanation/1.0"
+          },
+          "request_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "writer_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "native_family": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.native_families"
+          },
+          "result": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.writer_request_results"
+          },
+          "reasons": {
+            "type": "reason_array",
+            "required": true,
+            "ordered": true
+          }
+        },
+        "conditionals": [
+          {
+            "if": {
+              "field": "result",
+              "equals": "completed"
+            },
+            "require_empty": [
+              "reasons"
+            ]
+          },
+          {
+            "if": {
+              "field": "result",
+              "not_equals": "completed"
+            },
+            "require_nonempty": [
+              "reasons"
+            ]
+          }
+        ]
+      },
+      "authority_transaction_result": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/authority_transaction_result.schema.json",
+        "schema_type": "residency.authority_transaction_result/1.0",
+        "fields": {
+          "schema": {
+            "type": "schema_literal",
+            "required": true,
+            "value": "residency.explanation/1.0"
+          },
+          "request_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "stage": {
+            "type": "literal",
+            "required": true,
+            "value": "authority_transaction"
+          },
+          "authority_kind": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.authority_kinds"
+          },
+          "result": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.authority_transaction_results"
+          },
+          "previous_generation": {
+            "type": "nullable_opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "current_generation": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "migration_state": {
+            "type": "object",
+            "required": false
+          },
+          "reasons": {
+            "type": "reason_array",
+            "required": true,
+            "ordered": true
+          },
+          "resource_projection": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "conditionals": [
+          {
+            "if": {
+              "field": "result",
+              "in": [
+                "failed",
+                "conflict"
+              ]
+            },
+            "require_nonempty": [
+              "reasons"
+            ]
+          },
+          {
+            "if": {
+              "field": "result",
+              "equals": "succeeded"
+            },
+            "allow_empty": [
+              "reasons"
+            ]
+          }
+        ]
+      },
+      "coordinator_step_result": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/coordinator_step_result.schema.json",
+        "schema_type": "residency.coordinator_step_result/1.0",
+        "fields": {
+          "schema": {
+            "type": "schema_literal",
+            "required": true,
+            "value": "residency.explanation/1.0"
+          },
+          "request_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "coordinator_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "step_kind": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.coordinator_step_kinds"
+          },
+          "candidate_id": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "artifact_scope_key": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "result": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.coordinator_step_results"
+          },
+          "effect_disposition": {
+            "type": "enum_ref",
+            "required": false,
+            "ref": "http_auth_registry.resource_vocabularies.effect_dispositions"
+          },
+          "publish_disposition": {
+            "type": "enum_ref",
+            "required": false,
+            "ref": "http_auth_registry.resource_vocabularies.publish_dispositions"
+          },
+          "previous_generation": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "current_generation": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "artifact_quarantine_record_id": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "recovery_operation_id": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "reasons": {
+            "type": "reason_array",
+            "required": true,
+            "ordered": true
+          }
+        },
+        "conditionals": [
+          {
+            "if": {
+              "field": "step_kind",
+              "equals": "artifact_acquisition"
+            },
+            "require": [
+              "candidate_id",
+              "artifact_scope_key"
+            ]
+          },
+          {
+            "if": {
+              "field": "result",
+              "in": [
+                "not_requested",
+                "not_started"
+              ]
+            },
+            "forbid": [
+              "effect_disposition"
+            ]
+          },
+          {
+            "if": {
+              "field": "result",
+              "not_in": [
+                "not_requested",
+                "not_started"
+              ]
+            },
+            "require": [
+              "effect_disposition"
+            ]
+          },
+          {
+            "if": {
+              "field": "step_kind",
+              "in": [
+                "artifact_acquisition",
+                "artifact_writer_quiescence"
+              ],
+              "result_not_in": [
+                "not_requested",
+                "not_started"
+              ]
+            },
+            "require": [
+              "publish_disposition"
+            ]
+          },
+          {
+            "if": {
+              "field": "result",
+              "equals": "recovery_required"
+            },
+            "require": [
+              "artifact_quarantine_record_id"
+            ]
+          },
+          {
+            "unless": {
+              "field": "result",
+              "equals": "recovery_required"
+            },
+            "forbid": [
+              "artifact_quarantine_record_id",
+              "recovery_operation_id"
+            ]
+          }
+        ]
+      },
+      "operation_revision": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/operation_revision.schema.json",
+        "schema_type": "residency.operation_revision/1.0",
+        "fields": {
+          "schema": {
+            "type": "schema_literal",
+            "required": true,
+            "value": "residency.explanation/1.0"
+          },
+          "operation_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "plan_id": {
+            "type": "nullable_opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "family": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "operation_registry.families"
+          },
+          "operation_kind": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "operation_registry.aliases.all_operations"
+          },
+          "phase": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "operation_registry.phases"
+          },
+          "terminal_outcome": {
+            "type": "nullable_enum_ref",
+            "required": true,
+            "ref": "operation_registry.terminal_outcomes"
+          },
+          "explanation_revision": {
+            "type": "uint64",
+            "required": true
+          },
+          "primary_reason_code": {
+            "type": "nullable_reason_code",
+            "required": true
+          },
+          "reasons": {
+            "type": "reason_array",
+            "required": true,
+            "ordered": true
+          },
+          "created_at": {
+            "type": "rfc3339",
+            "required": true
+          },
+          "updated_at": {
+            "type": "rfc3339",
+            "required": true
+          },
+          "expires_at": {
+            "type": "nullable_rfc3339",
+            "required": true
+          },
+          "forgotten_at": {
+            "type": "nullable_rfc3339",
+            "required": true
+          },
+          "retention_state": {
+            "type": "enum",
+            "required": true,
+            "values": [
+              "detail",
+              "tombstone",
+              "forgotten"
+            ]
+          }
+        },
+        "conditionals": [
+          {
+            "if": {
+              "field": "phase",
+              "equals": "terminal"
+            },
+            "require_nonnull": [
+              "terminal_outcome",
+              "primary_reason_code"
+            ],
+            "require_nonempty": [
+              "reasons"
+            ]
+          },
+          {
+            "if": {
+              "field": "phase",
+              "not_equals": "terminal"
+            },
+            "require_null": [
+              "terminal_outcome"
+            ]
+          },
+          {
+            "assert": {
+              "field": "primary_reason_code",
+              "equals_path": "reasons[0].code"
+            }
+          }
+        ]
+      },
+      "reason": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/reason.schema.json",
+        "schema_type": "residency.reason/1.0",
+        "fields": {
+          "code": {
+            "type": "reason_code",
+            "required": true,
+            "max_bytes": 128
+          },
+          "presentation": {
+            "type": "reason_presentation",
+            "required": true
+          },
+          "details": {
+            "type": "detail_schema_join",
+            "required": false
+          }
+        },
+        "conditionals": [
+          {
+            "if": {
+              "field": "detail_schema_id",
+              "equals": "d_none"
+            },
+            "forbid": [
+              "details"
+            ]
+          },
+          {
+            "if": {
+              "field": "detail_schema_id",
+              "not_equals": "d_none"
+            },
+            "require": [
+              "details"
+            ]
+          }
+        ]
+      },
+      "request_error": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/request_error.schema.json",
+        "schema_type": "residency.request_error/1.0",
+        "fields": {
+          "schema": {
+            "type": "schema_literal",
+            "required": true,
+            "value": "residency.explanation/1.0"
+          },
+          "request_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "reason": {
+            "type": "reason",
+            "required": true
+          },
+          "http_status": {
+            "type": "http_status",
+            "required": true,
+            "minimum": 400,
+            "maximum": 599
+          }
+        },
+        "conditionals": []
+      },
+      "residency_profiles": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/residency_profiles.schema.json",
+        "schema_type": "residency.profiles/1.0",
+        "fields": {
+          "schema": {
+            "type": "schema_literal",
+            "required": true,
+            "value": "residency.profiles/1.0"
+          },
+          "generator_version": {
+            "type": "literal",
+            "required": true,
+            "value": 1
+          },
+          "promotion_units": {
+            "type": "promotion_unit_array",
+            "required": true,
+            "min_items": 39,
+            "max_items": 39
+          },
+          "fallbacks": {
+            "type": "fallback_array",
+            "required": true,
+            "min_items": 14,
+            "max_items": 14
+          },
+          "contract_registry": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "conditionals": []
+      },
+      "resource_diagnostic": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/resource_diagnostic.schema.json",
+        "schema_type": "residency.resource_diagnostic/1.0",
+        "fields": {
+          "schema": {
+            "type": "schema_literal",
+            "required": true,
+            "value": "residency.explanation/1.0"
+          },
+          "reason": {
+            "type": "reason",
+            "required": true
+          },
+          "subject": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "subject_generation": {
+            "type": "nullable_opaque",
+            "required": true,
+            "max_bytes": 128
+          }
+        },
+        "conditionals": [
+          {
+            "unless": {
+              "reason_code": "residency_authority_unavailable",
+              "contexts": [
+                "health_read",
+                "residency_snapshot_read"
+              ]
+            },
+            "require_nonnull": [
+              "subject_generation"
+            ]
+          }
+        ]
+      },
+      "response_diagnostic": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/response_diagnostic.schema.json",
+        "schema_type": "residency.response_diagnostic/1.0",
+        "fields": {
+          "schema": {
+            "type": "schema_literal",
+            "required": true,
+            "value": "residency.explanation/1.0"
+          },
+          "reason": {
+            "type": "reason",
+            "required": true
+          }
+        },
+        "conditionals": []
+      },
+      "staged_import_session_record": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/staged_import_session_record.schema.json",
+        "schema_type": "residency.staged_import_session_record/1.0",
+        "fields": {
+          "schema": {
+            "type": "schema_literal",
+            "required": true,
+            "value": "residency.explanation/1.0"
+          },
+          "import_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "source_model_id": {
+            "type": "utf8",
+            "required": false,
+            "max_bytes": 512
+          },
+          "canonical_target_model_id": {
+            "type": "utf8",
+            "required": true,
+            "max_bytes": 512
+          },
+          "record_generation": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "state": {
+            "type": "enum_ref",
+            "required": true,
+            "ref": "http_auth_registry.resource_vocabularies.staged_import_states"
+          },
+          "terminal_result": {
+            "type": "enum_ref",
+            "required": false,
+            "ref": "http_auth_registry.resource_vocabularies.staged_import_terminal_results"
+          },
+          "accepted_manifest_entries": {
+            "type": "uint64",
+            "required": true
+          },
+          "accepted_bytes": {
+            "type": "uint64",
+            "required": true
+          },
+          "next_expected_ordinals": {
+            "type": "uint64_array",
+            "required": true
+          },
+          "inactivity_deadline": {
+            "type": "rfc3339",
+            "required": true
+          },
+          "absolute_deadline": {
+            "type": "rfc3339",
+            "required": true
+          },
+          "updated_at": {
+            "type": "rfc3339",
+            "required": true
+          },
+          "terminal_at": {
+            "type": "rfc3339",
+            "required": false
+          },
+          "expires_at": {
+            "type": "rfc3339",
+            "required": false
+          },
+          "artifact_quarantine_id": {
+            "type": "opaque",
+            "required": false,
+            "max_bytes": 128
+          },
+          "writer_status": {
+            "type": "schema_ref",
+            "required": false,
+            "ref": "schema_registry.artifact_writer_job_revision"
+          },
+          "etag": {
+            "type": "strong_etag",
+            "required": true
+          }
+        },
+        "conditionals": [
+          {
+            "if": {
+              "field": "state",
+              "equals": "terminal"
+            },
+            "require": [
+              "terminal_result",
+              "terminal_at",
+              "expires_at"
+            ]
+          },
+          {
+            "if": {
+              "field": "terminal_result",
+              "equals": "quarantined"
+            },
+            "require": [
+              "artifact_quarantine_id"
+            ]
+          }
+        ]
+      }
+    }
+  },
   "source_support_baseline": "a505bbc702cc1fcd44ef73c44defabc98c36d505",
   "campaign_base_binding": {
     "document": "docs/research/hatchery-residency-validation-profile.md",

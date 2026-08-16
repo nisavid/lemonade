@@ -1,0 +1,188 @@
+{
+  "$defs": {},
+  "$id": "residency.profiles/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "contract_registry": {
+      "type": "object"
+    },
+    "fallbacks": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "effect": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "guard": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "enum": [
+              "hatchery_rocm_admission_refuse_unknown_capacity_v1",
+              "hatchery_rocm_pressure_disabled_invalid_evidence_v1",
+              "hatchery_rocm_pressure_report_only_v1",
+              "hatchery_rocm_recovery_block_readiness_v1",
+              "hatchery_rocm_startup_block_group_v1",
+              "residency_admission_refuse_unknown_demand_v1",
+              "residency_load_retry_refuse_unproven_victim_set_v1",
+              "residency_npu_conflict_preserve_refuse_v1",
+              "residency_pin_mutation_refuse_stale_or_unready_v1",
+              "residency_pressure_disabled_invalid_evidence_v1",
+              "residency_pressure_report_only_unvalidated_v1",
+              "residency_recovery_block_unproven_release_v1",
+              "residency_startup_block_group_v1",
+              "residency_unload_preserve_live_use_v1"
+            ],
+            "maxLength": 51,
+            "minLength": 1,
+            "type": "string"
+          },
+          "operations": {
+            "items": {
+              "enum": [
+                "ADM",
+                "LFR",
+                "NPC",
+                "PIN",
+                "PRE",
+                "REC",
+                "STA",
+                "UNL"
+              ],
+              "maxLength": 3,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id",
+          "operations",
+          "guard",
+          "effect"
+        ],
+        "type": "object"
+      },
+      "maxItems": 14,
+      "minItems": 14,
+      "type": "array"
+    },
+    "generator_version": {
+      "const": 1
+    },
+    "promotion_units": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_level": {
+            "enum": [
+              "unsupported"
+            ],
+            "maxLength": 11,
+            "minLength": 1,
+            "type": "string"
+          },
+          "contract": {
+            "type": "object"
+          },
+          "delivery_state": {
+            "enum": [
+              "absent"
+            ],
+            "maxLength": 6,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "enum": [
+              "H-NPU-FLM-CONFLICT-XDNA2-v1",
+              "H-ROCM-ADM-GTT-HOST-v1",
+              "H-ROCM-PRE-GTT-HOST-v1",
+              "H-ROCM-REC-GTT-HOST-OWN-v1",
+              "H-ROCM-STA-GTT-HOST-v1",
+              "H-VULKAN-ADM-GTT-HOST-v1",
+              "H-VULKAN-PRE-GTT-HOST-v1",
+              "H-VULKAN-REC-GTT-HOST-OWN-v1",
+              "H-VULKAN-STA-GTT-HOST-v1",
+              "W-XDNA2-FLM-NPU-EMBEDDING-ADM-v1",
+              "W-XDNA2-FLM-NPU-EMBEDDING-LFR-v1",
+              "W-XDNA2-FLM-NPU-EMBEDDING-PIN-v1",
+              "W-XDNA2-FLM-NPU-EMBEDDING-REC-v1",
+              "W-XDNA2-FLM-NPU-EMBEDDING-STA-v1",
+              "W-XDNA2-FLM-NPU-EMBEDDING-UNL-v1",
+              "W-XDNA2-FLM-NPU-LLM-ADM-v1",
+              "W-XDNA2-FLM-NPU-LLM-LFR-v1",
+              "W-XDNA2-FLM-NPU-LLM-PIN-v1",
+              "W-XDNA2-FLM-NPU-LLM-REC-v1",
+              "W-XDNA2-FLM-NPU-LLM-STA-v1",
+              "W-XDNA2-FLM-NPU-LLM-UNL-v1",
+              "W-XDNA2-FLM-NPU-TRANSCRIPTION-ADM-v1",
+              "W-XDNA2-FLM-NPU-TRANSCRIPTION-LFR-v1",
+              "W-XDNA2-FLM-NPU-TRANSCRIPTION-PIN-v1",
+              "W-XDNA2-FLM-NPU-TRANSCRIPTION-REC-v1",
+              "W-XDNA2-FLM-NPU-TRANSCRIPTION-STA-v1",
+              "W-XDNA2-FLM-NPU-TRANSCRIPTION-UNL-v1",
+              "W-XDNA2-RYZENAI-LLM-NPU-LLM-ADM-v1",
+              "W-XDNA2-RYZENAI-LLM-NPU-LLM-LFR-v1",
+              "W-XDNA2-RYZENAI-LLM-NPU-LLM-PIN-v1",
+              "W-XDNA2-RYZENAI-LLM-NPU-LLM-REC-v1",
+              "W-XDNA2-RYZENAI-LLM-NPU-LLM-STA-v1",
+              "W-XDNA2-RYZENAI-LLM-NPU-LLM-UNL-v1",
+              "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-ADM-v1",
+              "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-LFR-v1",
+              "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-PIN-v1",
+              "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-REC-v1",
+              "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-STA-v1",
+              "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-UNL-v1"
+            ],
+            "maxLength": 43,
+            "minLength": 1,
+            "type": "string"
+          },
+          "unit_kind": {
+            "enum": [
+              "compatibility_contract",
+              "exact_cell",
+              "later_runtime"
+            ],
+            "maxLength": 22,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "unit_kind",
+          "capability_level",
+          "delivery_state",
+          "contract"
+        ],
+        "type": "object"
+      },
+      "maxItems": 39,
+      "minItems": 39,
+      "type": "array"
+    },
+    "schema": {
+      "const": "residency.profiles/1.0"
+    }
+  },
+  "required": [
+    "schema",
+    "generator_version",
+    "promotion_units",
+    "fallbacks",
+    "contract_registry"
+  ],
+  "title": "Residency Profiles",
+  "type": "object"
+}

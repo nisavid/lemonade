@@ -1,0 +1,177 @@
+{
+  "$defs": {},
+  "$id": "residency.staged_import_session_record/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "terminal"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "required": [
+          "terminal_result",
+          "terminal_at",
+          "expires_at"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "terminal_result": {
+            "const": "quarantined"
+          }
+        },
+        "required": [
+          "terminal_result"
+        ]
+      },
+      "then": {
+        "required": [
+          "artifact_quarantine_id"
+        ]
+      }
+    }
+  ],
+  "properties": {
+    "absolute_deadline": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "accepted_bytes": {
+      "maximum": 18446744073709551615,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "accepted_manifest_entries": {
+      "maximum": 18446744073709551615,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "artifact_quarantine_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[\\u0021-\\u007e]+$",
+      "type": "string",
+      "x-max-utf8-bytes": 128
+    },
+    "canonical_target_model_id": {
+      "maxLength": 512,
+      "minLength": 1,
+      "type": "string",
+      "x-max-utf8-bytes": 512
+    },
+    "etag": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^\"[^\"\\u0000-\\u001f]{1,124}\"$",
+      "type": "string",
+      "x-strong-etag": true
+    },
+    "expires_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "import_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[\\u0021-\\u007e]+$",
+      "type": "string",
+      "x-max-utf8-bytes": 128
+    },
+    "inactivity_deadline": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "next_expected_ordinals": {
+      "items": {
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "maxItems": 4096,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "record_generation": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[\\u0021-\\u007e]+$",
+      "type": "string",
+      "x-max-utf8-bytes": 128
+    },
+    "schema": {
+      "const": "residency.explanation/1.0"
+    },
+    "source_model_id": {
+      "maxLength": 512,
+      "minLength": 1,
+      "type": "string",
+      "x-max-utf8-bytes": 512
+    },
+    "state": {
+      "enum": [
+        "prepared",
+        "uploading",
+        "verifying",
+        "publishing",
+        "closing",
+        "terminal"
+      ],
+      "maxLength": 10,
+      "minLength": 1,
+      "type": "string"
+    },
+    "terminal_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "terminal_result": {
+      "enum": [
+        "committed",
+        "aborted",
+        "expired",
+        "failed",
+        "quarantined"
+      ],
+      "maxLength": 11,
+      "minLength": 1,
+      "type": "string"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "writer_status": {
+      "$ref": "../residency.artifact_writer_job_revision/1.0"
+    }
+  },
+  "required": [
+    "schema",
+    "import_id",
+    "canonical_target_model_id",
+    "record_generation",
+    "state",
+    "accepted_manifest_entries",
+    "accepted_bytes",
+    "next_expected_ordinals",
+    "inactivity_deadline",
+    "absolute_deadline",
+    "updated_at",
+    "etag"
+  ],
+  "title": "Staged Import Session Record",
+  "type": "object",
+  "x-residency-required-keywords": [
+    "x-max-utf8-bytes",
+    "x-nfc"
+  ]
+}

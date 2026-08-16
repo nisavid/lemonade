@@ -1,0 +1,144 @@
+{
+  "$defs": {
+    "reason": {
+      "allOf": [
+        {
+          "$ref": "../residency.reason/1.0"
+        },
+        {
+          "properties": {
+            "code": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "residency_legacy_admin_key_fallback_deprecated",
+                    "residency_unmanaged_artifact_compatibility"
+                  ]
+                },
+                {
+                  "not": {
+                    "enum": [
+                      "residency_operation_succeeded",
+                      "residency_persistence_failed",
+                      "residency_explanation_storage_unavailable",
+                      "residency_authority_persistence_failed",
+                      "residency_authority_storage_unavailable",
+                      "residency_authority_unavailable",
+                      "residency_authority_degraded",
+                      "residency_recovery_required",
+                      "residency_startup_rollback_incomplete",
+                      "residency_service_termination_incomplete",
+                      "residency_dead_backend_prune_incomplete",
+                      "residency_recovery_not_ready",
+                      "residency_quarantined",
+                      "residency_cancelled",
+                      "residency_plan_invalidated",
+                      "residency_coordinator_source_changed",
+                      "residency_footprint_confidence_insufficient",
+                      "residency_capability_unsupported",
+                      "residency_evidence_missing",
+                      "residency_evidence_stale",
+                      "residency_evidence_unhealthy",
+                      "residency_evidence_incoherent",
+                      "residency_evidence_superseded",
+                      "slots_pinned_error",
+                      "residency_protected_pinned",
+                      "residency_protected_in_use",
+                      "residency_force_fence_failed",
+                      "residency_artifact_writer_fenced",
+                      "residency_model_identity_fenced",
+                      "router_residency_conflict",
+                      "residency_unconditional_pin_write_deprecated",
+                      "residency_unmanaged_artifact_compatibility",
+                      "residency_idempotency_conflict",
+                      "residency_capacity_insufficient",
+                      "residency_limit_exceeded_after_reconfiguration",
+                      "residency_count_limit_exceeded_after_reconfiguration",
+                      "residency_plan_infeasible",
+                      "residency_startup_set_infeasible",
+                      "residency_planning_deadline_exceeded",
+                      "residency_operation_budget_exhausted",
+                      "residency_attempt_budget_exhausted",
+                      "residency_critical_pressure_refusal",
+                      "residency_pressure_unresolved",
+                      "residency_action_failed",
+                      "residency_partial_outcome",
+                      "residency_artifact_acquisition_failed",
+                      "residency_artifact_writer_failed",
+                      "residency_artifact_writer_superseded_by_model_delete",
+                      "residency_artifact_writer_quiescence_failed",
+                      "residency_model_artifact_delete_failed",
+                      "residency_model_identity_delete_failed",
+                      "residency_precondition_required",
+                      "residency_precondition_failed",
+                      "residency_idempotency_key_required",
+                      "residency_deprecated_configuration_key",
+                      "residency_configuration_scope_mismatch",
+                      "residency_configuration_conflict",
+                      "residency_pin_migration_conflict",
+                      "residency_legacy_memory_limit_ambiguous",
+                      "residency_legacy_eviction_options_require_review",
+                      "residency_legacy_gtt_hint_ignored",
+                      "model_not_found",
+                      "residency_reserved_registration_name",
+                      "residency_model_identity_conflict",
+                      "residency_model_identity_source_ineligible",
+                      "residency_model_replacement_requires_release",
+                      "model_not_loaded_or_loading",
+                      "residency_resident_unavailable",
+                      "residency_operation_not_found",
+                      "residency_operation_expired",
+                      "residency_coordinator_expired",
+                      "residency_artifact_quarantine_not_found",
+                      "residency_artifact_quarantine_expired",
+                      "residency_artifact_import_not_found",
+                      "residency_artifact_import_expired",
+                      "residency_artifact_import_conflict",
+                      "residency_artifact_import_invalid",
+                      "residency_artifact_import_storage_unavailable",
+                      "residency_artifact_import_failed",
+                      "residency_artifact_import_cleanup_incomplete",
+                      "residency_fallback_selected",
+                      "residency_legacy_admin_key_fallback_deprecated",
+                      "residency_status_capability_required",
+                      "residency_status_capability_invalid",
+                      "residency_status_capability_expired",
+                      "residency_status_authorization_forbidden",
+                      "residency_operation_rate_limited"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        }
+      ],
+      "x-reason-envelope": "response_diagnostic"
+    }
+  },
+  "$id": "residency.response_diagnostic/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "reason": {
+      "$ref": "#/$defs/reason"
+    },
+    "schema": {
+      "const": "residency.explanation/1.0"
+    }
+  },
+  "required": [
+    "schema",
+    "reason"
+  ],
+  "title": "Response Diagnostic",
+  "type": "object",
+  "x-residency-required-keywords": [
+    "x-max-utf8-bytes",
+    "x-nfc"
+  ]
+}

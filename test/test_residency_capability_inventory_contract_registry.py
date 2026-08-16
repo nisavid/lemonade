@@ -1,0 +1,156 @@
+"""Closed generated-contract registry tests through the inventory CLI."""
+
+from __future__ import annotations
+
+from residency_capability_inventory_cli_case import ResidencyCapabilityInventoryCliCase
+
+
+class ResidencyCapabilityInventoryContractRegistryTest(
+    ResidencyCapabilityInventoryCliCase
+):
+    """Exercise the schema-v7 contract registry through the public CLI."""
+
+    def test_schema_v7_closes_the_generated_contract_registries(self) -> None:
+        self.assertEqual(self.inventory["schema_version"], 7)
+        registry = self.inventory["contract_registry"]
+        self.assertEqual(registry["schema"], "residency.explanation/1.0")
+        self.assertEqual(len(registry["operation_registry"]["families"]), 2)
+        self.assertEqual(len(registry["operation_registry"]["aliases"]), 12)
+        self.assertEqual(len(registry["reason_envelope_registry"]), 8)
+        self.assertEqual(len(registry["request_context_registry"]), 37)
+        self.assertEqual(len(registry["request_stage_registry"]), 7)
+        self.assertEqual(len(registry["reason_registry"]), 87)
+        self.assertEqual(len(registry["presentation_registry"]), 27)
+        self.assertEqual(len(registry["detail_schema_registry"]), 15)
+        self.assertEqual(len(registry["schema_registry"]), 12)
+
+        result = self._run_cli()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_reason_envelope_rejects_unknown_membership(self) -> None:
+        def add_unknown(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            registry["reason_envelope_registry"]["request_error"][
+                "reason_codes"
+            ].append("residency_unknown")
+
+        self._replace_inventory(add_unknown)
+
+        self.assert_invalid(self._run_cli(), "membership is not closed")
+
+    def test_reason_envelope_rejects_duplicate_membership(self) -> None:
+        def duplicate_reason(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            codes = registry["reason_envelope_registry"]["operation_revision"][
+                "reason_codes"
+            ]
+            codes.append(codes[0])
+
+        self._replace_inventory(duplicate_reason)
+
+        self.assert_invalid(self._run_cli(), "contains duplicate values")
+
+    def test_reason_row_must_match_reverse_envelope_membership(self) -> None:
+        def drop_context(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            del registry["reason_registry"]["residency_capability_unsupported"][
+                "envelopes"
+            ]["coordinator_step_result"]
+
+        self._replace_inventory(drop_context)
+
+        self.assert_invalid(self._run_cli(), "envelope join disagrees")
+
+    def test_operation_reason_rejects_illegal_terminal_state(self) -> None:
+        def use_null_terminal_outcome(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            registry["reason_registry"]["residency_operation_succeeded"]["envelopes"][
+                "operation_revision"
+            ]["contexts"][0]["legal_states"] = ["terminal:null:primary"]
+
+        self._replace_inventory(use_null_terminal_outcome)
+
+        self.assert_invalid(self._run_cli(), "invalid terminal outcome")
+
+    def test_contextual_http_status_must_be_registered(self) -> None:
+        def use_invalid_status(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            registry["reason_registry"]["residency_precondition_required"]["envelopes"][
+                "request_error"
+            ]["http_status"] = 700
+
+        self._replace_inventory(use_invalid_status)
+
+        self.assert_invalid(self._run_cli(), "registered HTTP status")
+
+    def test_presentation_rejects_bidi_controls(self) -> None:
+        def add_bidi_control(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            registry["presentation_registry"]["p_success"][
+                "title"
+            ] = "Operation \u202esucceeded"
+
+        self._replace_inventory(add_bidi_control)
+
+        self.assert_invalid(self._run_cli(), "contains unsafe controls")
+
+    def test_detail_schema_fields_must_close_required_and_optional_lists(self) -> None:
+        def drop_detail_field(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            del registry["detail_schema_registry"]["d_authority"]["fields"][
+                "failure_class"
+            ]
+
+        self._replace_inventory(drop_detail_field)
+
+        self.assert_invalid(self._run_cli(), "field closure disagrees")
+
+    def test_schema_enum_ref_must_resolve(self) -> None:
+        def use_unknown_ref(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            registry["schema_registry"]["operation_revision"]["fields"]["phase"][
+                "ref"
+            ] = "operation_registry.unknown_phases"
+
+        self._replace_inventory(use_unknown_ref)
+
+        self.assert_invalid(self._run_cli(), "unknown registry path")
+
+    def test_schema_conditional_fields_must_resolve(self) -> None:
+        def require_unknown_field(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            registry["schema_registry"]["operation_revision"]["conditionals"][0][
+                "require_nonnull"
+            ].append("unknown_field")
+
+        self._replace_inventory(require_unknown_field)
+
+        self.assert_invalid(self._run_cli(), "unknown schema fields")
+
+    def test_resource_vocabulary_is_closed(self) -> None:
+        def add_writer_state(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            registry["http_auth_registry"]["resource_vocabularies"][
+                "writer_normalized_states"
+            ].append("terminal_unknown")
+
+        self._replace_inventory(add_writer_state)
+
+        self.assert_invalid(self._run_cli(), "resource vocabularies")
+
+    def test_promotion_units_remain_inactive(self) -> None:
+        def raise_capability(inventory: dict[str, object]) -> None:
+            inventory["exact_cells"][0]["capability_level"] = "modeled"
+
+        self._replace_inventory(raise_capability)
+
+        self.assert_invalid(
+            self._run_cli(), "cannot accept capability while delivery is absent"
+        )
+
+
+if __name__ == "__main__":
+    import unittest
+
+    unittest.main()
