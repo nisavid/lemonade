@@ -1,0 +1,22 @@
+{
+  "command": [
+    "python3",
+    "test/residency/contract/test_generated_contract.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "c++",
+      "jsonschema",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-009 residency contract generator is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "5ea4d182e4e853d02f984eab293d9c98cc599c40",
+  "task_id": "TASK-009"
+}
