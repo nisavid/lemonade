@@ -191,7 +191,7 @@ The generated catalog must report every unit as `delivery_state=absent`; no new 
 | TASK-014 | TASK-013 | Prototype crash-durable root publication and non-PID process containment/ownership on POSIX and Windows, including descendant/job membership and verified termination. | ✅ | 2026-08-16 |
 | TASK-015 | TASK-013 | Prototype causal GTT, host-memory, process, cgroup, and device attribution on Hatchery; record every unavailable projection as unknown rather than zero. | ✅ | 2026-08-16 |
 | TASK-016 | TASK-013 | Prototype the pure-offline llama.cpp/ROCm sizing path and its own complete operation manifest; prove no backend spawn, device-context initialization, or unreserved driver effect. | ✅ | 2026-08-16 |
-| TASK-017 | TASK-013 | Prototype verified soft release for the available llama.cpp mechanisms, including causal identity, physical release, ledger reconciliation, and unsupported-mechanism fallback. | | |
+| TASK-017 | TASK-013 | Prototype verified soft release for the available llama.cpp mechanisms, including causal identity, physical release, ledger reconciliation, and unsupported-mechanism fallback. | ✅ | 2026-08-16 |
 | TASK-018 | TASK-013 | Prototype FLM service membership and ownership boundaries without claiming Windows participant-cell or physical NPU authority. | | |
 
 Exit gate:
