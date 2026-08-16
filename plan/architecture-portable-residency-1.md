@@ -104,7 +104,7 @@ Every implementation task after the TASK-005 bootstrap that changes code or gene
 |---|---|
 | TASK-001–TASK-004 | `.github/workflows/docs_and_style.yml`; `docs/agents/{architecture-map,research-map}.md`; the portable-residency inventory, matrix, and campaign documents; inventory validator/source-closure modules and public-CLI tests; the reviewed planning checkpoint's exact ref-update and validation records. Classified only as pre-handoff research refresh. |
 | TASK-005–TASK-007, TASK-093, TASK-108–TASK-109 | `plan/portable-residency-implementation-base.json`; content-addressed per-task bundles under `plan/evidence/red-fixtures/`; `tools/validate_residency_implementation_handoff.py`; `test/test_residency_implementation_handoff.py`; exact implementation-base scout outputs and created GitHub issue IDs recorded in the manifest. |
-| TASK-008–TASK-013 | `tools/generate_residency_contract.py`; `src/cpp/resources/residency_profiles.json`; `src/cpp/include/lemon/residency/{types,generated_contract,catalog}.h`; `src/cpp/server/residency/{generated_contract,catalog,explanations}.cpp`; `docs/api/schemas/residency/`; `test/residency/contract/`. |
+| TASK-008–TASK-013 | `CMakeLists.txt`; `tools/generate_residency_contract.py`; `src/cpp/resources/residency_profiles.json`; `src/cpp/include/lemon/residency/{types,generated_contract,catalog}.h`; `src/cpp/server/residency/{generated_contract,catalog,explanations}.cpp`; `docs/api/schemas/residency/`; `test/cpp/test_residency_contract_types.cpp`; `test/residency/contract/`. |
 | TASK-014–TASK-018 | `test/residency/prototypes/`; content-addressed results under `docs/research/residency-prototype-results/`; no production authority. |
 | TASK-019–TASK-025, TASK-094–TASK-095 | `src/cpp/include/lemon/residency/{journal,claims,recovery,recovery_store}.h`; `src/cpp/server/residency/{journal,claims,recovery,recovery_store}.cpp`; `src/cpp/server/residency/platform/`; `test/residency/recovery/`. |
 | TASK-026–TASK-030 | `src/cpp/include/lemon/residency/provider.h`; `src/cpp/server/residency/providers/{system_provider,backend_provider}.cpp`; `test/residency/{fakes,providers}/`. |
@@ -164,7 +164,7 @@ The exit record includes both immutable SHAs and the created issue IDs. No runti
 
 | Task | Depends on | Description | Completed | Date |
 |---|---|---|---|---|
-| TASK-008 | TASK-007 | Define closed promotion-unit, operation, constraint, capability, delivery, effective-mode, footprint-confidence, reason, phase, outcome, fallback, and schema types. Unknown values deserialize as non-authorizing results. | | |
+| TASK-008 | TASK-007 | Define closed promotion-unit, operation, constraint, capability, delivery, effective-mode, footprint-confidence, signal-evidence, reason, phase, outcome, fallback, and schema types in `lemon::residency`; register the public type seam as `ResidencyContractTypes`. Unknown values deserialize as non-authorizing results. | ✅ | 2026-08-15 |
 | TASK-009 | TASK-008 | Add `tools/generate_residency_contract.py` to generate the catalog resource, C++ bindings, operation/reason/presentation/retention/HTTP/auth registries, JSON schemas, and byte-golden fixtures from one source. | | |
 | TASK-010 | TASK-009 | Implement exact catalog parsing and selector resolution; reject missing, duplicate, ambiguous, precedence-incomparable, digest-mismatched, or unsupported matches. | | |
 | TASK-011 | TASK-009 | Implement the immutable explanation store and bounded unknown-minor rendering from generated types; explanations remain projections rather than lifecycle or claim authority. | | |

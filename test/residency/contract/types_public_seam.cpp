@@ -1,0 +1,315 @@
+#include "lemon/residency/types.h"
+
+#include <cstdlib>
+#include <iostream>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <type_traits>
+
+namespace {
+
+using namespace lemon::residency;
+
+void require(bool condition, std::string_view message) {
+    if (!condition) {
+        std::cerr << "FAIL: " << message << '\n';
+        std::exit(1);
+    }
+}
+
+template <typename Enum, typename Decoder>
+void require_round_trip(Decoder decoder, Enum expected, std::string_view wire) {
+    const auto decoded = decoder(wire);
+    require(decoded.is_known(), "accepted wire value decoded as unknown");
+    require(decoded.known_value() != nullptr, "known value is unavailable");
+    require(*decoded.known_value() == expected, "accepted wire value decoded incorrectly");
+    require(wire_name(expected) == wire, "accepted value did not round-trip");
+}
+
+template <typename Decoder>
+void require_unknown(Decoder decoder, std::string_view wire) {
+    const auto decoded = decoder(wire);
+    require(!decoded.is_known(), "future wire value became authorizing");
+    require(decoded.known_value() == nullptr, "unknown wire value exposed a known value");
+    require(decoded.unknown_value() != nullptr, "unknown wire value was discarded");
+    require(decoded.unknown_value()->token == wire, "unknown wire spelling was not preserved");
+}
+
+}
+
+int main() {
+    static_assert(!std::is_same_v<PromotionUnitId, KnownReasonCode>);
+    static_assert(!std::is_same_v<KnownReasonCode, FallbackId>);
+    static_assert(!std::is_same_v<FallbackId, SchemaType>);
+    static_assert(!std::is_constructible_v<PromotionUnitId, std::string>);
+    static_assert(!std::is_default_constructible_v<DecodedValue<EffectiveMode>>);
+    static_assert(!std::is_convertible_v<DecodedValue<EffectiveMode>, EffectiveMode>);
+    static_assert(!std::is_convertible_v<DecodedValue<EffectiveMode>, bool>);
+
+    require_round_trip(decode_promotion_unit_kind, PromotionUnitKind::ExactCell, "exact_cell");
+    require_round_trip(
+        decode_promotion_unit_kind,
+        PromotionUnitKind::CompatibilityContract,
+        "compatibility_contract");
+    require_round_trip(
+        decode_promotion_unit_kind, PromotionUnitKind::LaterRuntime, "later_runtime");
+    require_unknown(decode_promotion_unit_kind, "future_unit_kind");
+
+    require_round_trip(
+        decode_operation_family, OperationFamily::ResourceLifecycle, "resource_lifecycle");
+    require_round_trip(decode_operation_family, OperationFamily::ResidentState, "resident_state");
+
+    require_round_trip(decode_operation_template, OperationTemplate::Adm, "ADM");
+    require_round_trip(decode_operation_template, OperationTemplate::Lfr, "LFR");
+    require_round_trip(decode_operation_template, OperationTemplate::Pre, "PRE");
+    require_round_trip(decode_operation_template, OperationTemplate::Sta, "STA");
+    require_round_trip(decode_operation_template, OperationTemplate::Rec, "REC");
+    require_round_trip(decode_operation_template, OperationTemplate::Unl, "UNL");
+    require_round_trip(decode_operation_template, OperationTemplate::Pin, "PIN");
+    require_round_trip(decode_operation_template, OperationTemplate::Npc, "NPC");
+
+    require_round_trip(decode_operation_kind, OperationKind::Admission, "admission");
+    require_round_trip(decode_operation_kind, OperationKind::ExplicitUnload, "explicit_unload");
+    require_round_trip(decode_operation_kind, OperationKind::ForceUnload, "force_unload");
+    require_round_trip(
+        decode_operation_kind, OperationKind::PressureReclamation, "pressure_reclamation");
+    require_round_trip(decode_operation_kind, OperationKind::StartupLoad, "startup_load");
+    require_round_trip(
+        decode_operation_kind, OperationKind::ServiceTermination, "service_termination");
+    require_round_trip(
+        decode_operation_kind, OperationKind::DeadBackendPruning, "dead_backend_pruning");
+    require_round_trip(
+        decode_operation_kind,
+        OperationKind::SameEpochRecoveryCleanup,
+        "same_epoch_recovery_cleanup");
+    require_round_trip(
+        decode_operation_kind,
+        OperationKind::PriorEpochOwnerCleanup,
+        "prior_epoch_owner_cleanup");
+    require_round_trip(
+        decode_operation_kind,
+        OperationKind::ArtifactScopeRecoveryCleanup,
+        "artifact_scope_recovery_cleanup");
+    require_round_trip(
+        decode_operation_kind, OperationKind::SavedPinMutation, "saved_pin_mutation");
+    require_round_trip(
+        decode_operation_kind, OperationKind::RuntimePinMutation, "runtime_pin_mutation");
+    require_round_trip(decode_operation_kind, OperationKind::LegacyPinBatch, "legacy_pin_batch");
+    require_round_trip(
+        decode_operation_kind,
+        OperationKind::ResidentStateRecoveryCleanup,
+        "resident_state_recovery_cleanup");
+
+    require_round_trip(
+        decode_constraint_kind, ConstraintKind::GpuSharedResidency, "gpu_shared_residency");
+    require_round_trip(
+        decode_constraint_kind,
+        ConstraintKind::GpuProviderResolvedCapacity,
+        "gpu_provider_resolved_capacity");
+    require_round_trip(
+        decode_constraint_kind,
+        ConstraintKind::HostMemAvailableFloor,
+        "host_memavailable_floor");
+    require_round_trip(
+        decode_constraint_kind,
+        ConstraintKind::HostEffectsProviderResolved,
+        "host_effects_provider_resolved");
+    require_round_trip(
+        decode_constraint_kind, ConstraintKind::ModelTypePool, "model_type_pool");
+    require_round_trip(decode_constraint_kind, ConstraintKind::Ownership, "ownership");
+    require_round_trip(decode_constraint_kind, ConstraintKind::FlmTypeSlot, "flm_type_slot");
+    require_round_trip(
+        decode_constraint_kind, ConstraintKind::NpuCrossFamily, "npu_cross_family");
+    require_round_trip(decode_constraint_kind, ConstraintKind::NpuExclusive, "npu_exclusive");
+
+    require_round_trip(
+        decode_capability_level, CapabilityLevel::Unsupported, "unsupported");
+    require_round_trip(
+        decode_capability_level, CapabilityLevel::FallbackOnly, "fallback_only");
+    require_round_trip(decode_capability_level, CapabilityLevel::Modeled, "modeled");
+    require_round_trip(decode_capability_level, CapabilityLevel::Validated, "validated");
+
+    require_round_trip(decode_delivery_state, DeliveryState::Absent, "absent");
+    require_round_trip(
+        decode_delivery_state, DeliveryState::ImplementedUnverified, "implemented_unverified");
+    require_round_trip(
+        decode_delivery_state, DeliveryState::ReleaseVerified, "release_verified");
+
+    require_round_trip(
+        decode_effective_mode, EffectiveMode::CapacityPlanned, "capacity_planned");
+    require_round_trip(
+        decode_effective_mode, EffectiveMode::BackendEnforced, "backend_enforced");
+    require_round_trip(decode_effective_mode, EffectiveMode::CountLimited, "count_limited");
+    require_round_trip(decode_effective_mode, EffectiveMode::Refused, "refused");
+    require_round_trip(
+        decode_effective_mode,
+        EffectiveMode::AutomaticReclamation,
+        "automatic_reclamation");
+    require_round_trip(decode_effective_mode, EffectiveMode::ReportOnly, "report_only");
+    require_round_trip(decode_effective_mode, EffectiveMode::Disabled, "disabled");
+    require_round_trip(
+        decode_effective_mode, EffectiveMode::AutomaticGrouped, "automatic_grouped");
+    require_round_trip(decode_effective_mode, EffectiveMode::Blocked, "blocked");
+    require_round_trip(decode_effective_mode, EffectiveMode::Ready, "ready");
+    require_round_trip(decode_effective_mode, EffectiveMode::CleanupOnly, "cleanup_only");
+
+    require_round_trip(
+        decode_footprint_confidence,
+        FootprintConfidence::EnforcedComplete,
+        "enforced_complete");
+    require_round_trip(
+        decode_footprint_confidence,
+        FootprintConfidence::ValidatedPredictor,
+        "validated_predictor");
+    require_round_trip(
+        decode_footprint_confidence,
+        FootprintConfidence::CalibratedInstance,
+        "calibrated_instance");
+    require_round_trip(
+        decode_footprint_confidence, FootprintConfidence::Incomplete, "incomplete");
+    require_round_trip(decode_footprint_confidence, FootprintConfidence::Unknown, "unknown");
+
+    require_round_trip(decode_signal_evidence_state, SignalEvidenceState::Valid, "valid");
+    require_round_trip(decode_signal_evidence_state, SignalEvidenceState::Missing, "missing");
+    require_round_trip(decode_signal_evidence_state, SignalEvidenceState::Stale, "stale");
+    require_round_trip(decode_signal_evidence_state, SignalEvidenceState::Unhealthy, "unhealthy");
+    require_round_trip(
+        decode_signal_evidence_state, SignalEvidenceState::Incoherent, "incoherent");
+    require_round_trip(
+        decode_signal_evidence_state, SignalEvidenceState::Superseded, "superseded");
+
+    require_round_trip(decode_operation_phase, OperationPhase::Evaluating, "evaluating");
+    require_round_trip(
+        decode_operation_phase, OperationPhase::WaitingForEvidence, "waiting_for_evidence");
+    require_round_trip(
+        decode_operation_phase, OperationPhase::WaitingForInUse, "waiting_for_in_use");
+    require_round_trip(decode_operation_phase, OperationPhase::Reserved, "reserved");
+    require_round_trip(decode_operation_phase, OperationPhase::Executing, "executing");
+    require_round_trip(decode_operation_phase, OperationPhase::Closing, "closing");
+    require_round_trip(
+        decode_operation_phase, OperationPhase::RecoveryRequired, "recovery_required");
+    require_round_trip(decode_operation_phase, OperationPhase::Terminal, "terminal");
+
+    require_round_trip(decode_terminal_outcome, TerminalOutcome::Succeeded, "succeeded");
+    require_round_trip(decode_terminal_outcome, TerminalOutcome::Refused, "refused");
+    require_round_trip(decode_terminal_outcome, TerminalOutcome::Failed, "failed");
+    require_round_trip(decode_terminal_outcome, TerminalOutcome::Cancelled, "cancelled");
+    require_round_trip(
+        decode_terminal_outcome, TerminalOutcome::Superseded, "superseded");
+    require_round_trip(
+        decode_terminal_outcome,
+        TerminalOutcome::PartiallySucceeded,
+        "partially_succeeded");
+    require_round_trip(
+        decode_terminal_outcome, TerminalOutcome::Quarantined, "quarantined");
+
+    require_unknown(decode_operation_family, "future_family");
+    require_unknown(decode_operation_template, "FUTURE");
+    require_unknown(decode_operation_kind, "future_operation");
+    require_unknown(decode_constraint_kind, "future_constraint");
+    require_unknown(decode_capability_level, "Validated");
+    require_unknown(decode_delivery_state, "future_delivery");
+    require_unknown(decode_effective_mode, "fallback");
+    require_unknown(decode_effective_mode, "future_mode");
+    require_unknown(decode_footprint_confidence, "future_confidence");
+    require_unknown(decode_signal_evidence_state, "future_evidence");
+    require_unknown(decode_operation_phase, "future_phase");
+    require_unknown(decode_terminal_outcome, "future_outcome");
+
+    std::string owned_wire = "future_owned_mode";
+    const auto owned_unknown = decode_effective_mode(owned_wire);
+    owned_wire.assign("mutated");
+    require(
+        owned_unknown.unknown_value()->token == "future_owned_mode",
+        "unknown wire value retained a borrowed view");
+    require(
+        wire_name(static_cast<EffectiveMode>(255)).empty(),
+        "forged enum serialized as a known wire value");
+
+    const EffectiveModeSelection admission{
+        EffectiveModeDomain::Admission,
+        DecodedValue<EffectiveMode>::known(EffectiveMode::CapacityPlanned),
+        std::nullopt};
+    require(admission.is_structurally_valid(), "admission mode was rejected");
+    require(!admission.fallback_used(), "fallback use was invented");
+
+    const EffectiveModeSelection wrong_domain{
+        EffectiveModeDomain::Pressure,
+        DecodedValue<EffectiveMode>::known(EffectiveMode::CapacityPlanned),
+        std::nullopt};
+    require(wrong_domain.is_structurally_valid() == false, "cross-domain mode was accepted");
+
+    const EffectiveModeSelection unknown_fallback{
+        EffectiveModeDomain::Pressure,
+        DecodedValue<EffectiveMode>::known(EffectiveMode::ReportOnly),
+        DecodedValue<FallbackId>::unknown("future_fallback")};
+    require(unknown_fallback.fallback_used(), "fallback association was discarded");
+    require(
+        !unknown_fallback.is_structurally_valid(),
+        "unknown fallback identifier became structurally valid");
+
+    require(
+        operation_state_is_valid(
+            OperationFamily::ResourceLifecycle, OperationPhase::Executing, std::nullopt),
+        "nonterminal state without outcome was rejected");
+    require(
+        !operation_state_is_valid(
+            OperationFamily::ResourceLifecycle,
+            OperationPhase::Executing,
+            TerminalOutcome::Succeeded),
+        "nonterminal state accepted an outcome");
+    require(
+        !operation_state_is_valid(
+            OperationFamily::ResourceLifecycle, OperationPhase::Terminal, std::nullopt),
+        "terminal state accepted a missing outcome");
+    require(
+        operation_state_is_valid(
+            OperationFamily::ResourceLifecycle,
+            OperationPhase::Terminal,
+            TerminalOutcome::Quarantined),
+        "resource lifecycle rejected quarantined outcome");
+    require(
+        !operation_state_is_valid(
+            OperationFamily::ResidentState,
+            OperationPhase::Terminal,
+            TerminalOutcome::Quarantined),
+        "resident-state operation accepted quarantined outcome");
+
+    const auto unknown_reason = ReasonCode::unknown("future_reason");
+    require(!unknown_reason.is_known(), "unknown reason became registered");
+    require(
+        unknown_reason.unknown_value()->token == "future_reason",
+        "unknown reason spelling was not preserved");
+
+    require(
+        classify_schema_version({1, 2}, {1, 2}, SchemaUse::Authority) ==
+            SchemaCompatibility::Exact,
+        "exact schema version was not accepted");
+    require(
+        classify_schema_version({1, 2}, {1, 3}, SchemaUse::Projection) ==
+            SchemaCompatibility::ProjectionOnly,
+        "explicit newer-minor projection was not bounded");
+    require(
+        classify_schema_version({1, 2}, {1, 3}, SchemaUse::Authority) ==
+            SchemaCompatibility::Unsupported,
+        "newer minor authorized without projection policy");
+    require(
+        classify_schema_version({1, 2}, {1, 1}, SchemaUse::Projection) ==
+            SchemaCompatibility::Unsupported,
+        "older schema minor became compatible implicitly");
+    require(
+        classify_schema_version({1, 2}, {2, 0}, SchemaUse::Projection) ==
+            SchemaCompatibility::Unsupported,
+        "unknown schema major became authorizing");
+    require(
+        classify_schema_version({1, 2}, {1, 2}, static_cast<SchemaUse>(255)) ==
+            SchemaCompatibility::Unsupported,
+        "unknown schema use became authorizing");
+
+    const SchemaRef unknown_schema{
+        DecodedValue<SchemaType>::unknown("future_schema"), SchemaVersion{1, 0}};
+    require(!unknown_schema.type.is_known(), "unknown schema type became registered");
+
+    return 0;
+}

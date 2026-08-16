@@ -2214,6 +2214,23 @@ if(BUILD_TESTING AND EXISTS "${_ARCHIVE_PLATFORM_TEST_SRC}")
     add_cpp_ci_test(ArchivePlatformTest CI ON COMMAND test_archive_platform)
 endif()
 
+set(_RESIDENCY_CONTRACT_TYPES_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_contract_types.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_CONTRACT_TYPES_TEST_SRC}")
+    add_executable(test_residency_contract_types
+        test/cpp/test_residency_contract_types.cpp
+    )
+    target_include_directories(test_residency_contract_types PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+    )
+    add_cpp_ci_test(
+        ResidencyContractTypes
+        CI ON
+        COMMAND test_residency_contract_types
+    )
+endif()
+
 # ProcessManager zombie detection and non-mutating reap contract.
 if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(_PROCESS_MANAGER_TEST_SRC
