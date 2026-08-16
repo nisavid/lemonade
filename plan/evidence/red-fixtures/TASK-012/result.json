@@ -1,0 +1,21 @@
+{
+  "command": [
+    "python3",
+    "-S",
+    "test/residency/contract/test_delivery_public_seam.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-012 residency contract delivery wiring is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "42ddef5ffcf27d4f56e4fd5d431dc1f24aff3405",
+  "task_id": "TASK-012"
+}
