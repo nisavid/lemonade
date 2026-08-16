@@ -1,0 +1,21 @@
+{
+  "command": [
+    "python3",
+    "test/residency/contract/test_explanations_public_seam.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "c++",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-011 residency explanation contract is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "fbd4d3c86d6b88c53c96bcd1eb28a066a03a9a65",
+  "task_id": "TASK-011"
+}
