@@ -1,0 +1,23 @@
+{
+  "command": [
+    "python3",
+    "test/residency/contract/test_catalog_public_seam.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "c++",
+      "mbedcrypto",
+      "nlohmann-json",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-010 residency catalog contract is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "f225f6f59fb9ab57f15d8f4f4b04eeca7c055256",
+  "task_id": "TASK-010"
+}
