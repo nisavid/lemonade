@@ -320,6 +320,333 @@ def _schema_rows(registry: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     }
 
 
+def _nonnegative_integer(value: Any, label: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ContractGenerationError(f"{label} must be a nonnegative integer")
+    return value
+
+
+def _explanation_schema_metadata(
+    registry: Mapping[str, Any],
+    schema_rows: Mapping[str, Mapping[str, Any]],
+    schemas: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    schema_id = _string(registry.get("schema"), "contract_registry.schema")
+    operation_schema = _mapping(
+        schema_rows.get("operation_revision"),
+        "contract_registry.schema_registry.operation_revision",
+    )
+    version = _mapping(
+        operation_schema.get("version"),
+        "contract_registry.schema_registry.operation_revision.version",
+    )
+    _require_exact_keys(version, {"major", "minor"}, "operation revision version")
+    major = _nonnegative_integer(version.get("major"), "operation revision major")
+    minor = _nonnegative_integer(version.get("minor"), "operation revision minor")
+    if not schema_id.endswith(f"/{major}.{minor}"):
+        raise ContractGenerationError(
+            "explanation schema ID and operation revision version differ"
+        )
+
+    operation_fields = _mapping(
+        operation_schema.get("fields"),
+        "contract_registry.schema_registry.operation_revision.fields",
+    )
+    schema_field = _mapping(
+        operation_fields.get("schema"),
+        "contract_registry.schema_registry.operation_revision.fields.schema",
+    )
+    if schema_field.get("value") != schema_id:
+        raise ContractGenerationError(
+            "operation revision schema literal and explanation schema differ"
+        )
+
+    generated_operation_schema = _mapping(
+        schemas.get("operation_revision"), "generated operation revision schema"
+    )
+    properties = _mapping(
+        generated_operation_schema.get("properties"),
+        "generated operation revision schema properties",
+    )
+    reasons = _mapping(
+        properties.get("reasons"),
+        "generated operation revision reasons schema",
+    )
+    max_reasons = _nonnegative_integer(
+        reasons.get("maxItems"), "generated operation revision reason bound"
+    )
+    if max_reasons == 0:
+        raise ContractGenerationError(
+            "generated operation revision reason bound must be positive"
+        )
+    return {
+        "id": schema_id,
+        "major": major,
+        "minor": minor,
+        "max_reasons": max_reasons,
+    }
+
+
+def _operation_retention_policy(registry: Mapping[str, Any]) -> dict[str, Any]:
+    retention_registry = _registry_mapping(registry, "retention_registry")
+    operation = copy.deepcopy(
+        _mapping(retention_registry.get("operation"), "retention_registry.operation")
+    )
+    expected = {
+        "active_expires",
+        "recovery_required_expires",
+        "terminal_detail_seconds",
+        "forgotten_after_terminal_seconds",
+    }
+    _require_exact_keys(operation, expected, "retention_registry.operation")
+    for field in ("active_expires", "recovery_required_expires"):
+        if not isinstance(operation.get(field), bool):
+            raise ContractGenerationError(
+                f"retention_registry.operation.{field} must be a boolean"
+            )
+    for field in (
+        "terminal_detail_seconds",
+        "forgotten_after_terminal_seconds",
+    ):
+        operation[field] = _nonnegative_integer(
+            operation.get(field), f"retention_registry.operation.{field}"
+        )
+    return operation
+
+
+def _operation_family_rows(registry: Mapping[str, Any]) -> list[dict[str, str]]:
+    operation_registry = _registry_mapping(registry, "operation_registry")
+    families = _mapping(
+        operation_registry.get("families"), "operation_registry.families"
+    )
+    aliases = _mapping(operation_registry.get("aliases"), "operation_registry.aliases")
+    all_operations = _string_list(
+        aliases.get("all_operations"), "operation_registry.aliases.all_operations"
+    )
+    family_by_operation: dict[str, str] = {}
+    for family in sorted(families):
+        for operation in _string_list(
+            families[family], f"operation_registry.families.{family}"
+        ):
+            if operation in family_by_operation:
+                raise ContractGenerationError(
+                    f"operation {operation!r} belongs to multiple families"
+                )
+            family_by_operation[operation] = family
+    if set(family_by_operation) != set(all_operations):
+        raise ContractGenerationError(
+            "operation family mapping does not close all operations"
+        )
+    return [
+        {"operation_kind": operation, "family": family_by_operation[operation]}
+        for operation in all_operations
+    ]
+
+
+def _operation_legal_state_row(
+    code: str,
+    operation_kinds: list[str],
+    legal_state: str,
+    state_label: str,
+    secondary_only: bool,
+    known_phases: set[str],
+    known_outcomes: set[str],
+) -> dict[str, Any]:
+    row = {
+        "code": code,
+        "operation_kinds": "|".join(operation_kinds),
+    }
+    if legal_state == "associated_primary_state:secondary":
+        return {
+            **row,
+            "phases": "",
+            "terminal_outcomes": "",
+            "primary": False,
+            "secondary": True,
+            "associated_primary_state": True,
+        }
+    state_parts = legal_state.split(":")
+    if len(state_parts) != 3:
+        raise ContractGenerationError(
+            f"{state_label} must have phase, outcome, and position"
+        )
+    phases = state_parts[0].split("|")
+    outcomes = state_parts[1].split("|")
+    positions = state_parts[2].split("|")
+    if not set(phases).issubset(known_phases):
+        raise ContractGenerationError(f"{state_label} has unknown phases")
+    if not set(outcomes).issubset(known_outcomes | {"null"}):
+        raise ContractGenerationError(f"{state_label} has unknown outcomes")
+    if not set(positions).issubset({"primary", "secondary"}):
+        raise ContractGenerationError(f"{state_label} has unknown positions")
+    primary = "primary" in positions
+    if secondary_only and primary:
+        raise ContractGenerationError(
+            f"{state_label} gives a secondary-only reason primary authority"
+        )
+    return {
+        **row,
+        "phases": "|".join(phases),
+        "terminal_outcomes": "|".join(outcomes),
+        "primary": primary,
+        "secondary": "secondary" in positions,
+        "associated_primary_state": False,
+    }
+
+
+def _operation_reason_context_rows(
+    code: str,
+    envelope: Mapping[str, Any],
+    secondary_only: bool,
+    known_operations: set[str],
+    known_phases: set[str],
+    known_outcomes: set[str],
+) -> list[dict[str, Any]]:
+    contexts: list[dict[str, Any]] = []
+    raw_contexts = _list(
+        envelope.get("contexts"),
+        f"reason_registry.{code}.envelopes.operation_revision.contexts",
+    )
+    for context_index, raw_context in enumerate(raw_contexts):
+        context_label = (
+            f"reason_registry.{code}.envelopes.operation_revision."
+            f"contexts[{context_index}]"
+        )
+        context = _mapping(raw_context, context_label)
+        operation_kinds = _string_list(
+            context.get("operation_kinds"), f"{context_label}.operation_kinds"
+        )
+        if not operation_kinds or not set(operation_kinds).issubset(known_operations):
+            raise ContractGenerationError(
+                f"{context_label}.operation_kinds is not a nonempty known subset"
+            )
+        legal_states = _string_list(
+            context.get("legal_states"), f"{context_label}.legal_states"
+        )
+        if not legal_states:
+            raise ContractGenerationError(
+                f"{context_label}.legal_states must not be empty"
+            )
+        contexts.extend(
+            _operation_legal_state_row(
+                code,
+                operation_kinds,
+                legal_state,
+                f"{context_label}.legal_states[{legal_state!r}]",
+                secondary_only,
+                known_phases,
+                known_outcomes,
+            )
+            for legal_state in legal_states
+        )
+    return contexts
+
+
+def _operation_reason_rows(
+    registry: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    envelope_registry = _registry_mapping(registry, "reason_envelope_registry")
+    operation_envelope = _mapping(
+        envelope_registry.get("operation_revision"),
+        "reason_envelope_registry.operation_revision",
+    )
+    operation_reason_codes = _string_list(
+        operation_envelope.get("reason_codes"),
+        "reason_envelope_registry.operation_revision.reason_codes",
+    )
+    reason_registry = _registry_mapping(registry, "reason_registry")
+    operation_registry = _registry_mapping(registry, "operation_registry")
+    aliases = _mapping(operation_registry.get("aliases"), "operation_registry.aliases")
+    known_operations = set(
+        _string_list(
+            aliases.get("all_operations"),
+            "operation_registry.aliases.all_operations",
+        )
+    )
+    known_phases = set(
+        _string_list(operation_registry.get("phases"), "operation_registry.phases")
+    )
+    known_outcomes = set(
+        _string_list(
+            operation_registry.get("terminal_outcomes"),
+            "operation_registry.terminal_outcomes",
+        )
+    )
+
+    rules: list[dict[str, Any]] = []
+    contexts: list[dict[str, Any]] = []
+    for canonical_rank, code in enumerate(operation_reason_codes):
+        reason = _mapping(reason_registry.get(code), f"reason_registry.{code}")
+        envelopes = _mapping(
+            reason.get("envelopes"), f"reason_registry.{code}.envelopes"
+        )
+        envelope = _mapping(
+            envelopes.get("operation_revision"),
+            f"reason_registry.{code}.envelopes.operation_revision",
+        )
+        priority_band = _nonnegative_integer(
+            envelope.get("priority_band"),
+            f"reason_registry.{code}.envelopes.operation_revision.priority_band",
+        )
+        secondary_only = envelope.get("secondary_only", False)
+        if not isinstance(secondary_only, bool):
+            raise ContractGenerationError(
+                f"reason_registry.{code}.envelopes.operation_revision.secondary_only "
+                "must be a boolean"
+            )
+        rules.append(
+            {
+                "code": code,
+                "canonical_rank": canonical_rank,
+                "priority_band": priority_band,
+                "secondary_only": secondary_only,
+            }
+        )
+        contexts.extend(
+            _operation_reason_context_rows(
+                code,
+                envelope,
+                secondary_only,
+                known_operations,
+                known_phases,
+                known_outcomes,
+            )
+        )
+    return rules, contexts
+
+
+def _presentation_rows(registry: Mapping[str, Any]) -> list[dict[str, str]]:
+    presentations = _registry_mapping(registry, "presentation_registry")
+    rows: list[dict[str, str]] = []
+    for presentation_id in sorted(presentations):
+        presentation = _mapping(
+            presentations[presentation_id],
+            f"presentation_registry.{presentation_id}",
+        )
+        rows.append(
+            {
+                "id": presentation_id,
+                "category_id": _string(
+                    presentation.get("category_id"),
+                    f"presentation_registry.{presentation_id}.category_id",
+                ),
+                "severity": _string(
+                    presentation.get("severity"),
+                    f"presentation_registry.{presentation_id}.severity",
+                ),
+                "title": _string(
+                    presentation.get("title"),
+                    f"presentation_registry.{presentation_id}.title",
+                ),
+                "default_message": _string(
+                    presentation.get("default_message"),
+                    f"presentation_registry.{presentation_id}.default_message",
+                ),
+            }
+        )
+    return rows
+
+
 def _cpp_string(value: str) -> str:
     replacements = {
         "\\": "\\\\",
@@ -339,17 +666,59 @@ def _cpp_array(values: Iterable[str], indent: str = "    ") -> str:
     return "\n".join(f"{indent}{_cpp_string(value)}," for value in values)
 
 
-def _render_cpp_header(packaged_catalog_sha256: str) -> bytes:
+def _render_cpp_header(
+    packaged_catalog_sha256: str,
+    explanation_schema: Mapping[str, Any],
+    operation_retention: Mapping[str, Any],
+) -> bytes:
     return (
         b"#pragma once\n"
         b"\n"
         b'#include "lemon/residency/types.h"\n'
         b"\n"
+        b"#include <cstddef>\n"
+        b"#include <cstdint>\n"
+        b"#include <optional>\n"
         b"#include <string_view>\n"
         b"\n"
         b"namespace lemon::residency {\n"
         b"\n"
         + f"inline constexpr std::string_view kPackagedCatalogSha256 = {_cpp_string(packaged_catalog_sha256)};\n".encode()
+        + f"inline constexpr std::string_view kExplanationSchemaId = {_cpp_string(_string(explanation_schema.get('id'), 'explanation schema ID'))};\n".encode()
+        + "inline constexpr SchemaVersion kExplanationSchemaVersion{{{}, {}}};\n".format(
+            _nonnegative_integer(
+                explanation_schema.get("major"), "explanation schema major"
+            ),
+            _nonnegative_integer(
+                explanation_schema.get("minor"), "explanation schema minor"
+            ),
+        ).encode()
+        + "inline constexpr std::size_t kMaxExplanationReasons = {};\n".format(
+            _nonnegative_integer(
+                explanation_schema.get("max_reasons"),
+                "maximum explanation reasons",
+            )
+        ).encode()
+        + b"\n"
+        + b"struct OperationRetentionPolicy {\n"
+        b"    bool active_expires;\n"
+        b"    bool recovery_required_expires;\n"
+        b"    std::uint64_t terminal_detail_seconds;\n"
+        b"    std::uint64_t forgotten_after_terminal_seconds;\n"
+        b"};\n"
+        b"\n"
+        + "inline constexpr OperationRetentionPolicy kOperationRetentionPolicy{{{}, {}, {}, {}}};\n".format(
+            str(bool(operation_retention.get("active_expires"))).lower(),
+            str(bool(operation_retention.get("recovery_required_expires"))).lower(),
+            _nonnegative_integer(
+                operation_retention.get("terminal_detail_seconds"),
+                "terminal detail retention",
+            ),
+            _nonnegative_integer(
+                operation_retention.get("forgotten_after_terminal_seconds"),
+                "terminal forgotten retention",
+            ),
+        ).encode()
         + b"\n"
         + b"struct ReasonMetadata {\n"
         b"    std::string_view code;\n"
@@ -359,6 +728,21 @@ def _render_cpp_header(packaged_catalog_sha256: str) -> bytes:
         b"    std::string_view severity;\n"
         b"    std::string_view title;\n"
         b"    std::string_view default_message;\n"
+        b"};\n"
+        b"\n"
+        b"struct ReasonPresentationMetadata {\n"
+        b"    std::string_view id;\n"
+        b"    std::string_view category_id;\n"
+        b"    std::string_view severity;\n"
+        b"    std::string_view title;\n"
+        b"    std::string_view default_message;\n"
+        b"};\n"
+        b"\n"
+        b"struct OperationReasonRuleMetadata {\n"
+        b"    std::string_view code;\n"
+        b"    std::size_t canonical_rank;\n"
+        b"    std::uint32_t priority_band;\n"
+        b"    bool secondary_only;\n"
         b"};\n"
         b"\n"
         b"class GeneratedContractRegistry {\n"
@@ -379,6 +763,13 @@ def _render_cpp_header(packaged_catalog_sha256: str) -> bytes:
         b"const ReasonMetadata* reason_metadata(std::string_view code) noexcept;\n"
         b"const ReasonMetadata* reason_metadata(const KnownReasonCode& code) noexcept;\n"
         b"const ReasonMetadata* reason_metadata(const ReasonCode& code) noexcept;\n"
+        b"OperationFamily operation_family(OperationKind kind) noexcept;\n"
+        b"const OperationReasonRuleMetadata* operation_reason_rule_metadata(std::string_view code) noexcept;\n"
+        b"bool operation_reason_is_legal(std::string_view code, OperationKind kind, OperationPhase phase, std::optional<TerminalOutcome> terminal_outcome, bool secondary) noexcept;\n"
+        b"const ReasonPresentationMetadata* reason_presentation_metadata(std::string_view presentation_id) noexcept;\n"
+        b"bool reason_category_is_known(std::string_view category_id) noexcept;\n"
+        b"const ReasonPresentationMetadata* unique_reason_presentation_for_category(std::string_view category_id) noexcept;\n"
+        b"const ReasonPresentationMetadata* matching_reason_presentation_for_category(std::string_view category_id, std::string_view presentation_id) noexcept;\n"
         b"\n"
         b"}\n"
     )
@@ -389,6 +780,10 @@ def _render_cpp_source(
     fallback_ids: list[str],
     schema_types: list[str],
     reason_rows: list[dict[str, Any]],
+    operation_family_rows: list[dict[str, str]],
+    operation_reason_rows: list[dict[str, Any]],
+    operation_reason_context_rows: list[dict[str, Any]],
+    presentation_rows: list[dict[str, str]],
 ) -> bytes:
     cpp_promotion_unit_kinds = {
         "exact_cell": "PromotionUnitKind::ExactCell",
@@ -430,6 +825,48 @@ def _render_cpp_source(
         )
         for row in reason_rows
     )
+    operation_family_metadata_rows = "\n".join(
+        "    OperationFamilyMetadata{{{}, {}}},".format(
+            _cpp_string(row["operation_kind"]), _cpp_string(row["family"])
+        )
+        for row in operation_family_rows
+    )
+    operation_reason_metadata_rows = "\n".join(
+        "    OperationReasonRuleMetadata{{{}, {}, {}, {}}},".format(
+            _cpp_string(row["code"]),
+            row["canonical_rank"],
+            row["priority_band"],
+            str(row["secondary_only"]).lower(),
+        )
+        for row in operation_reason_rows
+    )
+    operation_reason_context_metadata_rows = "\n".join(
+        "    OperationReasonContextMetadata{{{}, {}, {}, {}, {}, {}, {}}},".format(
+            _cpp_string(row["code"]),
+            _cpp_string(row["operation_kinds"]),
+            _cpp_string(row["phases"]),
+            _cpp_string(row["terminal_outcomes"]),
+            str(row["primary"]).lower(),
+            str(row["secondary"]).lower(),
+            str(row["associated_primary_state"]).lower(),
+        )
+        for row in operation_reason_context_rows
+    )
+    presentation_metadata_rows = "\n".join(
+        "    ReasonPresentationMetadata{{{}}},".format(
+            ", ".join(
+                _cpp_string(row[field])
+                for field in (
+                    "id",
+                    "category_id",
+                    "severity",
+                    "title",
+                    "default_message",
+                )
+            )
+        )
+        for row in presentation_rows
+    )
     source = f"""#include "lemon/residency/generated_contract.h"
 
 #include <array>
@@ -442,6 +879,21 @@ namespace {{
 struct PromotionUnitMetadata {{
     std::string_view id;
     PromotionUnitKind kind;
+}};
+
+struct OperationFamilyMetadata {{
+    std::string_view operation_kind;
+    std::string_view family;
+}};
+
+struct OperationReasonContextMetadata {{
+    std::string_view code;
+    std::string_view operation_kinds;
+    std::string_view phases;
+    std::string_view terminal_outcomes;
+    bool primary;
+    bool secondary;
+    bool associated_primary_state;
 }};
 
 constexpr std::array<PromotionUnitMetadata, {len(promotion_units)}> promotion_units{{{{
@@ -459,6 +911,41 @@ constexpr std::array<std::string_view, {len(schema_types)}> schema_types{{{{
 constexpr std::array<ReasonMetadata, {len(reason_rows)}> reasons{{{{
 {metadata_rows}
 }}}};
+
+constexpr std::array<ReasonPresentationMetadata, {len(presentation_rows)}> presentations{{{{
+{presentation_metadata_rows}
+}}}};
+
+constexpr std::array<OperationFamilyMetadata, {len(operation_family_rows)}> operation_families{{{{
+{operation_family_metadata_rows}
+}}}};
+
+constexpr std::array<OperationReasonRuleMetadata, {len(operation_reason_rows)}> operation_reason_rules{{{{
+{operation_reason_metadata_rows}
+}}}};
+
+constexpr std::array<OperationReasonContextMetadata, {len(operation_reason_context_rows)}> operation_reason_contexts{{{{
+{operation_reason_context_metadata_rows}
+}}}};
+
+bool token_list_contains(std::string_view list, std::string_view token) noexcept {{
+    if (token.empty()) {{
+        return false;
+    }}
+    std::size_t start = 0;
+    while (start <= list.size()) {{
+        const auto end = list.find('|', start);
+        const auto count = end == std::string_view::npos ? list.size() - start : end - start;
+        if (list.substr(start, count) == token) {{
+            return true;
+        }}
+        if (end == std::string_view::npos) {{
+            return false;
+        }}
+        start = end + 1;
+    }}
+    return false;
+}}
 
 }}
 
@@ -554,6 +1041,108 @@ const ReasonMetadata* reason_metadata(const ReasonCode& code) noexcept {{
     return known == nullptr ? nullptr : reason_metadata(*known);
 }}
 
+OperationFamily operation_family(OperationKind kind) noexcept {{
+    const auto operation_kind = wire_name(kind);
+    for (const auto& metadata : operation_families) {{
+        if (metadata.operation_kind == operation_kind) {{
+            const auto family = decode_operation_family(metadata.family);
+            const auto* known = family.known_value();
+            if (known != nullptr) {{
+                return *known;
+            }}
+        }}
+    }}
+    std::terminate();
+}}
+
+const OperationReasonRuleMetadata*
+operation_reason_rule_metadata(std::string_view code) noexcept {{
+    for (const auto& metadata : operation_reason_rules) {{
+        if (metadata.code == code) {{
+            return &metadata;
+        }}
+    }}
+    return nullptr;
+}}
+
+bool operation_reason_is_legal(
+    std::string_view code, OperationKind kind, OperationPhase phase,
+    std::optional<TerminalOutcome> terminal_outcome, bool secondary) noexcept {{
+    const auto* rule = operation_reason_rule_metadata(code);
+    if (rule == nullptr || (rule->secondary_only && !secondary)) {{
+        return false;
+    }}
+    const auto operation_kind = wire_name(kind);
+    const auto operation_phase = wire_name(phase);
+    if (operation_kind.empty() || operation_phase.empty()) {{
+        return false;
+    }}
+    if (terminal_outcome.has_value() && wire_name(*terminal_outcome).empty()) {{
+        return false;
+    }}
+    if (!operation_state_is_valid(operation_family(kind), phase, terminal_outcome)) {{
+        return false;
+    }}
+    const auto outcome = terminal_outcome.has_value()
+                             ? wire_name(*terminal_outcome)
+                             : std::string_view{{"null"}};
+    for (const auto& context : operation_reason_contexts) {{
+        if (context.code != code ||
+            !token_list_contains(context.operation_kinds, operation_kind) ||
+            (secondary ? !context.secondary : !context.primary)) {{
+            continue;
+        }}
+        if (context.associated_primary_state ||
+            (token_list_contains(context.phases, operation_phase) &&
+             token_list_contains(context.terminal_outcomes, outcome))) {{
+            return true;
+        }}
+    }}
+    return false;
+}}
+
+const ReasonPresentationMetadata*
+reason_presentation_metadata(std::string_view presentation_id) noexcept {{
+    for (const auto& presentation : presentations) {{
+        if (presentation.id == presentation_id) {{
+            return &presentation;
+        }}
+    }}
+    return nullptr;
+}}
+
+bool reason_category_is_known(std::string_view category_id) noexcept {{
+    for (const auto& presentation : presentations) {{
+        if (presentation.category_id == category_id) {{
+            return true;
+        }}
+    }}
+    return false;
+}}
+
+const ReasonPresentationMetadata*
+unique_reason_presentation_for_category(std::string_view category_id) noexcept {{
+    const ReasonPresentationMetadata* match = nullptr;
+    for (const auto& presentation : presentations) {{
+        if (presentation.category_id != category_id) {{
+            continue;
+        }}
+        if (match != nullptr) {{
+            return nullptr;
+        }}
+        match = &presentation;
+    }}
+    return match;
+}}
+
+const ReasonPresentationMetadata* matching_reason_presentation_for_category(
+    std::string_view category_id, std::string_view presentation_id) noexcept {{
+    const auto* presentation = reason_presentation_metadata(presentation_id);
+    return presentation != nullptr && presentation->category_id == category_id
+               ? presentation
+               : nullptr;
+}}
+
 }}
 """
     return source.encode("utf-8")
@@ -568,6 +1157,12 @@ def generate_outputs(source_path: Path) -> dict[str, bytes]:
     promotion_units = _promotion_units(projection, fallback_ids)
     reasons = _reason_rows(registry)
     schema_rows = _schema_rows(registry)
+    operation_family_rows = _operation_family_rows(registry)
+    operation_reason_rows, operation_reason_context_rows = _operation_reason_rows(
+        registry
+    )
+    presentation_rows = _presentation_rows(registry)
+    operation_retention = _operation_retention_policy(registry)
     catalog_schema = _schema_type(
         "residency_profiles", schema_rows["residency_profiles"]
     )
@@ -633,6 +1228,7 @@ def generate_outputs(source_path: Path) -> dict[str, bytes]:
     }
     catalog_bytes = _json_bytes(catalog)
     schemas, schema_examples = build_schemas(registry, reasons, catalog)
+    explanation_schema = _explanation_schema_metadata(registry, schema_rows, schemas)
     http_auth = {
         "schema": registry["schema"],
         "request_context_registry": registry["request_context_registry"],
@@ -652,13 +1248,19 @@ def generate_outputs(source_path: Path) -> dict[str, bytes]:
     outputs = {
         "src/cpp/resources/residency_profiles.json": catalog_bytes,
         "src/cpp/include/lemon/residency/generated_contract.h": _render_cpp_header(
-            hashlib.sha256(catalog_bytes).hexdigest()
+            hashlib.sha256(catalog_bytes).hexdigest(),
+            explanation_schema,
+            operation_retention,
         ),
         "src/cpp/server/residency/generated_contract.cpp": _render_cpp_source(
             promotion_units,
             sorted(fallback_ids),
             [_schema_type(key, schema_rows[key]) for key in SCHEMA_KEYS],
             reasons,
+            operation_family_rows,
+            operation_reason_rows,
+            operation_reason_context_rows,
+            presentation_rows,
         ),
         "test/residency/contract/generated/catalog.json": catalog_bytes,
         "test/residency/contract/generated/reasons.json": _json_bytes(reason_golden),

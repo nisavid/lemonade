@@ -195,6 +195,17 @@ def require_catalog_contract(files: dict[str, bytes]) -> None:
         "decode_schema_type",
         "promotion_unit_kind",
         "reason_metadata",
+        "kExplanationSchemaId",
+        "kExplanationSchemaVersion",
+        "kMaxExplanationReasons",
+        "kOperationRetentionPolicy",
+        "operation_family",
+        "operation_reason_rule_metadata",
+        "operation_reason_is_legal",
+        "reason_presentation_metadata",
+        "reason_category_is_known",
+        "unique_reason_presentation_for_category",
+        "matching_reason_presentation_for_category",
     ):
         require(symbol in header, f"generated header lacks {symbol}")
     require(
@@ -258,6 +269,138 @@ def require_catalog_contract(files: dict[str, bytes]) -> None:
         )
 
 
+LegalityQuery = tuple[str, str, str, str | None, bool]
+OperationState = tuple[str, str, str, str | None]
+
+
+def cpp_enum(enum_name: str, wire: str) -> str:
+    member = "".join(part.title() for part in wire.split("_"))
+    return f"{enum_name}::{member}"
+
+
+def operation_reason_metadata_checks(registry: dict[str, Any]) -> str:
+    operation_reason_codes = registry["reason_envelope_registry"]["operation_revision"][
+        "reason_codes"
+    ]
+    checks = []
+    for rank, code in enumerate(operation_reason_codes):
+        envelope = registry["reason_registry"][code]["envelopes"]["operation_revision"]
+        secondary_only = str(envelope.get("secondary_only", False)).lower()
+        checks.append(
+            f"    const auto* operation_reason_{rank} = "
+            f"operation_reason_rule_metadata({json.dumps(code)});\n"
+            f"    if (operation_reason_{rank} == nullptr || "
+            f"operation_reason_{rank}->canonical_rank != {rank} || "
+            f"operation_reason_{rank}->priority_band != "
+            f"{envelope['priority_band']} || "
+            f"operation_reason_{rank}->secondary_only != {secondary_only}) "
+            "return 142;"
+        )
+    return "\n".join(checks)
+
+
+def record_operation_legal_state(
+    code: str,
+    kind: str,
+    state: str,
+    legal_queries: set[LegalityQuery],
+    covered_states: set[OperationState],
+    associated_contexts: list[tuple[str, str]],
+) -> None:
+    if state == "associated_primary_state:secondary":
+        associated_contexts.append((code, kind))
+        return
+    phases, outcomes, positions = state.split(":")
+    for phase in phases.split("|"):
+        for outcome in outcomes.split("|"):
+            normalized_outcome = None if outcome == "null" else outcome
+            covered_states.add((code, kind, phase, normalized_outcome))
+            legal_queries.update(
+                (
+                    code,
+                    kind,
+                    phase,
+                    normalized_outcome,
+                    position == "secondary",
+                )
+                for position in positions.split("|")
+            )
+
+
+def operation_legality_contract(
+    registry: dict[str, Any],
+) -> tuple[set[LegalityQuery], set[OperationState], list[tuple[str, str]]]:
+    legal_queries: set[LegalityQuery] = set()
+    covered_states: set[OperationState] = set()
+    associated_contexts: list[tuple[str, str]] = []
+    operation_reason_codes = registry["reason_envelope_registry"]["operation_revision"][
+        "reason_codes"
+    ]
+    for code in operation_reason_codes:
+        envelope = registry["reason_registry"][code]["envelopes"]["operation_revision"]
+        for context in envelope["contexts"]:
+            for kind in context["operation_kinds"]:
+                for state in context["legal_states"]:
+                    record_operation_legal_state(
+                        code,
+                        kind,
+                        state,
+                        legal_queries,
+                        covered_states,
+                        associated_contexts,
+                    )
+    return legal_queries, covered_states, associated_contexts
+
+
+def operation_legality_call(
+    code: str,
+    kind: str,
+    phase: str,
+    outcome: str | None,
+    secondary: bool,
+) -> str:
+    outcome_expression = (
+        "std::nullopt" if outcome is None else cpp_enum("TerminalOutcome", outcome)
+    )
+    return (
+        "operation_reason_is_legal("
+        f"{json.dumps(code)}, {cpp_enum('OperationKind', kind)}, "
+        f"{cpp_enum('OperationPhase', phase)}, {outcome_expression}, "
+        f"{str(secondary).lower()})"
+    )
+
+
+def operation_legality_checks(registry: dict[str, Any]) -> str:
+    legal_queries, covered_states, associated_contexts = operation_legality_contract(
+        registry
+    )
+    checks = [
+        f"    if (!{operation_legality_call(*query)}) return 143;"
+        for query in sorted(
+            legal_queries,
+            key=lambda row: (row[0], row[1], row[2], row[3] or "", row[4]),
+        )
+    ]
+    for state in sorted(
+        covered_states,
+        key=lambda row: (row[0], row[1], row[2], row[3] or ""),
+    ):
+        for secondary in (False, True):
+            query = (*state, secondary)
+            if query not in legal_queries:
+                checks.append(f"    if ({operation_legality_call(*query)}) return 144;")
+    for code, kind in associated_contexts:
+        secondary = operation_legality_call(code, kind, "evaluating", None, True)
+        primary = operation_legality_call(code, kind, "evaluating", None, False)
+        checks.extend(
+            (
+                f"    if (!{secondary}) return 145;",
+                f"    if ({primary}) return 146;",
+            )
+        )
+    return "\n".join(checks)
+
+
 def require_generated_cpp_compiles(output_root: Path, files: dict[str, bytes]) -> None:
     configured = shlex.split(os.environ.get("CXX", "c++"))
     require(
@@ -294,6 +437,33 @@ def require_generated_cpp_compiles(output_root: Path, files: dict[str, bytes]) -
             )
             for index, unit in enumerate(catalog["promotion_units"])
         )
+        operation_family_checks = "\n".join(
+            (
+                f"    if (operation_family(OperationKind::{kind}) != "
+                f"OperationFamily::{family}) return {100 + index};"
+            )
+            for index, (kind, family) in enumerate(
+                (
+                    ("Admission", "ResourceLifecycle"),
+                    ("ExplicitUnload", "ResourceLifecycle"),
+                    ("ForceUnload", "ResourceLifecycle"),
+                    ("PressureReclamation", "ResourceLifecycle"),
+                    ("StartupLoad", "ResourceLifecycle"),
+                    ("ServiceTermination", "ResourceLifecycle"),
+                    ("DeadBackendPruning", "ResourceLifecycle"),
+                    ("SameEpochRecoveryCleanup", "ResourceLifecycle"),
+                    ("PriorEpochOwnerCleanup", "ResourceLifecycle"),
+                    ("ArtifactScopeRecoveryCleanup", "ResourceLifecycle"),
+                    ("SavedPinMutation", "ResidentState"),
+                    ("RuntimePinMutation", "ResidentState"),
+                    ("LegacyPinBatch", "ResidentState"),
+                    ("ResidentStateRecoveryCleanup", "ResidentState"),
+                )
+            )
+        )
+        registry = catalog["contract_registry"]
+        operation_reason_checks_text = operation_reason_metadata_checks(registry)
+        operation_legality_checks_text = operation_legality_checks(registry)
         seam.write_text(
             '#include "lemon/residency/generated_contract.h"\n\n'
             "using namespace lemon::residency;\n\n"
@@ -302,6 +472,36 @@ def require_generated_cpp_compiles(output_root: Path, files: dict[str, bytes]) -
             f"{known_checks}\n"
             f"{internal_key_checks}\n"
             f"{promotion_kind_checks}\n"
+            f"{operation_family_checks}\n"
+            f"{operation_reason_checks_text}\n"
+            f"{operation_legality_checks_text}\n"
+            '    if (kExplanationSchemaId != "residency.explanation/1.0") return 120;\n'
+            "    if (kExplanationSchemaVersion.major != 1 || kExplanationSchemaVersion.minor != 0) return 121;\n"
+            "    if (kMaxExplanationReasons != 16) return 122;\n"
+            "    if (kOperationRetentionPolicy.active_expires || kOperationRetentionPolicy.recovery_required_expires) return 123;\n"
+            "    if (kOperationRetentionPolicy.terminal_detail_seconds != 86400 || kOperationRetentionPolicy.forgotten_after_terminal_seconds != 604800) return 124;\n"
+            '    const auto* succeeded = operation_reason_rule_metadata("residency_operation_succeeded");\n'
+            "    if (succeeded == nullptr || succeeded->canonical_rank != 0 || succeeded->priority_band != 0 || succeeded->secondary_only) return 125;\n"
+            '    const auto* cancelled = operation_reason_rule_metadata("residency_cancelled");\n'
+            "    if (cancelled == nullptr || cancelled->canonical_rank != 8 || cancelled->priority_band != 1 || cancelled->secondary_only) return 126;\n"
+            '    const auto* deprecated_pin = operation_reason_rule_metadata("residency_unconditional_pin_write_deprecated");\n'
+            "    if (deprecated_pin == nullptr || deprecated_pin->canonical_rank != 33 || deprecated_pin->priority_band != 6 || !deprecated_pin->secondary_only) return 127;\n"
+            '    if (operation_reason_rule_metadata("future_reason") != nullptr) return 128;\n'
+            '    if (!operation_reason_is_legal("residency_cancelled", OperationKind::Admission, OperationPhase::Evaluating, std::nullopt, false)) return 129;\n'
+            '    if (!operation_reason_is_legal("residency_capability_unsupported", OperationKind::Admission, OperationPhase::Evaluating, std::nullopt, false)) return 130;\n'
+            '    if (operation_reason_is_legal("residency_capability_unsupported", OperationKind::ExplicitUnload, OperationPhase::Evaluating, std::nullopt, false)) return 131;\n'
+            '    if (!operation_reason_is_legal("residency_operation_succeeded", OperationKind::Admission, OperationPhase::Terminal, TerminalOutcome::Succeeded, false)) return 132;\n'
+            '    if (operation_reason_is_legal("residency_operation_succeeded", OperationKind::Admission, OperationPhase::Evaluating, std::nullopt, false)) return 133;\n'
+            '    if (!operation_reason_is_legal("residency_unconditional_pin_write_deprecated", OperationKind::SavedPinMutation, OperationPhase::Evaluating, std::nullopt, true)) return 134;\n'
+            '    if (operation_reason_is_legal("residency_unconditional_pin_write_deprecated", OperationKind::SavedPinMutation, OperationPhase::Evaluating, std::nullopt, false)) return 135;\n'
+            '    const auto* capacity = reason_presentation_metadata("p_capacity");\n'
+            '    if (capacity == nullptr || capacity->category_id != "capacity" || capacity->severity != "warning") return 136;\n'
+            '    if (!reason_category_is_known("capacity") || reason_category_is_known("future-category")) return 137;\n'
+            '    if (unique_reason_presentation_for_category("capacity") != capacity) return 138;\n'
+            '    if (unique_reason_presentation_for_category("authentication") != nullptr) return 139;\n'
+            '    const auto* status_auth = matching_reason_presentation_for_category("authentication", "p_status_authentication");\n'
+            '    if (status_auth == nullptr || status_auth->title != "Status authorization required") return 140;\n'
+            '    if (matching_reason_presentation_for_category("capacity", "p_action") != nullptr) return 141;\n'
             "    return 0;\n"
             "}\n",
             encoding="utf-8",

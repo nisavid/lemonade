@@ -12,6 +12,21 @@ struct PromotionUnitMetadata {
     PromotionUnitKind kind;
 };
 
+struct OperationFamilyMetadata {
+    std::string_view operation_kind;
+    std::string_view family;
+};
+
+struct OperationReasonContextMetadata {
+    std::string_view code;
+    std::string_view operation_kinds;
+    std::string_view phases;
+    std::string_view terminal_outcomes;
+    bool primary;
+    bool secondary;
+    bool associated_primary_state;
+};
+
 constexpr std::array<PromotionUnitMetadata, 39> promotion_units{{
     PromotionUnitMetadata{"H-NPU-FLM-CONFLICT-XDNA2-v1", PromotionUnitKind::CompatibilityContract},
     PromotionUnitMetadata{"H-ROCM-ADM-GTT-HOST-v1", PromotionUnitKind::ExactCell},
@@ -176,6 +191,192 @@ constexpr std::array<ReasonMetadata, 87> reasons{{
     ReasonMetadata{"slots_pinned_error", "protection", "p_protection", "d_compatibility", "warning", "Resident protected", "A resident protection rule prevents the requested action."},
 }};
 
+constexpr std::array<ReasonPresentationMetadata, 27> presentations{{
+    ReasonPresentationMetadata{"p_action", "action", "error", "Action incomplete", "A residency action did not complete successfully."},
+    ReasonPresentationMetadata{"p_artifact_import", "artifact_import", "warning", "Artifact import unavailable", "The staged artifact import could not complete in its current state."},
+    ReasonPresentationMetadata{"p_authentication", "authentication", "warning", "Legacy authorization", "A deprecated authorization compatibility rule was used."},
+    ReasonPresentationMetadata{"p_capability", "capability", "error", "Capability unavailable", "The required residency capability is unavailable."},
+    ReasonPresentationMetadata{"p_capacity", "capacity", "warning", "Capacity unavailable", "The requested residency capacity is unavailable."},
+    ReasonPresentationMetadata{"p_compatibility", "compatibility", "warning", "Compatibility constraint", "A compatibility rule affects the requested operation."},
+    ReasonPresentationMetadata{"p_configuration", "configuration", "error", "Configuration conflict", "The residency configuration request conflicts with current authority."},
+    ReasonPresentationMetadata{"p_evidence", "evidence", "error", "Evidence unavailable", "Required residency evidence is not currently usable."},
+    ReasonPresentationMetadata{"p_feasibility", "feasibility", "warning", "Plan infeasible", "No complete safe residency plan is currently feasible."},
+    ReasonPresentationMetadata{"p_integrity", "integrity", "critical", "Residency quarantined", "Residency state is quarantined pending recovery."},
+    ReasonPresentationMetadata{"p_lifecycle", "lifecycle", "warning", "Lifecycle changed", "The residency lifecycle operation was interrupted or superseded."},
+    ReasonPresentationMetadata{"p_lookup", "lookup", "warning", "Operation unavailable", "The requested residency operation record is unavailable."},
+    ReasonPresentationMetadata{"p_migration", "migration", "warning", "Migration attention required", "Residency migration state requires review or resolution."},
+    ReasonPresentationMetadata{"p_model_identity", "model_identity", "warning", "Model not found", "The requested model is not known."},
+    ReasonPresentationMetadata{"p_model_identity_conflict", "model_identity", "warning", "Model identity unavailable", "The requested model identity cannot be published in its current state."},
+    ReasonPresentationMetadata{"p_persistence", "persistence", "error", "Persistence unavailable", "Required residency state could not be persisted."},
+    ReasonPresentationMetadata{"p_policy", "policy", "info", "Fallback selected", "A declared residency fallback was selected."},
+    ReasonPresentationMetadata{"p_precondition", "precondition", "warning", "Precondition failed", "The request precondition is missing or no longer current."},
+    ReasonPresentationMetadata{"p_pressure", "pressure", "error", "Pressure unresolved", "Memory pressure could not be safely resolved."},
+    ReasonPresentationMetadata{"p_protection", "protection", "warning", "Resident protected", "A resident protection rule prevents the requested action."},
+    ReasonPresentationMetadata{"p_rate_limit", "rate_limit", "warning", "Operation rate limited", "The residency operation allowance is temporarily exhausted."},
+    ReasonPresentationMetadata{"p_record_lookup", "lookup", "warning", "Residency record unavailable", "The requested residency request record is no longer available."},
+    ReasonPresentationMetadata{"p_recovery", "recovery", "error", "Recovery required", "Residency recovery is required before normal lifecycle work can continue."},
+    ReasonPresentationMetadata{"p_resident_state", "resident_state", "warning", "Resident unavailable", "The requested live resident state is unavailable."},
+    ReasonPresentationMetadata{"p_scheduling", "scheduling", "warning", "Scheduling limit reached", "The residency coordinator could not proceed within its bound."},
+    ReasonPresentationMetadata{"p_status_authentication", "authentication", "warning", "Status authorization required", "A valid residency status capability or admin authorization is required."},
+    ReasonPresentationMetadata{"p_success", "success", "info", "Operation succeeded", "The residency operation succeeded."},
+}};
+
+constexpr std::array<OperationFamilyMetadata, 14> operation_families{{
+    OperationFamilyMetadata{"admission", "resource_lifecycle"},
+    OperationFamilyMetadata{"explicit_unload", "resource_lifecycle"},
+    OperationFamilyMetadata{"force_unload", "resource_lifecycle"},
+    OperationFamilyMetadata{"pressure_reclamation", "resource_lifecycle"},
+    OperationFamilyMetadata{"startup_load", "resource_lifecycle"},
+    OperationFamilyMetadata{"service_termination", "resource_lifecycle"},
+    OperationFamilyMetadata{"dead_backend_pruning", "resource_lifecycle"},
+    OperationFamilyMetadata{"same_epoch_recovery_cleanup", "resource_lifecycle"},
+    OperationFamilyMetadata{"prior_epoch_owner_cleanup", "resource_lifecycle"},
+    OperationFamilyMetadata{"artifact_scope_recovery_cleanup", "resource_lifecycle"},
+    OperationFamilyMetadata{"saved_pin_mutation", "resident_state"},
+    OperationFamilyMetadata{"runtime_pin_mutation", "resident_state"},
+    OperationFamilyMetadata{"legacy_pin_batch", "resident_state"},
+    OperationFamilyMetadata{"resident_state_recovery_cleanup", "resident_state"},
+}};
+
+constexpr std::array<OperationReasonRuleMetadata, 34> operation_reason_rules{{
+    OperationReasonRuleMetadata{"residency_operation_succeeded", 0, 0, false},
+    OperationReasonRuleMetadata{"residency_persistence_failed", 1, 0, false},
+    OperationReasonRuleMetadata{"residency_recovery_required", 2, 0, false},
+    OperationReasonRuleMetadata{"residency_quarantined", 3, 0, false},
+    OperationReasonRuleMetadata{"residency_startup_rollback_incomplete", 4, 0, false},
+    OperationReasonRuleMetadata{"residency_service_termination_incomplete", 5, 0, false},
+    OperationReasonRuleMetadata{"residency_dead_backend_prune_incomplete", 6, 0, false},
+    OperationReasonRuleMetadata{"residency_recovery_not_ready", 7, 0, false},
+    OperationReasonRuleMetadata{"residency_cancelled", 8, 1, false},
+    OperationReasonRuleMetadata{"residency_plan_invalidated", 9, 1, false},
+    OperationReasonRuleMetadata{"residency_footprint_confidence_insufficient", 10, 2, false},
+    OperationReasonRuleMetadata{"residency_capability_unsupported", 11, 2, false},
+    OperationReasonRuleMetadata{"residency_evidence_missing", 12, 2, false},
+    OperationReasonRuleMetadata{"residency_evidence_stale", 13, 2, false},
+    OperationReasonRuleMetadata{"residency_evidence_unhealthy", 14, 2, false},
+    OperationReasonRuleMetadata{"residency_evidence_incoherent", 15, 2, false},
+    OperationReasonRuleMetadata{"residency_evidence_superseded", 16, 2, false},
+    OperationReasonRuleMetadata{"slots_pinned_error", 17, 3, false},
+    OperationReasonRuleMetadata{"router_residency_conflict", 18, 3, false},
+    OperationReasonRuleMetadata{"residency_protected_pinned", 19, 3, false},
+    OperationReasonRuleMetadata{"residency_protected_in_use", 20, 3, false},
+    OperationReasonRuleMetadata{"residency_force_fence_failed", 21, 3, false},
+    OperationReasonRuleMetadata{"residency_capacity_insufficient", 22, 4, false},
+    OperationReasonRuleMetadata{"residency_plan_infeasible", 23, 4, false},
+    OperationReasonRuleMetadata{"residency_startup_set_infeasible", 24, 4, false},
+    OperationReasonRuleMetadata{"residency_planning_deadline_exceeded", 25, 4, false},
+    OperationReasonRuleMetadata{"residency_critical_pressure_refusal", 26, 4, false},
+    OperationReasonRuleMetadata{"residency_action_failed", 27, 5, false},
+    OperationReasonRuleMetadata{"residency_partial_outcome", 28, 5, false},
+    OperationReasonRuleMetadata{"residency_pressure_unresolved", 29, 5, false},
+    OperationReasonRuleMetadata{"residency_operation_budget_exhausted", 30, 5, false},
+    OperationReasonRuleMetadata{"residency_attempt_budget_exhausted", 31, 5, false},
+    OperationReasonRuleMetadata{"residency_fallback_selected", 32, 6, true},
+    OperationReasonRuleMetadata{"residency_unconditional_pin_write_deprecated", 33, 6, true},
+}};
+
+constexpr std::array<OperationReasonContextMetadata, 80> operation_reason_contexts{{
+    OperationReasonContextMetadata{"residency_operation_succeeded", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|artifact_scope_recovery_cleanup|saved_pin_mutation|runtime_pin_mutation|legacy_pin_batch|resident_state_recovery_cleanup", "terminal", "succeeded", true, false, false},
+    OperationReasonContextMetadata{"residency_persistence_failed", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_persistence_failed", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "recovery_required", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_persistence_failed", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "terminal", "failed|quarantined", true, true, false},
+    OperationReasonContextMetadata{"residency_persistence_failed", "artifact_scope_recovery_cleanup", "closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_persistence_failed", "artifact_scope_recovery_cleanup", "terminal", "failed|partially_succeeded", true, true, false},
+    OperationReasonContextMetadata{"residency_persistence_failed", "saved_pin_mutation|runtime_pin_mutation|legacy_pin_batch|resident_state_recovery_cleanup", "closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_persistence_failed", "saved_pin_mutation|runtime_pin_mutation|legacy_pin_batch|resident_state_recovery_cleanup", "recovery_required", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_persistence_failed", "saved_pin_mutation|runtime_pin_mutation|legacy_pin_batch|resident_state_recovery_cleanup", "terminal", "failed", true, true, false},
+    OperationReasonContextMetadata{"residency_recovery_required", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|saved_pin_mutation|runtime_pin_mutation|legacy_pin_batch|resident_state_recovery_cleanup", "recovery_required", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_quarantined", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "recovery_required", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_quarantined", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "terminal", "quarantined", true, true, false},
+    OperationReasonContextMetadata{"residency_startup_rollback_incomplete", "startup_load", "closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_startup_rollback_incomplete", "startup_load", "recovery_required", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_startup_rollback_incomplete", "startup_load", "terminal", "partially_succeeded|quarantined", true, true, false},
+    OperationReasonContextMetadata{"residency_service_termination_incomplete", "service_termination", "closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_service_termination_incomplete", "service_termination", "recovery_required", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_service_termination_incomplete", "service_termination", "terminal", "failed|partially_succeeded|quarantined", true, true, false},
+    OperationReasonContextMetadata{"residency_dead_backend_prune_incomplete", "dead_backend_pruning", "closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_dead_backend_prune_incomplete", "dead_backend_pruning", "recovery_required", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_dead_backend_prune_incomplete", "dead_backend_pruning", "terminal", "failed|partially_succeeded|quarantined", true, true, false},
+    OperationReasonContextMetadata{"residency_recovery_not_ready", "admission|pressure_reclamation|startup_load", "evaluating", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_recovery_not_ready", "admission|pressure_reclamation|startup_load", "terminal", "refused", true, true, false},
+    OperationReasonContextMetadata{"residency_cancelled", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|artifact_scope_recovery_cleanup", "evaluating|waiting_for_evidence|waiting_for_in_use|reserved|executing|closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_cancelled", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|artifact_scope_recovery_cleanup", "terminal", "cancelled|partially_succeeded", true, true, false},
+    OperationReasonContextMetadata{"residency_cancelled", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "recovery_required", "null", false, true, false},
+    OperationReasonContextMetadata{"residency_cancelled", "saved_pin_mutation|runtime_pin_mutation|legacy_pin_batch|resident_state_recovery_cleanup", "evaluating|closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_cancelled", "saved_pin_mutation|runtime_pin_mutation|legacy_pin_batch|resident_state_recovery_cleanup", "recovery_required", "null", false, true, false},
+    OperationReasonContextMetadata{"residency_cancelled", "saved_pin_mutation|runtime_pin_mutation|legacy_pin_batch|resident_state_recovery_cleanup", "terminal", "cancelled", true, true, false},
+    OperationReasonContextMetadata{"residency_plan_invalidated", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "evaluating|waiting_for_evidence|waiting_for_in_use|reserved|executing|closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_plan_invalidated", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "terminal", "superseded|partially_succeeded", true, true, false},
+    OperationReasonContextMetadata{"residency_footprint_confidence_insufficient", "admission|pressure_reclamation|startup_load", "evaluating", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_footprint_confidence_insufficient", "admission|pressure_reclamation|startup_load", "terminal", "refused", true, true, false},
+    OperationReasonContextMetadata{"residency_capability_unsupported", "admission|pressure_reclamation|startup_load", "evaluating", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_capability_unsupported", "admission|pressure_reclamation|startup_load", "terminal", "refused", true, true, false},
+    OperationReasonContextMetadata{"residency_evidence_missing", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "evaluating|waiting_for_evidence", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_evidence_missing", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "terminal", "refused|superseded", true, true, false},
+    OperationReasonContextMetadata{"residency_evidence_stale", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "evaluating|waiting_for_evidence", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_evidence_stale", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "terminal", "refused|superseded", true, true, false},
+    OperationReasonContextMetadata{"residency_evidence_unhealthy", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "evaluating|waiting_for_evidence", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_evidence_unhealthy", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "terminal", "refused|superseded", true, true, false},
+    OperationReasonContextMetadata{"residency_evidence_incoherent", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "evaluating|waiting_for_evidence", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_evidence_incoherent", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "terminal", "refused|superseded", true, true, false},
+    OperationReasonContextMetadata{"residency_evidence_superseded", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "evaluating|waiting_for_evidence", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_evidence_superseded", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "terminal", "refused|superseded", true, true, false},
+    OperationReasonContextMetadata{"slots_pinned_error", "admission", "evaluating", "null", true, true, false},
+    OperationReasonContextMetadata{"slots_pinned_error", "admission", "terminal", "refused", true, true, false},
+    OperationReasonContextMetadata{"router_residency_conflict", "admission", "evaluating", "null", true, true, false},
+    OperationReasonContextMetadata{"router_residency_conflict", "admission", "terminal", "refused", true, true, false},
+    OperationReasonContextMetadata{"residency_protected_pinned", "admission|pressure_reclamation|startup_load", "evaluating", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_protected_pinned", "admission|pressure_reclamation|startup_load", "terminal", "refused", true, true, false},
+    OperationReasonContextMetadata{"residency_protected_in_use", "admission|explicit_unload|pressure_reclamation|startup_load|service_termination|same_epoch_recovery_cleanup", "evaluating|waiting_for_in_use", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_protected_in_use", "admission|explicit_unload|pressure_reclamation|startup_load|service_termination|same_epoch_recovery_cleanup", "terminal", "refused", true, true, false},
+    OperationReasonContextMetadata{"residency_force_fence_failed", "force_unload", "evaluating|waiting_for_in_use", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_force_fence_failed", "force_unload", "terminal", "refused|failed", true, true, false},
+    OperationReasonContextMetadata{"residency_capacity_insufficient", "admission|startup_load", "evaluating", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_capacity_insufficient", "admission|startup_load", "terminal", "refused", true, true, false},
+    OperationReasonContextMetadata{"residency_plan_infeasible", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "evaluating", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_plan_infeasible", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "terminal", "refused", true, true, false},
+    OperationReasonContextMetadata{"residency_startup_set_infeasible", "startup_load", "evaluating", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_startup_set_infeasible", "startup_load", "terminal", "refused", true, true, false},
+    OperationReasonContextMetadata{"residency_planning_deadline_exceeded", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "evaluating|waiting_for_in_use", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_planning_deadline_exceeded", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "terminal", "refused|failed", true, true, false},
+    OperationReasonContextMetadata{"residency_critical_pressure_refusal", "admission|pressure_reclamation|startup_load", "evaluating", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_critical_pressure_refusal", "admission|pressure_reclamation|startup_load", "terminal", "refused", true, true, false},
+    OperationReasonContextMetadata{"residency_action_failed", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|artifact_scope_recovery_cleanup", "executing|closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_action_failed", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|artifact_scope_recovery_cleanup", "terminal", "failed|partially_succeeded", true, true, false},
+    OperationReasonContextMetadata{"residency_partial_outcome", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|artifact_scope_recovery_cleanup", "closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_partial_outcome", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|artifact_scope_recovery_cleanup", "terminal", "partially_succeeded", true, true, false},
+    OperationReasonContextMetadata{"residency_pressure_unresolved", "pressure_reclamation", "evaluating|closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_pressure_unresolved", "pressure_reclamation", "terminal", "failed|refused", true, true, false},
+    OperationReasonContextMetadata{"residency_operation_budget_exhausted", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|artifact_scope_recovery_cleanup|saved_pin_mutation|runtime_pin_mutation|legacy_pin_batch|resident_state_recovery_cleanup", "closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_operation_budget_exhausted", "admission|explicit_unload|force_unload|pressure_reclamation|startup_load|service_termination|dead_backend_pruning|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|artifact_scope_recovery_cleanup|saved_pin_mutation|runtime_pin_mutation|legacy_pin_batch|resident_state_recovery_cleanup", "terminal", "refused|failed|superseded", true, true, false},
+    OperationReasonContextMetadata{"residency_attempt_budget_exhausted", "same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|artifact_scope_recovery_cleanup", "closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_attempt_budget_exhausted", "same_epoch_recovery_cleanup|prior_epoch_owner_cleanup|artifact_scope_recovery_cleanup", "terminal", "failed|partially_succeeded", true, true, false},
+    OperationReasonContextMetadata{"residency_attempt_budget_exhausted", "resident_state_recovery_cleanup", "closing", "null", true, true, false},
+    OperationReasonContextMetadata{"residency_attempt_budget_exhausted", "resident_state_recovery_cleanup", "terminal", "failed", true, true, false},
+    OperationReasonContextMetadata{"residency_fallback_selected", "admission|pressure_reclamation|startup_load|same_epoch_recovery_cleanup|prior_epoch_owner_cleanup", "", "", false, true, true},
+    OperationReasonContextMetadata{"residency_unconditional_pin_write_deprecated", "saved_pin_mutation", "evaluating|closing", "null", false, true, false},
+    OperationReasonContextMetadata{"residency_unconditional_pin_write_deprecated", "saved_pin_mutation", "terminal", "succeeded", false, true, false},
+}};
+
+bool token_list_contains(std::string_view list, std::string_view token) noexcept {
+    if (token.empty()) {
+        return false;
+    }
+    std::size_t start = 0;
+    while (start <= list.size()) {
+        const auto end = list.find('|', start);
+        const auto count = end == std::string_view::npos ? list.size() - start : end - start;
+        if (list.substr(start, count) == token) {
+            return true;
+        }
+        if (end == std::string_view::npos) {
+            return false;
+        }
+        start = end + 1;
+    }
+    return false;
+}
+
 }
 
 DecodedValue<PromotionUnitId>
@@ -268,6 +469,108 @@ const ReasonMetadata* reason_metadata(const KnownReasonCode& code) noexcept {
 const ReasonMetadata* reason_metadata(const ReasonCode& code) noexcept {
     const auto* known = code.known_value();
     return known == nullptr ? nullptr : reason_metadata(*known);
+}
+
+OperationFamily operation_family(OperationKind kind) noexcept {
+    const auto operation_kind = wire_name(kind);
+    for (const auto& metadata : operation_families) {
+        if (metadata.operation_kind == operation_kind) {
+            const auto family = decode_operation_family(metadata.family);
+            const auto* known = family.known_value();
+            if (known != nullptr) {
+                return *known;
+            }
+        }
+    }
+    std::terminate();
+}
+
+const OperationReasonRuleMetadata*
+operation_reason_rule_metadata(std::string_view code) noexcept {
+    for (const auto& metadata : operation_reason_rules) {
+        if (metadata.code == code) {
+            return &metadata;
+        }
+    }
+    return nullptr;
+}
+
+bool operation_reason_is_legal(
+    std::string_view code, OperationKind kind, OperationPhase phase,
+    std::optional<TerminalOutcome> terminal_outcome, bool secondary) noexcept {
+    const auto* rule = operation_reason_rule_metadata(code);
+    if (rule == nullptr || (rule->secondary_only && !secondary)) {
+        return false;
+    }
+    const auto operation_kind = wire_name(kind);
+    const auto operation_phase = wire_name(phase);
+    if (operation_kind.empty() || operation_phase.empty()) {
+        return false;
+    }
+    if (terminal_outcome.has_value() && wire_name(*terminal_outcome).empty()) {
+        return false;
+    }
+    if (!operation_state_is_valid(operation_family(kind), phase, terminal_outcome)) {
+        return false;
+    }
+    const auto outcome = terminal_outcome.has_value()
+                             ? wire_name(*terminal_outcome)
+                             : std::string_view{"null"};
+    for (const auto& context : operation_reason_contexts) {
+        if (context.code != code ||
+            !token_list_contains(context.operation_kinds, operation_kind) ||
+            (secondary ? !context.secondary : !context.primary)) {
+            continue;
+        }
+        if (context.associated_primary_state ||
+            (token_list_contains(context.phases, operation_phase) &&
+             token_list_contains(context.terminal_outcomes, outcome))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+const ReasonPresentationMetadata*
+reason_presentation_metadata(std::string_view presentation_id) noexcept {
+    for (const auto& presentation : presentations) {
+        if (presentation.id == presentation_id) {
+            return &presentation;
+        }
+    }
+    return nullptr;
+}
+
+bool reason_category_is_known(std::string_view category_id) noexcept {
+    for (const auto& presentation : presentations) {
+        if (presentation.category_id == category_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+const ReasonPresentationMetadata*
+unique_reason_presentation_for_category(std::string_view category_id) noexcept {
+    const ReasonPresentationMetadata* match = nullptr;
+    for (const auto& presentation : presentations) {
+        if (presentation.category_id != category_id) {
+            continue;
+        }
+        if (match != nullptr) {
+            return nullptr;
+        }
+        match = &presentation;
+    }
+    return match;
+}
+
+const ReasonPresentationMetadata* matching_reason_presentation_for_category(
+    std::string_view category_id, std::string_view presentation_id) noexcept {
+    const auto* presentation = reason_presentation_metadata(presentation_id);
+    return presentation != nullptr && presentation->category_id == category_id
+               ? presentation
+               : nullptr;
 }
 
 }

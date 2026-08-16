@@ -2257,6 +2257,25 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_CONTRACT_CATALOG_TEST_SRC}")
     )
 endif()
 
+set(_RESIDENCY_CONTRACT_EXPLANATIONS_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_contract_explanations.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_CONTRACT_EXPLANATIONS_TEST_SRC}")
+    add_executable(test_residency_contract_explanations
+        test/cpp/test_residency_contract_explanations.cpp
+        src/cpp/server/residency/explanations.cpp
+        src/cpp/server/residency/generated_contract.cpp
+    )
+    target_include_directories(test_residency_contract_explanations PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+    )
+    add_cpp_ci_test(
+        ResidencyContractExplanations
+        CI ON
+        COMMAND test_residency_contract_explanations
+    )
+endif()
+
 # ProcessManager zombie detection and non-mutating reap contract.
 if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(_PROCESS_MANAGER_TEST_SRC
