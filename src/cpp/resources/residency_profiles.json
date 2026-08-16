@@ -4775,6 +4775,14 @@
             "required": true,
             "type": "schema_literal",
             "value": "residency.profiles/1.0"
+          },
+          "selection_registry_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "source_support_baseline": {
+            "required": true,
+            "type": "git_commit_sha1"
           }
         },
         "output": "docs/api/schemas/residency/residency_profiles.schema.json",
@@ -6949,5 +6957,7 @@
       "unit_kind": "later_runtime"
     }
   ],
-  "schema": "residency.profiles/1.0"
+  "schema": "residency.profiles/1.0",
+  "selection_registry_sha256": "3985ff529d728d54afb8e048f0d55a73efd02b5bc9628ea596ccbf29e841aa1a",
+  "source_support_baseline": "a505bbc702cc1fcd44ef73c44defabc98c36d505"
 }

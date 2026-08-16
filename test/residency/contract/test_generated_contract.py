@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import shlex
@@ -85,6 +86,24 @@ def require_canonical_bytes(path: str, content: bytes) -> None:
 def require_catalog_contract(files: dict[str, bytes]) -> None:
     catalog = load_json(files["src/cpp/resources/residency_profiles.json"])
     require(catalog["schema"] == "residency.profiles/1.0", "catalog schema drifted")
+    source = load_json(SOURCE.read_bytes())
+    require(
+        catalog["source_support_baseline"] == source["source_support_baseline"],
+        "catalog source-support baseline drifted",
+    )
+    tools_root = str(REPO_ROOT / "tools")
+    if tools_root not in sys.path:
+        sys.path.insert(0, tools_root)
+    validate_inventory = import_module("residency_inventory.schema").validate_inventory
+    projection = validate_inventory(REPO_ROOT, source)
+    projection_bytes = (
+        json.dumps(projection, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    require(
+        catalog["selection_registry_sha256"]
+        == hashlib.sha256(projection_bytes).hexdigest(),
+        "catalog selection-registry digest drifted",
+    )
 
     units = catalog["promotion_units"]
     require(len(units) == 39, "catalog promotion-unit count drifted")
@@ -163,21 +182,80 @@ def require_catalog_contract(files: dict[str, bytes]) -> None:
 
     require(len(catalog["fallbacks"]) == 14, "fallback registry count drifted")
 
+    catalog_digest = hashlib.sha256(
+        files["src/cpp/resources/residency_profiles.json"]
+    ).hexdigest()
     header = files["src/cpp/include/lemon/residency/generated_contract.h"].decode()
-    source = files["src/cpp/server/residency/generated_contract.cpp"].decode()
+    generated_source = files["src/cpp/server/residency/generated_contract.cpp"].decode()
     for symbol in (
         "class GeneratedContractRegistry",
         "decode_promotion_unit_id",
         "decode_reason_code",
         "decode_fallback_id",
         "decode_schema_type",
+        "promotion_unit_kind",
         "reason_metadata",
     ):
         require(symbol in header, f"generated header lacks {symbol}")
     require(
-        '"residency_operation_succeeded"' in source,
+        f'inline constexpr std::string_view kPackagedCatalogSha256 = "{catalog_digest}";'
+        in header,
+        "generated header lacks the exact packaged catalog digest",
+    )
+    require(
+        '"residency_operation_succeeded"' in generated_source,
         "generated source lacks the closed reason registry",
     )
+
+    profile_schema = load_json(
+        files["docs/api/schemas/residency/residency_profiles.schema.json"]
+    )
+    require(
+        {
+            "source_support_baseline",
+            "selection_registry_sha256",
+        }.issubset(profile_schema["required"]),
+        "catalog identity fields are not required by the source-owned schema",
+    )
+    require(
+        profile_schema["properties"]["source_support_baseline"]["maxLength"] == 40,
+        "source-support baseline schema bound drifted",
+    )
+    require(
+        profile_schema["properties"]["source_support_baseline"]["minLength"] == 40,
+        "source-support baseline schema width drifted",
+    )
+    require(
+        profile_schema["properties"]["source_support_baseline"]["pattern"]
+        == "^[0-9a-f]{40}$",
+        "source-support baseline schema pattern drifted",
+    )
+    require(
+        profile_schema["properties"]["selection_registry_sha256"]["maxLength"] == 64,
+        "selection-registry digest schema bound drifted",
+    )
+    require(
+        profile_schema["properties"]["selection_registry_sha256"]["minLength"] == 64,
+        "selection-registry digest schema width drifted",
+    )
+    require(
+        profile_schema["properties"]["selection_registry_sha256"]["pattern"]
+        == "^[0-9a-f]{64}$",
+        "selection-registry digest schema pattern drifted",
+    )
+    profile_validator = jsonschema.Draft202012Validator(profile_schema)
+    for field, invalid in (
+        ("source_support_baseline", "A" * 40),
+        ("source_support_baseline", "0" * 39),
+        ("selection_registry_sha256", "G" * 64),
+        ("selection_registry_sha256", "0" * 63),
+    ):
+        invalid_catalog = dict(catalog)
+        invalid_catalog[field] = invalid
+        require(
+            not profile_validator.is_valid(invalid_catalog),
+            f"catalog schema accepted invalid {field}",
+        )
 
 
 def require_generated_cpp_compiles(output_root: Path, files: dict[str, bytes]) -> None:
@@ -201,12 +279,29 @@ def require_generated_cpp_compiles(output_root: Path, files: dict[str, bytes]) -
             f'    if (decode_schema_type("{key}").is_known()) return 2;'
             for key in schemas
         )
+        cpp_promotion_kinds = {
+            "exact_cell": "ExactCell",
+            "compatibility_contract": "CompatibilityContract",
+            "later_runtime": "LaterRuntime",
+        }
+        promotion_kind_checks = "\n".join(
+            (
+                f'    const auto promotion_unit_{index} = decode_promotion_unit_id("{unit["id"]}");\n'
+                f"    if (!promotion_unit_{index}.is_known()) return {4 + index * 2};\n"
+                f"    if (promotion_unit_kind(*promotion_unit_{index}.known_value()) != "
+                f"PromotionUnitKind::{cpp_promotion_kinds[unit['unit_kind']]}) "
+                f"return {5 + index * 2};"
+            )
+            for index, unit in enumerate(catalog["promotion_units"])
+        )
         seam.write_text(
             '#include "lemon/residency/generated_contract.h"\n\n'
             "using namespace lemon::residency;\n\n"
             "int main() {\n"
+            f'    if (kPackagedCatalogSha256 != "{hashlib.sha256(files["src/cpp/resources/residency_profiles.json"]).hexdigest()}") return 3;\n'
             f"{known_checks}\n"
             f"{internal_key_checks}\n"
+            f"{promotion_kind_checks}\n"
             "    return 0;\n"
             "}\n",
             encoding="utf-8",

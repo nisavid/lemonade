@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -338,7 +339,7 @@ def _cpp_array(values: Iterable[str], indent: str = "    ") -> str:
     return "\n".join(f"{indent}{_cpp_string(value)}," for value in values)
 
 
-def _render_cpp_header() -> bytes:
+def _render_cpp_header(packaged_catalog_sha256: str) -> bytes:
     return (
         b"#pragma once\n"
         b"\n"
@@ -348,7 +349,9 @@ def _render_cpp_header() -> bytes:
         b"\n"
         b"namespace lemon::residency {\n"
         b"\n"
-        b"struct ReasonMetadata {\n"
+        + f"inline constexpr std::string_view kPackagedCatalogSha256 = {_cpp_string(packaged_catalog_sha256)};\n".encode()
+        + b"\n"
+        + b"struct ReasonMetadata {\n"
         b"    std::string_view code;\n"
         b"    std::string_view category_id;\n"
         b"    std::string_view presentation_id;\n"
@@ -361,6 +364,7 @@ def _render_cpp_header() -> bytes:
         b"class GeneratedContractRegistry {\n"
         b"public:\n"
         b"    static DecodedValue<PromotionUnitId> decode_promotion_unit_id(std::string_view wire);\n"
+        b"    static PromotionUnitKind promotion_unit_kind(const PromotionUnitId& id) noexcept;\n"
         b"    static ReasonCode decode_reason_code(std::string_view wire);\n"
         b"    static DecodedValue<FallbackId> decode_fallback_id(std::string_view wire);\n"
         b"    static DecodedValue<SchemaType> decode_schema_type(std::string_view wire);\n"
@@ -368,6 +372,7 @@ def _render_cpp_header() -> bytes:
         b"};\n"
         b"\n"
         b"DecodedValue<PromotionUnitId> decode_promotion_unit_id(std::string_view wire);\n"
+        b"PromotionUnitKind promotion_unit_kind(const PromotionUnitId& id) noexcept;\n"
         b"ReasonCode decode_reason_code(std::string_view wire);\n"
         b"DecodedValue<FallbackId> decode_fallback_id(std::string_view wire);\n"
         b"DecodedValue<SchemaType> decode_schema_type(std::string_view wire);\n"
@@ -380,11 +385,25 @@ def _render_cpp_header() -> bytes:
 
 
 def _render_cpp_source(
-    promotion_unit_ids: list[str],
+    promotion_units: list[dict[str, Any]],
     fallback_ids: list[str],
     schema_types: list[str],
     reason_rows: list[dict[str, Any]],
 ) -> bytes:
+    cpp_promotion_unit_kinds = {
+        "exact_cell": "PromotionUnitKind::ExactCell",
+        "compatibility_contract": "PromotionUnitKind::CompatibilityContract",
+        "later_runtime": "PromotionUnitKind::LaterRuntime",
+    }
+    promotion_unit_rows = "\n".join(
+        "    PromotionUnitMetadata{{{}, {}}},".format(
+            _cpp_string(_string(unit.get("id"), "promotion unit ID")),
+            cpp_promotion_unit_kinds[
+                _string(unit.get("unit_kind"), "promotion unit kind")
+            ],
+        )
+        for unit in promotion_units
+    )
     metadata_rows = "\n".join(
         "    ReasonMetadata{{{}}},".format(
             ", ".join(
@@ -414,13 +433,19 @@ def _render_cpp_source(
     source = f"""#include "lemon/residency/generated_contract.h"
 
 #include <array>
+#include <exception>
 #include <string>
 
 namespace lemon::residency {{
 namespace {{
 
-constexpr std::array<std::string_view, {len(promotion_unit_ids)}> promotion_unit_ids{{{{
-{_cpp_array(promotion_unit_ids)}
+struct PromotionUnitMetadata {{
+    std::string_view id;
+    PromotionUnitKind kind;
+}};
+
+constexpr std::array<PromotionUnitMetadata, {len(promotion_units)}> promotion_units{{{{
+{promotion_unit_rows}
 }}}};
 
 constexpr std::array<std::string_view, {len(fallback_ids)}> fallback_ids{{{{
@@ -439,12 +464,22 @@ constexpr std::array<ReasonMetadata, {len(reason_rows)}> reasons{{{{
 
 DecodedValue<PromotionUnitId>
 GeneratedContractRegistry::decode_promotion_unit_id(std::string_view wire) {{
-    for (const auto value : promotion_unit_ids) {{
-        if (value == wire) {{
+    for (const auto& metadata : promotion_units) {{
+        if (metadata.id == wire) {{
             return DecodedValue<PromotionUnitId>::known(PromotionUnitId(std::string(wire)));
         }}
     }}
     return DecodedValue<PromotionUnitId>::unknown(wire);
+}}
+
+PromotionUnitKind
+GeneratedContractRegistry::promotion_unit_kind(const PromotionUnitId& id) noexcept {{
+    for (const auto& metadata : promotion_units) {{
+        if (metadata.id == id.token()) {{
+            return metadata.kind;
+        }}
+    }}
+    std::terminate();
 }}
 
 ReasonCode GeneratedContractRegistry::decode_reason_code(std::string_view wire) {{
@@ -488,6 +523,10 @@ GeneratedContractRegistry::reason_metadata(std::string_view code) noexcept {{
 
 DecodedValue<PromotionUnitId> decode_promotion_unit_id(std::string_view wire) {{
     return GeneratedContractRegistry::decode_promotion_unit_id(wire);
+}}
+
+PromotionUnitKind promotion_unit_kind(const PromotionUnitId& id) noexcept {{
+    return GeneratedContractRegistry::promotion_unit_kind(id);
 }}
 
 ReasonCode decode_reason_code(std::string_view wire) {{
@@ -557,13 +596,42 @@ def generate_outputs(source_path: Path) -> dict[str, bytes]:
         raise ContractGenerationError(
             "residency_profiles generator version must be an integer"
         )
+    source_support_baseline_field = _mapping(
+        profile_fields.get("source_support_baseline"),
+        "schema_registry.residency_profiles.fields.source_support_baseline",
+    )
+    if source_support_baseline_field != {
+        "type": "git_commit_sha1",
+        "required": True,
+    }:
+        raise ContractGenerationError(
+            "residency_profiles source-support baseline field drifted"
+        )
+    selection_registry_sha256_field = _mapping(
+        profile_fields.get("selection_registry_sha256"),
+        "schema_registry.residency_profiles.fields.selection_registry_sha256",
+    )
+    if selection_registry_sha256_field != {
+        "type": "sha256",
+        "required": True,
+    }:
+        raise ContractGenerationError(
+            "residency_profiles selection-registry digest field drifted"
+        )
+    source_support_baseline = _string(
+        projection.get("source_support_baseline"), "source_support_baseline"
+    )
+    selection_registry_sha256 = hashlib.sha256(_json_bytes(projection)).hexdigest()
     catalog = {
         "schema": catalog_schema,
         "generator_version": generator_version,
+        "source_support_baseline": source_support_baseline,
+        "selection_registry_sha256": selection_registry_sha256,
         "promotion_units": promotion_units,
         "fallbacks": fallbacks,
         "contract_registry": registry,
     }
+    catalog_bytes = _json_bytes(catalog)
     schemas, schema_examples = build_schemas(registry, reasons, catalog)
     http_auth = {
         "schema": registry["schema"],
@@ -582,15 +650,17 @@ def generate_outputs(source_path: Path) -> dict[str, bytes]:
     }
 
     outputs = {
-        "src/cpp/resources/residency_profiles.json": _json_bytes(catalog),
-        "src/cpp/include/lemon/residency/generated_contract.h": _render_cpp_header(),
+        "src/cpp/resources/residency_profiles.json": catalog_bytes,
+        "src/cpp/include/lemon/residency/generated_contract.h": _render_cpp_header(
+            hashlib.sha256(catalog_bytes).hexdigest()
+        ),
         "src/cpp/server/residency/generated_contract.cpp": _render_cpp_source(
-            [unit["id"] for unit in promotion_units],
+            promotion_units,
             sorted(fallback_ids),
             [_schema_type(key, schema_rows[key]) for key in SCHEMA_KEYS],
             reasons,
         ),
-        "test/residency/contract/generated/catalog.json": _json_bytes(catalog),
+        "test/residency/contract/generated/catalog.json": catalog_bytes,
         "test/residency/contract/generated/reasons.json": _json_bytes(reason_golden),
         "test/residency/contract/generated/http_auth.json": _json_bytes(http_auth),
         "test/residency/contract/generated/schema_examples.json": _json_bytes(

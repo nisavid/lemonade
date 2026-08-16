@@ -174,15 +174,34 @@
     },
     "schema": {
       "const": "residency.profiles/1.0"
+    },
+    "selection_registry_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string",
+      "x-max-utf8-bytes": 64
+    },
+    "source_support_baseline": {
+      "maxLength": 40,
+      "minLength": 40,
+      "pattern": "^[0-9a-f]{40}$",
+      "type": "string",
+      "x-max-utf8-bytes": 40
     }
   },
   "required": [
     "schema",
     "generator_version",
+    "source_support_baseline",
+    "selection_registry_sha256",
     "promotion_units",
     "fallbacks",
     "contract_registry"
   ],
   "title": "Residency Profiles",
-  "type": "object"
+  "type": "object",
+  "x-residency-required-keywords": [
+    "x-max-utf8-bytes"
+  ]
 }

@@ -1,51 +1,57 @@
 #include "lemon/residency/generated_contract.h"
 
 #include <array>
+#include <exception>
 #include <string>
 
 namespace lemon::residency {
 namespace {
 
-constexpr std::array<std::string_view, 39> promotion_unit_ids{{
-    "H-NPU-FLM-CONFLICT-XDNA2-v1",
-    "H-ROCM-ADM-GTT-HOST-v1",
-    "H-ROCM-PRE-GTT-HOST-v1",
-    "H-ROCM-REC-GTT-HOST-OWN-v1",
-    "H-ROCM-STA-GTT-HOST-v1",
-    "H-VULKAN-ADM-GTT-HOST-v1",
-    "H-VULKAN-PRE-GTT-HOST-v1",
-    "H-VULKAN-REC-GTT-HOST-OWN-v1",
-    "H-VULKAN-STA-GTT-HOST-v1",
-    "W-XDNA2-FLM-NPU-EMBEDDING-ADM-v1",
-    "W-XDNA2-FLM-NPU-EMBEDDING-LFR-v1",
-    "W-XDNA2-FLM-NPU-EMBEDDING-PIN-v1",
-    "W-XDNA2-FLM-NPU-EMBEDDING-REC-v1",
-    "W-XDNA2-FLM-NPU-EMBEDDING-STA-v1",
-    "W-XDNA2-FLM-NPU-EMBEDDING-UNL-v1",
-    "W-XDNA2-FLM-NPU-LLM-ADM-v1",
-    "W-XDNA2-FLM-NPU-LLM-LFR-v1",
-    "W-XDNA2-FLM-NPU-LLM-PIN-v1",
-    "W-XDNA2-FLM-NPU-LLM-REC-v1",
-    "W-XDNA2-FLM-NPU-LLM-STA-v1",
-    "W-XDNA2-FLM-NPU-LLM-UNL-v1",
-    "W-XDNA2-FLM-NPU-TRANSCRIPTION-ADM-v1",
-    "W-XDNA2-FLM-NPU-TRANSCRIPTION-LFR-v1",
-    "W-XDNA2-FLM-NPU-TRANSCRIPTION-PIN-v1",
-    "W-XDNA2-FLM-NPU-TRANSCRIPTION-REC-v1",
-    "W-XDNA2-FLM-NPU-TRANSCRIPTION-STA-v1",
-    "W-XDNA2-FLM-NPU-TRANSCRIPTION-UNL-v1",
-    "W-XDNA2-RYZENAI-LLM-NPU-LLM-ADM-v1",
-    "W-XDNA2-RYZENAI-LLM-NPU-LLM-LFR-v1",
-    "W-XDNA2-RYZENAI-LLM-NPU-LLM-PIN-v1",
-    "W-XDNA2-RYZENAI-LLM-NPU-LLM-REC-v1",
-    "W-XDNA2-RYZENAI-LLM-NPU-LLM-STA-v1",
-    "W-XDNA2-RYZENAI-LLM-NPU-LLM-UNL-v1",
-    "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-ADM-v1",
-    "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-LFR-v1",
-    "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-PIN-v1",
-    "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-REC-v1",
-    "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-STA-v1",
-    "W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-UNL-v1",
+struct PromotionUnitMetadata {
+    std::string_view id;
+    PromotionUnitKind kind;
+};
+
+constexpr std::array<PromotionUnitMetadata, 39> promotion_units{{
+    PromotionUnitMetadata{"H-NPU-FLM-CONFLICT-XDNA2-v1", PromotionUnitKind::CompatibilityContract},
+    PromotionUnitMetadata{"H-ROCM-ADM-GTT-HOST-v1", PromotionUnitKind::ExactCell},
+    PromotionUnitMetadata{"H-ROCM-PRE-GTT-HOST-v1", PromotionUnitKind::ExactCell},
+    PromotionUnitMetadata{"H-ROCM-REC-GTT-HOST-OWN-v1", PromotionUnitKind::ExactCell},
+    PromotionUnitMetadata{"H-ROCM-STA-GTT-HOST-v1", PromotionUnitKind::ExactCell},
+    PromotionUnitMetadata{"H-VULKAN-ADM-GTT-HOST-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"H-VULKAN-PRE-GTT-HOST-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"H-VULKAN-REC-GTT-HOST-OWN-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"H-VULKAN-STA-GTT-HOST-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-EMBEDDING-ADM-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-EMBEDDING-LFR-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-EMBEDDING-PIN-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-EMBEDDING-REC-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-EMBEDDING-STA-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-EMBEDDING-UNL-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-LLM-ADM-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-LLM-LFR-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-LLM-PIN-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-LLM-REC-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-LLM-STA-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-LLM-UNL-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-TRANSCRIPTION-ADM-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-TRANSCRIPTION-LFR-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-TRANSCRIPTION-PIN-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-TRANSCRIPTION-REC-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-TRANSCRIPTION-STA-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-FLM-NPU-TRANSCRIPTION-UNL-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-RYZENAI-LLM-NPU-LLM-ADM-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-RYZENAI-LLM-NPU-LLM-LFR-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-RYZENAI-LLM-NPU-LLM-PIN-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-RYZENAI-LLM-NPU-LLM-REC-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-RYZENAI-LLM-NPU-LLM-STA-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-RYZENAI-LLM-NPU-LLM-UNL-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-ADM-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-LFR-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-PIN-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-REC-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-STA-v1", PromotionUnitKind::LaterRuntime},
+    PromotionUnitMetadata{"W-XDNA2-WHISPERCPP-NPU-TRANSCRIPTION-UNL-v1", PromotionUnitKind::LaterRuntime},
 }};
 
 constexpr std::array<std::string_view, 14> fallback_ids{{
@@ -174,12 +180,22 @@ constexpr std::array<ReasonMetadata, 87> reasons{{
 
 DecodedValue<PromotionUnitId>
 GeneratedContractRegistry::decode_promotion_unit_id(std::string_view wire) {
-    for (const auto value : promotion_unit_ids) {
-        if (value == wire) {
+    for (const auto& metadata : promotion_units) {
+        if (metadata.id == wire) {
             return DecodedValue<PromotionUnitId>::known(PromotionUnitId(std::string(wire)));
         }
     }
     return DecodedValue<PromotionUnitId>::unknown(wire);
+}
+
+PromotionUnitKind
+GeneratedContractRegistry::promotion_unit_kind(const PromotionUnitId& id) noexcept {
+    for (const auto& metadata : promotion_units) {
+        if (metadata.id == id.token()) {
+            return metadata.kind;
+        }
+    }
+    std::terminate();
 }
 
 ReasonCode GeneratedContractRegistry::decode_reason_code(std::string_view wire) {
@@ -223,6 +239,10 @@ GeneratedContractRegistry::reason_metadata(std::string_view code) noexcept {
 
 DecodedValue<PromotionUnitId> decode_promotion_unit_id(std::string_view wire) {
     return GeneratedContractRegistry::decode_promotion_unit_id(wire);
+}
+
+PromotionUnitKind promotion_unit_kind(const PromotionUnitId& id) noexcept {
+    return GeneratedContractRegistry::promotion_unit_kind(id);
 }
 
 ReasonCode decode_reason_code(std::string_view wire) {

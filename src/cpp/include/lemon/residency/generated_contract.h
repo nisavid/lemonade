@@ -6,6 +6,8 @@
 
 namespace lemon::residency {
 
+inline constexpr std::string_view kPackagedCatalogSha256 = "a6dc806b5f69b6c44ec8e373c8880e0ce3f00da4a01a3388d00336d267176e42";
+
 struct ReasonMetadata {
     std::string_view code;
     std::string_view category_id;
@@ -19,6 +21,7 @@ struct ReasonMetadata {
 class GeneratedContractRegistry {
 public:
     static DecodedValue<PromotionUnitId> decode_promotion_unit_id(std::string_view wire);
+    static PromotionUnitKind promotion_unit_kind(const PromotionUnitId& id) noexcept;
     static ReasonCode decode_reason_code(std::string_view wire);
     static DecodedValue<FallbackId> decode_fallback_id(std::string_view wire);
     static DecodedValue<SchemaType> decode_schema_type(std::string_view wire);
@@ -26,6 +29,7 @@ public:
 };
 
 DecodedValue<PromotionUnitId> decode_promotion_unit_id(std::string_view wire);
+PromotionUnitKind promotion_unit_kind(const PromotionUnitId& id) noexcept;
 ReasonCode decode_reason_code(std::string_view wire);
 DecodedValue<FallbackId> decode_fallback_id(std::string_view wire);
 DecodedValue<SchemaType> decode_schema_type(std::string_view wire);

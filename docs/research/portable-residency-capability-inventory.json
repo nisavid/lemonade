@@ -4766,6 +4766,14 @@
             "required": true,
             "value": 1
           },
+          "source_support_baseline": {
+            "type": "git_commit_sha1",
+            "required": true
+          },
+          "selection_registry_sha256": {
+            "type": "sha256",
+            "required": true
+          },
           "promotion_units": {
             "type": "promotion_unit_array",
             "required": true,

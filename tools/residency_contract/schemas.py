@@ -73,6 +73,16 @@ def _opaque(max_bytes: int = 128) -> dict[str, Any]:
     }
 
 
+def _fixed_lower_hex(length: int) -> dict[str, Any]:
+    return {
+        "type": "string",
+        "minLength": length,
+        "maxLength": length,
+        "pattern": f"^[0-9a-f]{{{length}}}$",
+        "x-max-utf8-bytes": length,
+    }
+
+
 def _object(properties: Mapping[str, Any], required: Iterable[str]) -> dict[str, Any]:
     return {
         "type": "object",
@@ -252,6 +262,10 @@ def _text_field_schema(
         return {"const": spec.get("value")}
     if field_type == "opaque":
         return _opaque(max_bytes)
+    if field_type == "git_commit_sha1":
+        return _fixed_lower_hex(40)
+    if field_type == "sha256":
+        return _fixed_lower_hex(64)
     if field_type == "nullable_opaque":
         return {"oneOf": [{"type": "null"}, _opaque(max_bytes)]}
     if field_type == "utf8":

@@ -20,7 +20,7 @@ from .contract import (
 )
 
 EXPECTED_REGISTRY_DIGEST = (
-    "f51568e787767f1e6c6335cd99c759aad0d0b5ba23756dd11abbd45269a0d0e4"
+    "3109bd5d1d424a4b81782d4ebe3854aba0053cfa3045856ec2dcea135d003d1d"
 )
 EXPECTED_REGISTRY_KEYS = [
     "schema",
@@ -324,6 +324,7 @@ SCHEMA_FIELD_TYPES = {
     "enum",
     "enum_ref",
     "fallback_array",
+    "git_commit_sha1",
     "http_status",
     "identity_scope_array",
     "literal",
@@ -342,6 +343,7 @@ SCHEMA_FIELD_TYPES = {
     "rfc3339",
     "schema_literal",
     "schema_ref",
+    "sha256",
     "strong_etag",
     "tagged_baseline",
     "uint64",

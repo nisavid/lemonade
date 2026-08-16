@@ -23,6 +23,15 @@ class ResidencyCapabilityInventoryContractRegistryTest(
         self.assertEqual(len(registry["presentation_registry"]), 27)
         self.assertEqual(len(registry["detail_schema_registry"]), 15)
         self.assertEqual(len(registry["schema_registry"]), 12)
+        catalog_fields = registry["schema_registry"]["residency_profiles"]["fields"]
+        self.assertEqual(
+            catalog_fields["source_support_baseline"],
+            {"type": "git_commit_sha1", "required": True},
+        )
+        self.assertEqual(
+            catalog_fields["selection_registry_sha256"],
+            {"type": "sha256", "required": True},
+        )
 
         result = self._run_cli()
 
