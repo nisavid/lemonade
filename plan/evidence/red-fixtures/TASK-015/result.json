@@ -1,0 +1,22 @@
+{
+  "command": [
+    "python3",
+    "-S",
+    "test/residency/prototypes/test_task015_hatchery_attribution_public_seam.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "g++",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-015 Hatchery causal attribution prototype is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "664c743defb89d7a8552fa64bc77102fecf726e6",
+  "task_id": "TASK-015"
+}
