@@ -1,0 +1,22 @@
+{
+  "command": [
+    "python3",
+    "-S",
+    "test/residency/prototypes/test_task016_llamacpp_rocm_sizing_public_seam.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "g++",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-016 pure-offline llama.cpp/ROCm sizing prototype is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "f2260696d0242e0dd41d2706b74952e9be7fab1f",
+  "task_id": "TASK-016"
+}
