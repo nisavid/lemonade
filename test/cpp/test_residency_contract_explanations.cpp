@@ -95,7 +95,8 @@ void test_reason_code_boundaries() {
 }
 
 int main() {
-    const auto public_seam_result = run_residency_explanations_public_seam();
+    const auto public_seam_result =
+        lemon::residency::run_residency_explanations_public_seam();
     if (public_seam_result != 0) {
         return public_seam_result;
     }

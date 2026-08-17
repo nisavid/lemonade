@@ -364,7 +364,8 @@ void require_cross_component_matrix(const std::string &catalog_bytes) {
 }
 
 int main(int argc, char **argv) {
-    const auto prior_result = run_residency_catalog_public_seam(argc, argv);
+    const auto prior_result =
+        lemon::residency::run_residency_catalog_public_seam(argc, argv);
     if (prior_result != 0) {
         return prior_result;
     }

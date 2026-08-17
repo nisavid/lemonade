@@ -63,7 +63,7 @@ void require_implemented_candidates_stay_inactive() {
 
 int main(int argc, char** argv) {
     const auto public_seam_result =
-        run_residency_catalog_public_seam(argc, argv);
+        lemon::residency::run_residency_catalog_public_seam(argc, argv);
     if (public_seam_result != 0) {
         return public_seam_result;
     }

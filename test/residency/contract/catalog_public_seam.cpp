@@ -644,6 +644,8 @@ void require_digest_gate(const std::string& catalog_bytes) {
 
 }
 
+namespace lemon::residency {
+
 int run_residency_catalog_public_seam(int argc, char** argv) {
     std::string path = RESIDENCY_CATALOG_PATH;
     if (argc == 2) {
@@ -658,8 +660,10 @@ int run_residency_catalog_public_seam(int argc, char** argv) {
     return 0;
 }
 
+}
+
 #ifndef RESIDENCY_CATALOG_SEAM_NO_MAIN
 int main(int argc, char** argv) {
-    return run_residency_catalog_public_seam(argc, argv);
+    return lemon::residency::run_residency_catalog_public_seam(argc, argv);
 }
 #endif

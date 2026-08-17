@@ -965,6 +965,8 @@ void test_retention_and_compaction() {
 
 }
 
+namespace lemon::residency {
+
 int run_residency_explanations_public_seam() {
     test_reason_rendering();
     test_update_validation();
@@ -973,8 +975,10 @@ int run_residency_explanations_public_seam() {
     return 0;
 }
 
+}
+
 #ifndef RESIDENCY_EXPLANATIONS_SEAM_NO_MAIN
 int main() {
-    return run_residency_explanations_public_seam();
+    return lemon::residency::run_residency_explanations_public_seam();
 }
 #endif
