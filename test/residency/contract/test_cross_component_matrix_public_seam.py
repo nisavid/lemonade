@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -332,8 +333,16 @@ def configured_compiler() -> list[str]:
     return configured
 
 
-def compiler_command(output: Path) -> list[str]:
-    configured = configured_compiler()
+def compiler_command(
+    output: Path,
+    *,
+    configured: list[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> list[str]:
+    if configured is None:
+        configured = configured_compiler()
+    if environment is None:
+        environment = os.environ
     compiler = Path(configured[0]).name.lower()
     include_root = repo_root / "src/cpp/include"
     sources = (
@@ -352,11 +361,11 @@ def compiler_command(output: Path) -> list[str]:
             "/EHsc",
             f"/I{include_root}",
         ]
-        if os.environ.get("NLOHMANN_JSON_INCLUDE_DIR"):
-            command.append(f"/I{os.environ['NLOHMANN_JSON_INCLUDE_DIR']}")
-        if os.environ.get("MBEDTLS_INCLUDE_DIR"):
-            command.append(f"/I{os.environ['MBEDTLS_INCLUDE_DIR']}")
-        library = os.environ.get("MBEDCRYPTO_LIBRARY")
+        if environment.get("NLOHMANN_JSON_INCLUDE_DIR"):
+            command.append(f"/I{environment['NLOHMANN_JSON_INCLUDE_DIR']}")
+        if environment.get("MBEDTLS_INCLUDE_DIR"):
+            command.append(f"/I{environment['MBEDTLS_INCLUDE_DIR']}")
+        library = environment.get("MBEDCRYPTO_LIBRARY")
         require(library is not None, "MSVC mbedcrypto library is unavailable")
         command.extend(
             [
@@ -379,12 +388,33 @@ def compiler_command(output: Path) -> list[str]:
         "-I",
         str(include_root),
     ]
-    if os.environ.get("NLOHMANN_JSON_INCLUDE_DIR"):
-        command.extend(["-I", os.environ["NLOHMANN_JSON_INCLUDE_DIR"]])
-    command.extend(
-        [*(str(source) for source in sources), "-lmbedcrypto", "-o", str(output)]
-    )
+    if environment.get("NLOHMANN_JSON_INCLUDE_DIR"):
+        command.extend(["-I", environment["NLOHMANN_JSON_INCLUDE_DIR"]])
+    if environment.get("MBEDTLS_INCLUDE_DIR"):
+        command.extend(["-I", environment["MBEDTLS_INCLUDE_DIR"]])
+    library = environment.get("MBEDCRYPTO_LIBRARY") or "-lmbedcrypto"
+    command.extend([*(str(source) for source in sources), library, "-o", str(output)])
     return command
+
+
+def require_compiler_command_contract() -> None:
+    output = Path("residency-contract-matrix")
+    environment = {
+        "NLOHMANN_JSON_INCLUDE_DIR": "/fixture/nlohmann",
+        "MBEDTLS_INCLUDE_DIR": "/fixture/mbedtls",
+        "MBEDCRYPTO_LIBRARY": "/fixture/libmbedcrypto.a",
+    }
+    command = compiler_command(output, configured=["c++"], environment=environment)
+    for include in ("/fixture/nlohmann", "/fixture/mbedtls"):
+        include_index = command.index(include)
+        require(
+            command[include_index - 1] == "-I",
+            f"POSIX matrix seam miswired include {include}",
+        )
+    require(
+        "/fixture/libmbedcrypto.a" in command,
+        "POSIX matrix seam ignored MBEDCRYPTO_LIBRARY",
+    )
 
 
 def require_cpp_matrix() -> None:
@@ -792,6 +822,7 @@ def verify_cross_component_matrix() -> None:
     require_canonical_generated_contract()
     require_generator_check_matrix()
     require_package_member_matrix()
+    require_compiler_command_contract()
     require_cpp_matrix()
     require_delivery_matrix_wiring()
 

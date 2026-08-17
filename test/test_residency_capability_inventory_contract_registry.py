@@ -10,7 +10,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 ):
     """Exercise the schema-v7 contract registry through the public CLI."""
 
-    def test_schema_v7_closes_the_generated_contract_registries(self) -> None:
+    def test_010_schema_v7_closes_the_generated_contract_registries(self) -> None:
         self.assertEqual(self.inventory["schema_version"], 7)
         registry = self.inventory["contract_registry"]
         self.assertEqual(registry["schema"], "residency.explanation/1.0")
@@ -37,7 +37,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_reason_envelope_rejects_unknown_membership(self) -> None:
+    def test_020_reason_envelope_rejects_unknown_membership(self) -> None:
         def add_unknown(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
             registry["reason_envelope_registry"]["request_error"][
@@ -48,7 +48,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "membership is not closed")
 
-    def test_reason_envelope_rejects_duplicate_membership(self) -> None:
+    def test_030_reason_envelope_rejects_duplicate_membership(self) -> None:
         def duplicate_reason(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
             codes = registry["reason_envelope_registry"]["operation_revision"][
@@ -60,7 +60,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "contains duplicate values")
 
-    def test_reason_row_must_match_reverse_envelope_membership(self) -> None:
+    def test_040_reason_row_must_match_reverse_envelope_membership(self) -> None:
         def drop_context(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
             del registry["reason_registry"]["residency_capability_unsupported"][
@@ -71,7 +71,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "envelope join disagrees")
 
-    def test_operation_reason_rejects_illegal_terminal_state(self) -> None:
+    def test_050_operation_reason_rejects_illegal_terminal_state(self) -> None:
         def use_null_terminal_outcome(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
             registry["reason_registry"]["residency_operation_succeeded"]["envelopes"][
@@ -82,7 +82,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "invalid terminal outcome")
 
-    def test_contextual_http_status_must_be_registered(self) -> None:
+    def test_060_contextual_http_status_must_be_registered(self) -> None:
         def use_invalid_status(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
             registry["reason_registry"]["residency_precondition_required"]["envelopes"][
@@ -93,7 +93,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "registered HTTP status")
 
-    def test_presentation_rejects_bidi_controls(self) -> None:
+    def test_070_presentation_rejects_bidi_controls(self) -> None:
         def add_bidi_control(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
             registry["presentation_registry"]["p_success"][
@@ -104,7 +104,9 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "contains unsafe controls")
 
-    def test_detail_schema_fields_must_close_required_and_optional_lists(self) -> None:
+    def test_080_detail_schema_fields_must_close_required_and_optional_lists(
+        self,
+    ) -> None:
         def drop_detail_field(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
             del registry["detail_schema_registry"]["d_authority"]["fields"][
@@ -115,7 +117,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "field closure disagrees")
 
-    def test_schema_enum_ref_must_resolve(self) -> None:
+    def test_090_schema_enum_ref_must_resolve(self) -> None:
         def use_unknown_ref(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
             registry["schema_registry"]["operation_revision"]["fields"]["phase"][
@@ -126,7 +128,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "unknown registry path")
 
-    def test_schema_conditional_fields_must_resolve(self) -> None:
+    def test_100_schema_conditional_fields_must_resolve(self) -> None:
         def require_unknown_field(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
             registry["schema_registry"]["operation_revision"]["conditionals"][0][
@@ -137,7 +139,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "unknown schema fields")
 
-    def test_schema_conditional_require_values_must_not_be_empty(self) -> None:
+    def test_110_schema_conditional_require_values_must_not_be_empty(self) -> None:
         def empty_required_values(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
             conditional = registry["schema_registry"]["authority_transaction_result"][
@@ -150,7 +152,31 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "require_values is empty")
 
-    def test_resource_vocabulary_is_closed(self) -> None:
+    def test_120_schema_conditional_rejects_mixed_predicate_modes(self) -> None:
+        def add_unless_predicate(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            conditional = registry["schema_registry"]["authority_transaction_result"][
+                "conditionals"
+            ][0]
+            conditional["unless"] = conditional["if"]
+
+        self._replace_inventory(add_unless_predicate)
+
+        self.assert_invalid(self._run_cli(), "exactly one predicate mode")
+
+    def test_130_schema_assertion_rejects_conditional_consequences(self) -> None:
+        def replace_predicate_with_assertion(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            conditional = registry["schema_registry"]["authority_transaction_result"][
+                "conditionals"
+            ][0]
+            conditional["assert"] = conditional.pop("if")
+
+        self._replace_inventory(replace_predicate_with_assertion)
+
+        self.assert_invalid(self._run_cli(), "assert cannot include consequences")
+
+    def test_140_resource_vocabulary_is_closed(self) -> None:
         def add_writer_state(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
             registry["http_auth_registry"]["resource_vocabularies"][
@@ -161,7 +187,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "resource vocabularies")
 
-    def test_promotion_units_remain_inactive(self) -> None:
+    def test_150_promotion_units_remain_inactive(self) -> None:
         def raise_capability(inventory: dict[str, object]) -> None:
             inventory["exact_cells"][0]["capability_level"] = "modeled"
 

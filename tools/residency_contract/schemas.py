@@ -741,11 +741,17 @@ def _conditionals(raw_value: Any) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for index, raw_conditional in enumerate(_list(raw_value, "schema conditionals")):
         conditional = _mapping(raw_conditional, f"schema conditionals[{index}]")
+        label = f"schema conditionals[{index}]"
+        predicate_modes = set(conditional) & {"if", "unless", "assert"}
+        if len(predicate_modes) != 1:
+            raise SchemaRenderError(f"{label} must contain exactly one predicate mode")
         if "assert" in conditional:
+            if set(conditional) != {"assert"}:
+                raise SchemaRenderError(f"{label}.assert cannot include consequences")
             assertion = copy.deepcopy(
                 _mapping(
                     conditional["assert"],
-                    f"schema conditionals[{index}].assert",
+                    f"{label}.assert",
                 )
             )
             keyword = (
@@ -757,7 +763,6 @@ def _conditionals(raw_value: Any) -> list[dict[str, Any]]:
             continue
         key = "if" if "if" in conditional else "unless"
         raw_predicate = _mapping(conditional.get(key), f"schema conditional {key}")
-        label = f"schema conditionals[{index}]"
         predicate = _predicate(raw_predicate, label)
         if key == "unless":
             predicate = {"not": predicate}

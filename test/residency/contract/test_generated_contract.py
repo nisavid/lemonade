@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import os
@@ -827,55 +828,102 @@ def require_schema_translation_mutations_rejected(files: dict[str, bytes]) -> No
         "reasons"
     ]
 
-    predicate_registry = json.loads(json.dumps(source_registry))
-    predicate_conditional = predicate_registry["schema_registry"][
-        "authority_transaction_result"
-    ]["conditionals"][0]
-    predicate_conditional["if"] = {"contexts": ["health_read"]}
-    try:
-        registry_module.validate_contract_registry(predicate_registry)
-    except ValueError as error:
-        require(
-            "predicate is not translatable" in str(error),
-            "schema predicate mutation diagnostic drifted",
-        )
-    else:
-        raise AssertionError("non-translatable schema predicate was accepted")
+    def conditional(document: dict[str, Any]) -> dict[str, Any]:
+        registry = document.get("contract_registry", document)
+        return registry["schema_registry"]["authority_transaction_result"][
+            "conditionals"
+        ][0]
 
-    consequence_catalog = json.loads(json.dumps(catalog))
-    consequence_registry = consequence_catalog["contract_registry"]
-    consequence_conditional = consequence_registry["schema_registry"][
-        "authority_transaction_result"
-    ]["conditionals"][0]
-    consequence_conditional.pop("require_nonempty")
-    try:
-        schemas_module.build_schemas(consequence_registry, reasons, consequence_catalog)
-    except schemas_module.SchemaRenderError as error:
-        require(
-            "consequence is empty" in str(error),
-            "schema consequence mutation diagnostic drifted",
-        )
-    else:
-        raise AssertionError("empty schema consequence was accepted")
+    def check_registry(document: dict[str, Any]) -> None:
+        registry_module.validate_contract_registry(document)
 
-    empty_values_catalog = json.loads(json.dumps(catalog))
-    empty_values_registry = empty_values_catalog["contract_registry"]
-    empty_values_conditional = empty_values_registry["schema_registry"][
-        "authority_transaction_result"
-    ]["conditionals"][0]
-    empty_values_conditional.pop("require_nonempty")
-    empty_values_conditional["require_values"] = {}
-    try:
-        schemas_module.build_schemas(
-            empty_values_registry, reasons, empty_values_catalog
-        )
-    except schemas_module.SchemaRenderError as error:
-        require(
-            "require_values is empty" in str(error),
-            "empty require-values mutation diagnostic drifted",
-        )
-    else:
-        raise AssertionError("empty require-values consequence was accepted")
+    def check_schemas(document: dict[str, Any]) -> None:
+        registry = document["contract_registry"]
+        schemas_module.build_schemas(registry, reasons, document)
+
+    def set_untranslatable(target: dict[str, Any]) -> None:
+        target["if"] = {"contexts": ["health_read"]}
+
+    def drop_consequence(target: dict[str, Any]) -> None:
+        target.pop("require_nonempty")
+
+    def empty_values(target: dict[str, Any]) -> None:
+        target.pop("require_nonempty")
+        target["require_values"] = {}
+
+    def add_unless(target: dict[str, Any]) -> None:
+        target["unless"] = target["if"]
+
+    def assert_with_consequence(target: dict[str, Any]) -> None:
+        target["assert"] = target.pop("if")
+
+    cases = (
+        (
+            source_registry,
+            set_untranslatable,
+            check_registry,
+            ValueError,
+            "predicate is not translatable",
+            "non-translatable schema predicate",
+        ),
+        (
+            catalog,
+            drop_consequence,
+            check_schemas,
+            schemas_module.SchemaRenderError,
+            "consequence is empty",
+            "empty schema consequence",
+        ),
+        (
+            catalog,
+            empty_values,
+            check_schemas,
+            schemas_module.SchemaRenderError,
+            "require_values is empty",
+            "empty require-values consequence",
+        ),
+        (
+            source_registry,
+            add_unless,
+            check_registry,
+            ValueError,
+            "exactly one predicate mode",
+            "mixed schema predicate modes",
+        ),
+        (
+            catalog,
+            add_unless,
+            check_schemas,
+            schemas_module.SchemaRenderError,
+            "exactly one predicate mode",
+            "renderer mixed schema predicate modes",
+        ),
+        (
+            source_registry,
+            assert_with_consequence,
+            check_registry,
+            ValueError,
+            "assert cannot include consequences",
+            "schema assertion consequence",
+        ),
+        (
+            catalog,
+            assert_with_consequence,
+            check_schemas,
+            schemas_module.SchemaRenderError,
+            "assert cannot include consequences",
+            "renderer schema assertion consequence",
+        ),
+    )
+    for document, mutate, check, error_type, expected, label in cases:
+        mutated = copy.deepcopy(document)
+        mutate(conditional(mutated))
+        try:
+            check(mutated)
+        except error_type as error:
+            require(expected in str(error), f"{label} diagnostic drifted")
+        else:
+            raise AssertionError(f"{label} was accepted")
 
 
 def require_schemas_and_examples(files: dict[str, bytes]) -> None:

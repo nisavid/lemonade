@@ -1209,8 +1209,11 @@ def _validate_schema_conditional(
     unknown = set(conditional) - allowed
     if unknown:
         fail(f"{label} has unknown fields: {sorted(unknown)}")
-    if not set(conditional) & {"if", "unless", "assert"}:
-        fail(f"{label} lacks a closed predicate")
+    predicate_modes = set(conditional) & {"if", "unless", "assert"}
+    if len(predicate_modes) != 1:
+        fail(f"{label} must contain exactly one predicate mode")
+    if "assert" in predicate_modes and set(conditional) != {"assert"}:
+        fail(f"{label}.assert cannot include consequences")
     for key in ("if", "unless", "assert"):
         if key in conditional:
             predicate = require_mapping(conditional[key], f"{label}.{key}")

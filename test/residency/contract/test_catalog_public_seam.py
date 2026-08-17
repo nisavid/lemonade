@@ -115,12 +115,37 @@ def require_posix_command_contract() -> None:
         raise AssertionError("POSIX catalog seam kept fallback with an override")
 
 
+def require_msvc_command_contract() -> None:
+    output = Path("catalog-public-seam.exe")
+    try:
+        compiler_command(output, configured=["cl.exe"], environment={})
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("MSVC catalog seam accepted a missing mbedcrypto library")
+
+    environment: Mapping[str, str] = {
+        "NLOHMANN_JSON_INCLUDE_DIR": "C:/fixture/nlohmann",
+        "MBEDTLS_INCLUDE_DIR": "C:/fixture/mbedtls",
+        "MBEDCRYPTO_LIBRARY": "C:/fixture/mbedcrypto.lib",
+    }
+    command = compiler_command(output, configured=["cl.exe"], environment=environment)
+    for include in ("C:/fixture/nlohmann", "C:/fixture/mbedtls"):
+        if f"/I{include}" not in command:
+            raise AssertionError(f"MSVC catalog seam miswired include {include}")
+    if "C:/fixture/mbedcrypto.lib" not in command:
+        raise AssertionError("MSVC catalog seam ignored MBEDCRYPTO_LIBRARY")
+    if f"/Fo{output.parent}{os.sep}" not in command:
+        raise AssertionError("MSVC catalog seam miswired the object output directory")
+
+
 def main() -> int:
     if not CATALOG_HEADER.is_file() or not CATALOG_SOURCE.is_file():
         sys.stderr.write("TASK-010 residency catalog contract is unavailable\n")
         return 1
 
     require_posix_command_contract()
+    require_msvc_command_contract()
 
     with tempfile.TemporaryDirectory(prefix="residency-catalog-") as directory:
         suffix = ".exe" if os.name == "nt" else ""

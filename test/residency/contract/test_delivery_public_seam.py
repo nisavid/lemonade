@@ -235,12 +235,10 @@ def require_artifact_consumer_checkout_hardening() -> None:
 
 
 def hosted_generation_job(workflow: str) -> str:
-    return require_match(
-        r"^  portable-residency-inventory:\s*\n(?P<body>.*?)"
-        r"(?=^  [A-Za-z0-9_-]+:\s*$|\Z)",
-        workflow,
-        "portable residency CI job is unavailable",
-    ).group("body")
+    try:
+        return workflow_job(workflow, "portable-residency-inventory")
+    except AssertionError as error:
+        raise AssertionError("portable residency CI job is unavailable") from error
 
 
 def require_last_hosted_job_fixture() -> None:
