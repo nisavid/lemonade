@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -22,13 +23,21 @@ def configured_compiler() -> list[str]:
     return configured
 
 
-def compiler_command(output: Path) -> list[str]:
-    configured = configured_compiler()
+def compiler_command(
+    output: Path,
+    *,
+    configured: list[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> list[str]:
+    if configured is None:
+        configured = configured_compiler()
+    if environment is None:
+        environment = os.environ
     executable = Path(configured[0]).name.lower()
     sources = [CATALOG_SOURCE, GENERATED_SOURCE, PUBLIC_SEAM]
-    nlohmann_include = os.environ.get("NLOHMANN_JSON_INCLUDE_DIR")
-    mbedtls_include = os.environ.get("MBEDTLS_INCLUDE_DIR")
-    mbedcrypto_library = os.environ.get("MBEDCRYPTO_LIBRARY")
+    nlohmann_include = environment.get("NLOHMANN_JSON_INCLUDE_DIR")
+    mbedtls_include = environment.get("MBEDTLS_INCLUDE_DIR")
+    mbedcrypto_library = environment.get("MBEDCRYPTO_LIBRARY")
 
     if executable in {"cl", "cl.exe"}:
         command = [
@@ -71,10 +80,12 @@ def compiler_command(output: Path) -> list[str]:
     ]
     if nlohmann_include:
         command.extend(["-I", nlohmann_include])
+    if mbedtls_include:
+        command.extend(["-I", mbedtls_include])
     command.extend(
         [
             *(str(source) for source in sources),
-            "-lmbedcrypto",
+            mbedcrypto_library or "-lmbedcrypto",
             "-o",
             str(output),
         ]
@@ -82,10 +93,34 @@ def compiler_command(output: Path) -> list[str]:
     return command
 
 
+def require_posix_command_contract() -> None:
+    output = Path("catalog-public-seam")
+    fallback = compiler_command(output, configured=["c++"], environment={})
+    if "-lmbedcrypto" not in fallback:
+        raise AssertionError("POSIX catalog seam omitted the mbedcrypto fallback")
+
+    environment: Mapping[str, str] = {
+        "NLOHMANN_JSON_INCLUDE_DIR": "/fixture/nlohmann",
+        "MBEDTLS_INCLUDE_DIR": "/fixture/mbedtls",
+        "MBEDCRYPTO_LIBRARY": "/fixture/libmbedcrypto.a",
+    }
+    configured = compiler_command(output, configured=["c++"], environment=environment)
+    for include in ("/fixture/nlohmann", "/fixture/mbedtls"):
+        include_index = configured.index(include)
+        if configured[include_index - 1] != "-I":
+            raise AssertionError(f"POSIX catalog seam miswired include {include}")
+    if "/fixture/libmbedcrypto.a" not in configured:
+        raise AssertionError("POSIX catalog seam ignored MBEDCRYPTO_LIBRARY")
+    if "-lmbedcrypto" in configured:
+        raise AssertionError("POSIX catalog seam kept fallback with an override")
+
+
 def main() -> int:
     if not CATALOG_HEADER.is_file() or not CATALOG_SOURCE.is_file():
         sys.stderr.write("TASK-010 residency catalog contract is unavailable\n")
         return 1
+
+    require_posix_command_contract()
 
     with tempfile.TemporaryDirectory(prefix="residency-catalog-") as directory:
         suffix = ".exe" if os.name == "nt" else ""

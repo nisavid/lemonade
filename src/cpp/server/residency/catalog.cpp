@@ -47,13 +47,13 @@ namespace {
 
 using json = nlohmann::json;
 
-constexpr std::size_t MAX_DIAGNOSTIC_BYTES = 1000;
-constexpr std::size_t EXPECTED_PROMOTION_UNIT_COUNT = 39;
-constexpr std::size_t EXPECTED_FALLBACK_COUNT = 14;
+constexpr std::size_t max_diagnostic_bytes = 1000;
+constexpr std::size_t expected_promotion_unit_count = 39;
+constexpr std::size_t expected_fallback_count = 14;
 
 using FallbackRegistry = std::map<std::string, std::vector<OperationTemplate>>;
 
-constexpr std::array<std::string_view, 5> MATERIAL_PROFILE_KEYS{{
+constexpr std::array<std::string_view, 5> material_profile_keys{{
     "configuration_profile",
     "hardware_profile",
     "observation_contract",
@@ -77,8 +77,8 @@ private:
 }
 
 std::string bounded_diagnostic(std::string message) {
-    if (message.size() > MAX_DIAGNOSTIC_BYTES) {
-        message.resize(MAX_DIAGNOSTIC_BYTES);
+    if (message.size() > max_diagnostic_bytes) {
+        message.resize(max_diagnostic_bytes);
     }
     return message;
 }
@@ -373,15 +373,15 @@ std::map<std::string, std::string> parse_material_profiles(
     }
     std::map<std::string, std::string> result;
     for (const auto& [key, member] : value.items()) {
-        if (std::find(MATERIAL_PROFILE_KEYS.begin(), MATERIAL_PROFILE_KEYS.end(), key) ==
-            MATERIAL_PROFILE_KEYS.end()) {
+        if (std::find(material_profile_keys.begin(), material_profile_keys.end(), key) ==
+            material_profile_keys.end()) {
             reject(
                 CatalogLoadStatus::Malformed,
                 std::string(label) + " has unknown field " + key);
         }
         result.emplace(key, require_string(member, label));
     }
-    if (require_all && result.size() != MATERIAL_PROFILE_KEYS.size()) {
+    if (require_all && result.size() != material_profile_keys.size()) {
         reject(CatalogLoadStatus::Missing, std::string(label) + " is incomplete");
     }
     return result;
@@ -391,7 +391,7 @@ std::map<std::string, std::string> parse_exact_material_profiles(
     const json& value,
     std::string_view label) {
     std::map<std::string, std::string> result;
-    for (const auto key : MATERIAL_PROFILE_KEYS) {
+    for (const auto key : material_profile_keys) {
         result.emplace(
             std::string(key),
             required_string(value, key, label));
@@ -474,7 +474,7 @@ struct ParsedCatalog {
 };
 
 FallbackRegistry parse_fallback_registry(const json& value) {
-    if (!value.is_array() || value.size() != EXPECTED_FALLBACK_COUNT) {
+    if (!value.is_array() || value.size() != expected_fallback_count) {
         reject(CatalogLoadStatus::Missing, "catalog fallback roster is incomplete");
     }
     FallbackRegistry registry;
@@ -1025,7 +1025,7 @@ ParsedCatalog parse_catalog(std::string_view bytes) {
     const auto fallback_registry =
         parse_fallback_registry(required(document, "fallbacks", "catalog"));
     const auto& raw_units = required(document, "promotion_units", "catalog");
-    if (!raw_units.is_array() || raw_units.size() != EXPECTED_PROMOTION_UNIT_COUNT) {
+    if (!raw_units.is_array() || raw_units.size() != expected_promotion_unit_count) {
         reject(CatalogLoadStatus::Missing, "catalog promotion roster is incomplete");
     }
 
@@ -1152,9 +1152,9 @@ bool selector_profiles_valid(const std::map<std::string, std::string>& profiles)
     return std::all_of(profiles.begin(), profiles.end(), [](const auto& member) {
         return !member.second.empty() &&
                std::find(
-                   MATERIAL_PROFILE_KEYS.begin(),
-                   MATERIAL_PROFILE_KEYS.end(),
-                   member.first) != MATERIAL_PROFILE_KEYS.end();
+                   material_profile_keys.begin(),
+                   material_profile_keys.end(),
+                   member.first) != material_profile_keys.end();
     });
 }
 
@@ -1312,7 +1312,7 @@ CatalogValidationResult validate_catalog_document(std::string_view bytes) {
 
 CatalogLoadResult load_packaged_catalog(std::string_view bytes) {
     const auto digest = sha256_hex(bytes);
-    if (!digest.has_value() || *digest != kPackagedCatalogSha256) {
+    if (!digest.has_value() || *digest != packaged_catalog_sha256) {
         return CatalogLoadResult{
             CatalogLoadStatus::DigestMismatch,
             "packaged catalog SHA-256 does not match the generated lock",

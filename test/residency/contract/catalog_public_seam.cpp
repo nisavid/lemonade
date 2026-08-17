@@ -243,7 +243,7 @@ void require_missing_selection(const CatalogSelection& selection,
 
 void require_packaged_catalog(const std::string& catalog_bytes) {
     require_sha256(
-        kPackagedCatalogSha256,
+        packaged_catalog_sha256,
         "packaged catalog digest is not lowercase SHA-256");
 
     const json canonical = json::parse(catalog_bytes);
@@ -267,7 +267,7 @@ void require_packaged_catalog(const std::string& catalog_bytes) {
     require(packaged.accepted(), "packaged catalog failed its digest gate");
     require(packaged.snapshot.has_value(), "packaged catalog omitted its snapshot");
     require(
-        packaged.snapshot->catalog_sha256() == kPackagedCatalogSha256,
+        packaged.snapshot->catalog_sha256() == packaged_catalog_sha256,
         "snapshot catalog digest differs from the generated lock");
     require(
         packaged.snapshot->source_support_baseline() == SOURCE_SUPPORT_BASELINE,
@@ -644,7 +644,7 @@ void require_digest_gate(const std::string& catalog_bytes) {
 
 }
 
-int main(int argc, char** argv) {
+int run_residency_catalog_public_seam(int argc, char** argv) {
     std::string path = RESIDENCY_CATALOG_PATH;
     if (argc == 2) {
         path = argv[1];
@@ -657,3 +657,9 @@ int main(int argc, char** argv) {
     require_digest_gate(catalog_bytes);
     return 0;
 }
+
+#ifndef RESIDENCY_CATALOG_SEAM_NO_MAIN
+int main(int argc, char** argv) {
+    return run_residency_catalog_public_seam(argc, argv);
+}
+#endif

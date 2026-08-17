@@ -234,13 +234,25 @@ def require_artifact_consumer_checkout_hardening() -> None:
         )
 
 
-def require_hosted_generation_checks() -> None:
-    workflow = read(".github/workflows/docs_and_style.yml")
-    job = require_match(
-        r"^  portable-residency-inventory:\s*\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\s*$)",
+def hosted_generation_job(workflow: str) -> str:
+    return require_match(
+        r"^  portable-residency-inventory:\s*\n(?P<body>.*?)"
+        r"(?=^  [A-Za-z0-9_-]+:\s*$|\Z)",
         workflow,
         "portable residency CI job is unavailable",
     ).group("body")
+
+
+def require_last_hosted_job_fixture() -> None:
+    workflow = "jobs:\n  portable-residency-inventory:\n    fixture: final-job\n"
+    job = hosted_generation_job(workflow)
+    require("fixture: final-job" in job, "final hosted job body was truncated")
+
+
+def require_hosted_generation_checks() -> None:
+    require_last_hosted_job_fixture()
+    workflow = read(".github/workflows/docs_and_style.yml")
+    job = hosted_generation_job(workflow)
 
     pinned_fetch = job.find(
         "git fetch --no-tags --depth=1 https://github.com/lemonade-sdk/lemonade.git "

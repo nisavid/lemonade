@@ -655,11 +655,19 @@ def _cpp_string(value: str) -> str:
         "\r": "\\r",
         "\t": "\\t",
     }
-    return (
-        '"'
-        + "".join(replacements.get(character, character) for character in value)
-        + '"'
-    )
+    literals: list[str] = []
+    ascii_run: list[str] = []
+    for character in value:
+        if ord(character) < 0x80:
+            ascii_run.append(replacements.get(character, character))
+            continue
+        if ascii_run:
+            literals.append('"' + "".join(ascii_run) + '"')
+            ascii_run.clear()
+        literals.extend(f'"\\x{byte:02x}"' for byte in character.encode("utf-8"))
+    if ascii_run or not literals:
+        literals.append('"' + "".join(ascii_run) + '"')
+    return "".join(literals)
 
 
 def _cpp_array(values: Iterable[str], indent: str = "    ") -> str:
@@ -683,9 +691,9 @@ def _render_cpp_header(
         b"\n"
         b"namespace lemon::residency {\n"
         b"\n"
-        + f"inline constexpr std::string_view kPackagedCatalogSha256 = {_cpp_string(packaged_catalog_sha256)};\n".encode()
-        + f"inline constexpr std::string_view kExplanationSchemaId = {_cpp_string(_string(explanation_schema.get('id'), 'explanation schema ID'))};\n".encode()
-        + "inline constexpr SchemaVersion kExplanationSchemaVersion{{{}, {}}};\n".format(
+        + f"inline constexpr std::string_view packaged_catalog_sha256 = {_cpp_string(packaged_catalog_sha256)};\n".encode()
+        + f"inline constexpr std::string_view explanation_schema_id = {_cpp_string(_string(explanation_schema.get('id'), 'explanation schema ID'))};\n".encode()
+        + "inline constexpr SchemaVersion explanation_schema_version{{{}, {}}};\n".format(
             _nonnegative_integer(
                 explanation_schema.get("major"), "explanation schema major"
             ),
@@ -693,7 +701,7 @@ def _render_cpp_header(
                 explanation_schema.get("minor"), "explanation schema minor"
             ),
         ).encode()
-        + "inline constexpr std::size_t kMaxExplanationReasons = {};\n".format(
+        + "inline constexpr std::size_t max_explanation_reasons = {};\n".format(
             _nonnegative_integer(
                 explanation_schema.get("max_reasons"),
                 "maximum explanation reasons",
@@ -707,7 +715,7 @@ def _render_cpp_header(
         b"    std::uint64_t forgotten_after_terminal_seconds;\n"
         b"};\n"
         b"\n"
-        + "inline constexpr OperationRetentionPolicy kOperationRetentionPolicy{{{}, {}, {}, {}}};\n".format(
+        + "inline constexpr OperationRetentionPolicy operation_retention_policy{{{}, {}, {}, {}}};\n".format(
             str(bool(operation_retention.get("active_expires"))).lower(),
             str(bool(operation_retention.get("recovery_required_expires"))).lower(),
             _nonnegative_integer(

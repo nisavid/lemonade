@@ -1,6 +1,6 @@
-#define main residency_explanations_public_seam_main
+#define RESIDENCY_EXPLANATIONS_SEAM_NO_MAIN
 #include "../residency/contract/explanations_public_seam.cpp"
-#undef main
+#undef RESIDENCY_EXPLANATIONS_SEAM_NO_MAIN
 
 namespace {
 
@@ -95,7 +95,7 @@ void test_reason_code_boundaries() {
 }
 
 int main() {
-    const auto public_seam_result = residency_explanations_public_seam_main();
+    const auto public_seam_result = run_residency_explanations_public_seam();
     if (public_seam_result != 0) {
         return public_seam_result;
     }

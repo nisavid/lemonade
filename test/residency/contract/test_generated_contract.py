@@ -195,10 +195,10 @@ def require_catalog_contract(files: dict[str, bytes]) -> None:
         "decode_schema_type",
         "promotion_unit_kind",
         "reason_metadata",
-        "kExplanationSchemaId",
-        "kExplanationSchemaVersion",
-        "kMaxExplanationReasons",
-        "kOperationRetentionPolicy",
+        "explanation_schema_id",
+        "explanation_schema_version",
+        "max_explanation_reasons",
+        "operation_retention_policy",
         "operation_family",
         "operation_reason_rule_metadata",
         "operation_reason_is_legal",
@@ -209,7 +209,7 @@ def require_catalog_contract(files: dict[str, bytes]) -> None:
     ):
         require(symbol in header, f"generated header lacks {symbol}")
     require(
-        f'inline constexpr std::string_view kPackagedCatalogSha256 = "{catalog_digest}";'
+        f'inline constexpr std::string_view packaged_catalog_sha256 = "{catalog_digest}";'
         in header,
         "generated header lacks the exact packaged catalog digest",
     )
@@ -407,6 +407,12 @@ def require_generated_cpp_compiles(output_root: Path, files: dict[str, bytes]) -
         bool(configured) and shutil.which(configured[0]) is not None,
         f"C++ compiler is unavailable: {configured!r}",
     )
+    cpp_string = import_module("residency_contract.generator")._cpp_string
+    unicode_literal = cpp_string("éA")
+    require(
+        unicode_literal == r'"\xc3""\xa9""A"',
+        "C++ string literal did not isolate UTF-8 byte escapes",
+    )
     include_root = output_root / "src/cpp/include"
     generated_source = output_root / "src/cpp/server/residency/generated_contract.cpp"
     with tempfile.TemporaryDirectory(prefix="residency-contract-cpp-") as directory:
@@ -469,22 +475,25 @@ def require_generated_cpp_compiles(output_root: Path, files: dict[str, bytes]) -
         operation_legality_checks_text = operation_legality_checks(registry)
         seam.write_text(
             '#include "lemon/residency/generated_contract.h"\n\n'
+            "#include <string>\n"
             "#include <type_traits>\n\n"
             "using namespace lemon::residency;\n\n"
             "int main() {\n"
             "    static_assert(std::is_same_v<decltype(operation_family(OperationKind::Admission)), std::optional<OperationFamily>>);\n"
-            f'    if (kPackagedCatalogSha256 != "{hashlib.sha256(files["src/cpp/resources/residency_profiles.json"]).hexdigest()}") return 3;\n'
+            f"    const std::string unicode_literal = {unicode_literal};\n"
+            "    if (unicode_literal.size() != 3 || static_cast<unsigned char>(unicode_literal[0]) != 0xc3 || static_cast<unsigned char>(unicode_literal[1]) != 0xa9 || unicode_literal[2] != 'A') return 151;\n"
+            f'    if (packaged_catalog_sha256 != "{hashlib.sha256(files["src/cpp/resources/residency_profiles.json"]).hexdigest()}") return 3;\n'
             f"{known_checks}\n"
             f"{internal_key_checks}\n"
             f"{promotion_kind_checks}\n"
             f"{operation_family_checks}\n"
             f"{operation_reason_checks_text}\n"
             f"{operation_legality_checks_text}\n"
-            '    if (kExplanationSchemaId != "residency.explanation/1.0") return 120;\n'
-            "    if (kExplanationSchemaVersion.major != 1 || kExplanationSchemaVersion.minor != 0) return 121;\n"
-            "    if (kMaxExplanationReasons != 16) return 122;\n"
-            "    if (kOperationRetentionPolicy.active_expires || kOperationRetentionPolicy.recovery_required_expires) return 123;\n"
-            "    if (kOperationRetentionPolicy.terminal_detail_seconds != 86400 || kOperationRetentionPolicy.forgotten_after_terminal_seconds != 604800) return 124;\n"
+            '    if (explanation_schema_id != "residency.explanation/1.0") return 120;\n'
+            "    if (explanation_schema_version.major != 1 || explanation_schema_version.minor != 0) return 121;\n"
+            "    if (max_explanation_reasons != 16) return 122;\n"
+            "    if (operation_retention_policy.active_expires || operation_retention_policy.recovery_required_expires) return 123;\n"
+            "    if (operation_retention_policy.terminal_detail_seconds != 86400 || operation_retention_policy.forgotten_after_terminal_seconds != 604800) return 124;\n"
             '    const auto* succeeded = operation_reason_rule_metadata("residency_operation_succeeded");\n'
             "    if (succeeded == nullptr || succeeded->canonical_rank != 0 || succeeded->priority_band != 0 || succeeded->secondary_only) return 125;\n"
             '    const auto* cancelled = operation_reason_rule_metadata("residency_cancelled");\n'

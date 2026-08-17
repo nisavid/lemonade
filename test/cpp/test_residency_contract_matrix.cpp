@@ -1,9 +1,10 @@
-#define main residency_catalog_public_seam_main
+#define RESIDENCY_CATALOG_SEAM_NO_MAIN
 #include "../residency/contract/catalog_public_seam.cpp"
-#undef main
+#undef RESIDENCY_CATALOG_SEAM_NO_MAIN
 
 #include "lemon/residency/explanations.h"
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <string>
@@ -320,7 +321,7 @@ void require_generated_registries(const json &root) {
             "Sender-controlled message",
         };
         const auto rendered = render_reason_projection(
-            kExplanationSchemaVersion, kExplanationSchemaVersion,
+            explanation_schema_version, explanation_schema_version,
             sender_projection);
         require(rendered.status == ReasonRenderStatus::Known &&
                     rendered.reason.has_value(),
@@ -348,7 +349,7 @@ void require_generated_registries(const json &root) {
 }
 
 void require_cross_component_matrix(const std::string &catalog_bytes) {
-    require(kPackagedCatalogSha256 == expected_catalog_sha256,
+    require(packaged_catalog_sha256 == expected_catalog_sha256,
             "generated catalog digest constant drifted");
     const auto root = json::parse(catalog_bytes);
     const auto loaded = load_packaged_catalog(catalog_bytes);
@@ -363,7 +364,7 @@ void require_cross_component_matrix(const std::string &catalog_bytes) {
 }
 
 int main(int argc, char **argv) {
-    const auto prior_result = residency_catalog_public_seam_main(argc, argv);
+    const auto prior_result = run_residency_catalog_public_seam(argc, argv);
     if (prior_result != 0) {
         return prior_result;
     }

@@ -123,7 +123,7 @@ def require_canonical_generated_contract() -> None:
         "utf-8"
     )
     locked_digests = re.findall(
-        r'kPackagedCatalogSha256\s*=\s*"([0-9a-f]{64})"', header
+        r'packaged_catalog_sha256\s*=\s*"([0-9a-f]{64})"', header
     )
     require(
         locked_digests == [expected_catalog_sha256],
@@ -620,6 +620,46 @@ def docker_payload_check(content: str) -> bool:
     )
 
 
+def release_delivery_blocks(release: str) -> tuple[str, str]:
+    rpm_start = release.find("- name: Install and verify Lemonade (.rpm)")
+    require(rpm_start >= 0, "rpm install step anchor is unavailable")
+    rpm_end = release.find("\n      - name:", rpm_start + 1)
+    rpm = release[rpm_start : rpm_end if rpm_end >= 0 else len(release)]
+    windows_start = release.find("  test-embeddable-windows:")
+    require(windows_start >= 0, "windows embeddable job anchor is unavailable")
+    next_job = re.search(
+        r"^  [A-Za-z0-9_-]+:\s*$",
+        release[windows_start + 3 :],
+        flags=re.MULTILINE,
+    )
+    windows_end = (
+        windows_start + 3 + next_job.start() if next_job is not None else len(release)
+    )
+    windows = release[windows_start:windows_end]
+    return rpm, windows
+
+
+def require_delivery_anchor_guards(release: str) -> None:
+    fixtures = (
+        (
+            "- name: Install and verify Lemonade (.rpm)",
+            "rpm install step anchor is unavailable",
+        ),
+        (
+            "  test-embeddable-windows:",
+            "windows embeddable job anchor is unavailable",
+        ),
+    )
+    for anchor, expected in fixtures:
+        mutated = release.replace(anchor, "missing-delivery-anchor", 1)
+        try:
+            release_delivery_blocks(mutated)
+        except AssertionError as error:
+            require(str(error) == expected, "delivery anchor diagnostic drifted")
+        else:
+            raise AssertionError(expected)
+
+
 def require_delivery_matrix_wiring() -> None:
     cmake = read("CMakeLists.txt").decode("utf-8")
     cpp_path = "test/cpp/test_residency_contract_matrix.cpp"
@@ -675,21 +715,8 @@ def require_delivery_matrix_wiring() -> None:
     release = read(".github/workflows/cpp_server_build_test_release.yml").decode(
         "utf-8"
     )
-    rpm_start = release.find("- name: Install and verify Lemonade (.rpm)")
-    require(rpm_start >= 0, "RPM delivery matrix step is unavailable")
-    rpm_end = release.find("\n      - name:", rpm_start + 1)
-    rpm = release[rpm_start : rpm_end if rpm_end >= 0 else len(release)]
-    windows_start = release.find("  test-embeddable-windows:")
-    require(windows_start >= 0, "Windows delivery matrix job is unavailable")
-    next_job = re.search(
-        r"^  [A-Za-z0-9_-]+:\s*$",
-        release[windows_start + 3 :],
-        flags=re.MULTILINE,
-    )
-    windows_end = (
-        windows_start + 3 + next_job.start() if next_job is not None else len(release)
-    )
-    windows = release[windows_start : windows_end if windows_end >= 0 else len(release)]
+    require_delivery_anchor_guards(release)
+    rpm, windows = release_delivery_blocks(release)
     require(
         posix_payload_check(
             embeddable,

@@ -9,10 +9,10 @@
 
 namespace lemon::residency {
 
-inline constexpr std::string_view kPackagedCatalogSha256 = "a6dc806b5f69b6c44ec8e373c8880e0ce3f00da4a01a3388d00336d267176e42";
-inline constexpr std::string_view kExplanationSchemaId = "residency.explanation/1.0";
-inline constexpr SchemaVersion kExplanationSchemaVersion{1, 0};
-inline constexpr std::size_t kMaxExplanationReasons = 16;
+inline constexpr std::string_view packaged_catalog_sha256 = "a6dc806b5f69b6c44ec8e373c8880e0ce3f00da4a01a3388d00336d267176e42";
+inline constexpr std::string_view explanation_schema_id = "residency.explanation/1.0";
+inline constexpr SchemaVersion explanation_schema_version{1, 0};
+inline constexpr std::size_t max_explanation_reasons = 16;
 
 struct OperationRetentionPolicy {
     bool active_expires;
@@ -21,7 +21,7 @@ struct OperationRetentionPolicy {
     std::uint64_t forgotten_after_terminal_seconds;
 };
 
-inline constexpr OperationRetentionPolicy kOperationRetentionPolicy{false, false, 86400, 604800};
+inline constexpr OperationRetentionPolicy operation_retention_policy{false, false, 86400, 604800};
 
 struct ReasonMetadata {
     std::string_view code;

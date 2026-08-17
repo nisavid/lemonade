@@ -1,6 +1,6 @@
-#define main residency_catalog_public_seam_main
+#define RESIDENCY_CATALOG_SEAM_NO_MAIN
 #include "../residency/contract/catalog_public_seam.cpp"
-#undef main
+#undef RESIDENCY_CATALOG_SEAM_NO_MAIN
 
 namespace lemon::residency::catalog_internal {
 
@@ -63,7 +63,7 @@ void require_implemented_candidates_stay_inactive() {
 
 int main(int argc, char** argv) {
     const auto public_seam_result =
-        residency_catalog_public_seam_main(argc, argv);
+        run_residency_catalog_public_seam(argc, argv);
     if (public_seam_result != 0) {
         return public_seam_result;
     }

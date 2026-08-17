@@ -1,5 +1,6 @@
 #include "lemon/residency/explanations.h"
 
+#include <algorithm>
 #include <limits>
 #include <unordered_map>
 #include <utility>
@@ -61,6 +62,17 @@ RenderedReason render_unknown_reason(std::string code) {
             "warning",
             "Residency condition",
             "A residency condition is not recognized by this version."};
+}
+
+WireReasonProjection to_wire_reason_projection(const RenderedReason &reason) {
+    WireReasonProjection projection;
+    projection.code = reason.code;
+    projection.category_id = reason.category_id;
+    projection.presentation_id = reason.presentation_id;
+    projection.severity = reason.severity;
+    projection.title = reason.title;
+    projection.default_message = reason.default_message;
+    return projection;
 }
 
 bool same_reason(const RenderedReason &left, const RenderedReason &right) {
@@ -135,7 +147,7 @@ struct ValidatedDraft {
 
 ValidatedDraft validate_draft(const OperationExplanationDraft &draft) {
     if (!same_schema_version(draft.schema_version,
-                             kExplanationSchemaVersion)) {
+                             explanation_schema_version)) {
         return {ExplanationUpdateStatus::UnsupportedSchema, {},
                 "the explanation schema is not authoritative"};
     }
@@ -162,7 +174,7 @@ ValidatedDraft validate_draft(const OperationExplanationDraft &draft) {
         return {ExplanationUpdateStatus::Invalid, {},
                 "a terminal explanation requires a primary reason"};
     }
-    if (draft.reasons.size() > kMaxExplanationReasons) {
+    if (draft.reasons.size() > max_explanation_reasons) {
         return {ExplanationUpdateStatus::Invalid, {},
                 "the explanation has too many reasons"};
     }
@@ -170,7 +182,6 @@ ValidatedDraft validate_draft(const OperationExplanationDraft &draft) {
     std::vector<RenderedReason> rendered;
     rendered.reserve(draft.reasons.size());
     const OperationReasonRuleMetadata *previous_rule = nullptr;
-    std::string previous_code;
     for (std::size_t index = 0; index < draft.reasons.size(); ++index) {
         const auto &reason = draft.reasons[index];
         if (!valid_reason_code(reason.code)) {
@@ -191,14 +202,21 @@ ValidatedDraft validate_draft(const OperationExplanationDraft &draft) {
             return {ExplanationUpdateStatus::Invalid, {},
                     "an explanation reason is outside its operation envelope"};
         }
-        if (previous_rule != nullptr && previous_code != reason.code &&
+        if (std::find_if(
+                rendered.begin(), rendered.end(),
+                [&reason](const RenderedReason &candidate) {
+                    return candidate.code == reason.code;
+                }) != rendered.end()) {
+            return {ExplanationUpdateStatus::Invalid, {},
+                    "the explanation repeats a reason code"};
+        }
+        if (previous_rule != nullptr &&
             previous_rule->canonical_rank > rule->canonical_rank) {
             return {ExplanationUpdateStatus::Invalid, {},
                     "the explanation reasons are not in canonical order"};
         }
         rendered.push_back(render_known_reason(reason.code, *metadata));
         previous_rule = rule;
-        previous_code = reason.code;
     }
     return {ExplanationUpdateStatus::Accepted, std::move(rendered), {}};
 }
@@ -442,11 +460,11 @@ OperationExplanationStoreSnapshot::with_revision(
         ExplanationTimePoint forget_time;
         if (!checked_add_seconds(
                 committed_at,
-                kOperationRetentionPolicy.terminal_detail_seconds,
+                operation_retention_policy.terminal_detail_seconds,
                 detail_expiry) ||
             !checked_add_seconds(
                 committed_at,
-                kOperationRetentionPolicy.forgotten_after_terminal_seconds,
+                operation_retention_policy.forgotten_after_terminal_seconds,
                 forget_time)) {
             return rejected_update(ExplanationUpdateStatus::Invalid, *this,
                                    "the explanation retention deadline overflows");
@@ -459,9 +477,7 @@ OperationExplanationStoreSnapshot::with_revision(
     stored_draft.reasons.clear();
     stored_draft.reasons.reserve(validated.reasons.size());
     for (const auto &reason : validated.reasons) {
-        stored_draft.reasons.push_back(
-            {reason.code, reason.category_id, reason.presentation_id,
-             reason.severity, reason.title, reason.default_message});
+        stored_draft.reasons.push_back(to_wire_reason_projection(reason));
     }
     auto revision = std::shared_ptr<const OperationExplanationRevision>(
         new OperationExplanationRevision(

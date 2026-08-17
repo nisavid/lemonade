@@ -1,6 +1,7 @@
 #include "lemon/residency/explanations.h"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -204,10 +205,14 @@ ExplanationTimePoint at(std::int64_t epoch_seconds) {
 WireReasonProjection reason(std::string code, std::string category_id,
                             std::string presentation_id, std::string severity,
                             std::string title, std::string default_message) {
-    return {
-        std::move(code),     std::move(category_id), std::move(presentation_id),
-        std::move(severity), std::move(title),       std::move(default_message),
-    };
+    WireReasonProjection projection;
+    projection.code = std::move(code);
+    projection.category_id = std::move(category_id);
+    projection.presentation_id = std::move(presentation_id);
+    projection.severity = std::move(severity);
+    projection.title = std::move(title);
+    projection.default_message = std::move(default_message);
+    return projection;
 }
 
 WireReasonProjection cancelled_reason() {
@@ -672,8 +677,51 @@ void test_update_validation() {
                       ExplanationUpdateStatus::Invalid,
                       "reversed distinct-code reason order was accepted");
 
+    auto adjacent_duplicate = resource_draft(
+        "adjacent-duplicate", 0, OperationPhase::Evaluating, std::nullopt,
+        {cancelled_reason(), cancelled_reason()});
+    const auto adjacent_duplicate_update =
+        empty.with_revision(adjacent_duplicate, at(10));
+    require_rejection(adjacent_duplicate_update, ExplanationUpdateStatus::Invalid,
+                      "adjacent duplicate reason code was accepted");
+    require(adjacent_duplicate_update.diagnostic ==
+                "the explanation repeats a reason code",
+            "adjacent duplicate reason used the wrong diagnostic");
+
+    auto nonadjacent_duplicate = resource_draft(
+        "nonadjacent-duplicate", 0, OperationPhase::Evaluating, std::nullopt,
+        {cancelled_reason(), capability_reason(), cancelled_reason()});
+    const auto nonadjacent_duplicate_update =
+        empty.with_revision(nonadjacent_duplicate, at(10));
+    require_rejection(nonadjacent_duplicate_update,
+                      ExplanationUpdateStatus::Invalid,
+                      "nonadjacent duplicate reason code was accepted");
+    require(nonadjacent_duplicate_update.diagnostic ==
+                "the explanation repeats a reason code",
+            "nonadjacent duplicate reason used the wrong diagnostic");
+
     auto max_reasons = resource_draft("max-reasons", 0);
-    max_reasons.reasons.assign(16, cancelled_reason());
+    const std::vector<std::string> max_reason_codes{
+        "residency_recovery_not_ready",
+        "residency_cancelled",
+        "residency_plan_invalidated",
+        "residency_footprint_confidence_insufficient",
+        "residency_capability_unsupported",
+        "residency_evidence_missing",
+        "residency_evidence_stale",
+        "residency_evidence_unhealthy",
+        "residency_evidence_incoherent",
+        "residency_evidence_superseded",
+        "slots_pinned_error",
+        "router_residency_conflict",
+        "residency_protected_pinned",
+        "residency_protected_in_use",
+        "residency_capacity_insufficient",
+        "residency_plan_infeasible",
+    };
+    for (const auto &code : max_reason_codes) {
+        max_reasons.reasons.push_back(reason(code, {}, {}, {}, {}, {}));
+    }
     require(empty.with_revision(max_reasons, at(10)).status ==
                 ExplanationUpdateStatus::Accepted,
             "the 16-reason boundary was rejected");
@@ -917,10 +965,16 @@ void test_retention_and_compaction() {
 
 }
 
-int main() {
+int run_residency_explanations_public_seam() {
     test_reason_rendering();
     test_update_validation();
     test_revision_and_snapshot_semantics();
     test_retention_and_compaction();
     return 0;
 }
+
+#ifndef RESIDENCY_EXPLANATIONS_SEAM_NO_MAIN
+int main() {
+    return run_residency_explanations_public_seam();
+}
+#endif
