@@ -1,0 +1,22 @@
+{
+  "command": [
+    "python3",
+    "-S",
+    "test/residency/prototypes/test_task017_llamacpp_soft_release_public_seam.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "g++",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-017 llama.cpp soft-release prototype is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "f047ba860058c8b1a00527586fd9107ac3db79b7",
+  "task_id": "TASK-017"
+}
