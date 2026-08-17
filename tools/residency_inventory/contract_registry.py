@@ -1232,6 +1232,8 @@ def _validate_schema_conditional(
         values = require_mapping(
             conditional["require_values"], f"{label}.require_values"
         )
+        if not values:
+            fail(f"{label}.require_values is empty")
         unknown_fields = set(values) - set(fields)
         if unknown_fields:
             fail(f"{label}.require_values references unknown fields")

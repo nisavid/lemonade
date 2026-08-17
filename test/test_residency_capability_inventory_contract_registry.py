@@ -137,6 +137,19 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "unknown schema fields")
 
+    def test_schema_conditional_require_values_must_not_be_empty(self) -> None:
+        def empty_required_values(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            conditional = registry["schema_registry"]["authority_transaction_result"][
+                "conditionals"
+            ][0]
+            conditional.pop("require_nonempty")
+            conditional["require_values"] = {}
+
+        self._replace_inventory(empty_required_values)
+
+        self.assert_invalid(self._run_cli(), "require_values is empty")
+
     def test_resource_vocabulary_is_closed(self) -> None:
         def add_writer_state(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]

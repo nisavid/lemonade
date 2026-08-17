@@ -8,8 +8,8 @@
 namespace lemon::residency {
 namespace {
 
-constexpr std::size_t kMaxIdentityBytes = 128;
-constexpr std::size_t kMaxReasonCodeBytes = 128;
+constexpr std::size_t max_identity_bytes = 128;
+constexpr std::size_t max_reason_code_bytes = 128;
 
 bool same_schema_version(SchemaVersion left, SchemaVersion right) noexcept {
     return left.major == right.major && left.minor == right.minor;
@@ -28,11 +28,11 @@ bool valid_ascii_token(const std::string &value, std::size_t max_bytes) {
 }
 
 bool valid_identity(const std::string &value) {
-    return valid_ascii_token(value, kMaxIdentityBytes);
+    return valid_ascii_token(value, max_identity_bytes);
 }
 
 bool valid_reason_code(const std::string &value) {
-    return valid_ascii_token(value, kMaxReasonCodeBytes);
+    return valid_ascii_token(value, max_reason_code_bytes);
 }
 
 RenderedReason render_known_reason(std::string code,

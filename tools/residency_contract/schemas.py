@@ -720,6 +720,8 @@ def _consequence(conditional: Mapping[str, Any], label: str) -> dict[str, Any] |
         )
     if "require_values" in conditional:
         values = conditional["require_values"]
+        if not values:
+            raise SchemaRenderError(f"{label}.require_values is empty")
         parts.append(
             {
                 "properties": {

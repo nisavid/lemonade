@@ -858,6 +858,25 @@ def require_schema_translation_mutations_rejected(files: dict[str, bytes]) -> No
     else:
         raise AssertionError("empty schema consequence was accepted")
 
+    empty_values_catalog = json.loads(json.dumps(catalog))
+    empty_values_registry = empty_values_catalog["contract_registry"]
+    empty_values_conditional = empty_values_registry["schema_registry"][
+        "authority_transaction_result"
+    ]["conditionals"][0]
+    empty_values_conditional.pop("require_nonempty")
+    empty_values_conditional["require_values"] = {}
+    try:
+        schemas_module.build_schemas(
+            empty_values_registry, reasons, empty_values_catalog
+        )
+    except schemas_module.SchemaRenderError as error:
+        require(
+            "require_values is empty" in str(error),
+            "empty require-values mutation diagnostic drifted",
+        )
+    else:
+        raise AssertionError("empty require-values consequence was accepted")
+
 
 def require_schemas_and_examples(files: dict[str, bytes]) -> None:
     schemas, resources, contract_validator = load_schema_contract(files)
