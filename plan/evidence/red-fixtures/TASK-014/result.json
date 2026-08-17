@@ -1,0 +1,23 @@
+{
+  "command": [
+    "python3",
+    "-S",
+    "test/residency/prototypes/test_task014_durable_process_public_seam.py",
+    "--attest-recorded-observation"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "g++",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-014 durable-root and process-ownership prototype is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "63619c3cc45549fd277d0a83802074b54b9f4c24",
+  "task_id": "TASK-014"
+}
