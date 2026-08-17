@@ -654,6 +654,600 @@
         "TASK-108",
         "TASK-109"
       ]
+    },
+    {
+      "phase": 1,
+      "phase_checkpoint_commit": "cda741771f669c976b4f442e2c624b64b3cfdb16",
+      "phase_checkpoint_tree": "66a6fe105a1cb11bfa047c9b7bbac67c92e1517e",
+      "record_digest": "56674361917a58fdadf32f8de0738a79e891d054d6cfda5c150216427e20b475",
+      "task_evidence": [
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "test/residency/contract/test_types_public_seam.py"
+            ],
+          "commit": "5ea4d182e4e853d02f984eab293d9c98cc599c40",
+            "result": "pass",
+          "tree": "19008ebb5220fd2296784d775331ca1aa70901ed"
+          },
+          "outputs": [
+            {
+              "path": "CMakeLists.txt",
+              "sha256": "17af7cb80ab41ac8950855d3f11e44ceb8c63612ddf3cc700178390161c1b3a3"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "fc71962b7c1efdb280c86aa1261439bb4845f1f93225778e14ecc55aaf96154c"
+            },
+            {
+              "path": "src/cpp/include/lemon/residency/types.h",
+              "sha256": "bdaa17034c6f36966979d7bace533f47e696efb9c9244d3c7e5918b7bb03d65d"
+            },
+            {
+              "path": "test/cpp/test_residency_contract_types.cpp",
+              "sha256": "dae73142fcd39d4d9ce1f26e956be86e5762fbe290a3300130fa14d25c64c3d3"
+            },
+            {
+              "path": "test/residency/contract/test_types_public_seam.py",
+              "sha256": "7ab0db4e6faa5d7c495aa642cd608106fb699a33f95d6c7578cfdc1eed6c55c6"
+            },
+            {
+              "path": "test/residency/contract/types_public_seam.cpp",
+              "sha256": "c52340e854bb3e22f317192ed1d2a10073d1897defd128182e07df051f5ca2da"
+            }
+          ],
+          "red_fixture": {
+          "bundle_sha256": "68250a1e4c025729d15e3f3d952fd51776e0841945e858b4b5fffb76254a90e1",
+            "command": [
+              "python3",
+              "test/residency/contract/test_types_public_seam.py"
+            ],
+          "evidence_commit": "217fbcc8849596cd0900e3e8b9c1fa4e96104fba",
+          "evidence_tree": "274bffd95d6321a608cb2b4960b5bfa8bee2f84a",
+            "failure_signature": "TASK-008 public residency type contract is unavailable",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-008/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-008/test.patch",
+            "patch_sha256": "d3c845771d4ddadea7ae0bcf64fce16d190181ba7ca82a270f27a670e63297e8",
+            "test_paths": [
+              "test/residency/contract/types_public_seam.cpp",
+              "test/residency/contract/test_types_public_seam.py"
+            ]
+          },
+        "task_base_commit": "e7a626685f827ead314743da78d3a8b0daa36334",
+          "task_id": "TASK-008"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "test/residency/contract/test_generated_contract.py"
+            ],
+          "commit": "f225f6f59fb9ab57f15d8f4f4b04eeca7c055256",
+            "result": "pass",
+          "tree": "6e1e8118fc4c87aac598f417569a53c5fc5dbb68"
+          },
+          "outputs": [
+            {
+              "path": "docs/api/schemas/residency/artifact_quarantine_record.schema.json",
+              "sha256": "6646037c89ef0daae03b0a2256766250f9fb32da60b2213b9c01f1b1907126a8"
+            },
+            {
+              "path": "docs/api/schemas/residency/artifact_writer_job_revision.schema.json",
+              "sha256": "3110a6afae304af0e25476fa9532ee5c018bcfdb02c61c08987eff6abcc8663c"
+            },
+            {
+              "path": "docs/api/schemas/residency/artifact_writer_request_result.schema.json",
+              "sha256": "657f99e7ee3d01d1d496562d5a586e54edde33a6d9e1b3dbc01979e27f9a1c6d"
+            },
+            {
+              "path": "docs/api/schemas/residency/authority_transaction_result.schema.json",
+              "sha256": "171c4bceabe4cfa9b3bbc7b8bbdbdd91d64cba19219a1ffd85ebf9b559ebe1fa"
+            },
+            {
+              "path": "docs/api/schemas/residency/coordinator_step_result.schema.json",
+              "sha256": "268da5d1521ade1962a35559b6ab07e44d0bdf91bf70f8a2023a996123951e61"
+            },
+            {
+              "path": "docs/api/schemas/residency/operation_revision.schema.json",
+              "sha256": "9bffbd8b4e0738630963abac9130c73fe5faa249a8287eb177773140ab424f2b"
+            },
+            {
+              "path": "docs/api/schemas/residency/reason.schema.json",
+              "sha256": "96c5a0cd3e6ff976cbbf61abb58a8f58fa51e740ab75782f66c7aa40a1ddfd24"
+            },
+            {
+              "path": "docs/api/schemas/residency/request_error.schema.json",
+              "sha256": "47a669c38510c2a27251092235f65edeff63775bb64cb9b988e36b2315f277bd"
+            },
+            {
+              "path": "docs/api/schemas/residency/residency_profiles.schema.json",
+              "sha256": "0664fdee488c4fb7456f3c4b6110c4c96d5ec6a78b6071cc3fd8d27b5aa7c1cd"
+            },
+            {
+              "path": "docs/api/schemas/residency/resource_diagnostic.schema.json",
+              "sha256": "0484abfa4cb593ba011dfa8f28a6f92a72cde9088547efefd6c422f3d1857feb"
+            },
+            {
+              "path": "docs/api/schemas/residency/response_diagnostic.schema.json",
+              "sha256": "25accc162157b8a86b938420adec2d73eb0884a0a18a3bc658c857007f453b82"
+            },
+            {
+              "path": "docs/api/schemas/residency/staged_import_session_record.schema.json",
+              "sha256": "3c5798768f17d7f436391098494819f683f151ba261fdfc31325974286de4b5a"
+            },
+            {
+              "path": "docs/research/portable-residency-capability-inventory.json",
+              "sha256": "855d91cc1fdb75b15c550d0a6afed759d4d93e2923fa8f64f84f097e9cdcf97b"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "c810773aea6271ef4a5b6ec9d19bb8975366d13a4345c39d0d86fe571df8bdd2"
+            },
+            {
+              "path": "src/cpp/include/lemon/residency/generated_contract.h",
+              "sha256": "d1c2ba7e5f00cfb10b544545999ee5d7609293385da090517beb68d76581a5e5"
+            },
+            {
+              "path": "src/cpp/resources/residency_profiles.json",
+              "sha256": "29823d72251928072fdeb3f6047962b51a9efb4bee9c650c0a5adec35d6a0d29"
+            },
+            {
+              "path": "src/cpp/server/residency/generated_contract.cpp",
+              "sha256": "02948ede3de520f83ff8c5758ae2a2ca721c5a408a95d2c22ce681d77063b274"
+            },
+            {
+              "path": "test/residency/contract/generated/catalog.json",
+              "sha256": "29823d72251928072fdeb3f6047962b51a9efb4bee9c650c0a5adec35d6a0d29"
+            },
+            {
+              "path": "test/residency/contract/generated/http_auth.json",
+              "sha256": "fd9a351b56a28dc4111dbd30f257ed87859d0107af638643742f6462e8dc0b77"
+            },
+            {
+              "path": "test/residency/contract/generated/reasons.json",
+              "sha256": "815d048976cc6ccc2066c5b5b2ea3d50aae4081626f74407c9cd14bf05302353"
+            },
+            {
+              "path": "test/residency/contract/generated/schema_examples.json",
+              "sha256": "e43caa893ecd1bbef42cfe4f3a60f2ec6d08f7694a6d5e33a3d9bfd6236cd78c"
+            },
+            {
+              "path": "test/residency/contract/test_generated_contract.py",
+              "sha256": "b7d7798c4678b5c94084489c00ec3f1603c3e2e4dab1e89ea84274e74373599b"
+            },
+            {
+              "path": "test/test_residency_capability_inventory_contract_registry.py",
+              "sha256": "755f7d40acd734f10d9b9817927a7e57c972bd308dd0bae3c0dcb7dbe0df7871"
+            },
+            {
+              "path": "test/test_residency_capability_inventory_source.py",
+              "sha256": "9f967ee132dbbe8f7e45eae3c11d85b354c7e6ba68d1a44753d4031d1de15a09"
+            },
+            {
+              "path": "test/test_residency_later_promotion_roster.py",
+              "sha256": "48e92b7d34025320fa5b61acfbf530c0a38acce69b93c8f4c75c7d7c8bd85828"
+            },
+            {
+              "path": "tools/generate_residency_contract.py",
+              "sha256": "b077f409d5c0eba173ab01304fc6f9fd09cfa5353f4f667f989bec88d28d6c77"
+            },
+            {
+              "path": "tools/residency_contract/__init__.py",
+              "sha256": "c40f6e1bf5d644a79272672c5a397ccf58577cbacbc3ae6eaaf12502c7798923"
+            },
+            {
+              "path": "tools/residency_contract/generator.py",
+              "sha256": "b5971d3e372ae3751c1f205af9737c572be9663f9f473b8533c181802943708f"
+            },
+            {
+              "path": "tools/residency_contract/schemas.py",
+              "sha256": "7f62fb7d7df07b44ea8567b53e37ab6c6c3db1ea482ecb0e97114eebd5968a6f"
+            },
+            {
+              "path": "tools/residency_contract/validation.py",
+              "sha256": "f44d3a67605314d1d994e40c19d04829ee4bfcfb4106635446f8a1865f88a963"
+            },
+            {
+              "path": "tools/residency_inventory/contract_registry.py",
+              "sha256": "4190527a5065897c42f8b5e42fc572bba6412d8083814c354e667ece47114d1c"
+            },
+            {
+              "path": "tools/residency_inventory/promotions.py",
+              "sha256": "54beed3c1decbb1e1c422972522823457c27fe40aa021de6d90389c79cfcce00"
+            },
+            {
+              "path": "tools/residency_inventory/schema.py",
+              "sha256": "2699eb2fe07da3698210b5ca05c7bb5b50c4fe838a5b9ca6ba0dea913306560f"
+            }
+          ],
+          "red_fixture": {
+          "bundle_sha256": "057a77739b46d6b40af00eec682667f30c800297c8bf5017d827596f024d88d1",
+            "command": [
+              "python3",
+              "test/residency/contract/test_generated_contract.py"
+            ],
+          "evidence_commit": "a5ce18e0cb5ab2c7467acaf629cde8155b3be950",
+          "evidence_tree": "92576dd99a80db33bd11da88584275c8b8c208c2",
+            "failure_signature": "TASK-009 residency contract generator is unavailable",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-009/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-009/test.patch",
+            "patch_sha256": "2e714d47f1e9ee501d47fad011586c916b4b2ea085db58601bf0e904a00620c3",
+            "test_paths": [
+              "test/residency/contract/test_generated_contract.py"
+            ]
+          },
+        "task_base_commit": "5ea4d182e4e853d02f984eab293d9c98cc599c40",
+          "task_id": "TASK-009"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "test/residency/contract/test_catalog_public_seam.py"
+            ],
+          "commit": "fbd4d3c86d6b88c53c96bcd1eb28a066a03a9a65",
+            "result": "pass",
+          "tree": "89e3195a4a023169f7c85fd02aa21c5d7f52906b"
+          },
+          "outputs": [
+            {
+              "path": "CMakeLists.txt",
+              "sha256": "bfe8305a5a42f8a20f550800046f4bec5f77b729b758402754ca66f0f3d7331e"
+            },
+            {
+              "path": "docs/api/schemas/residency/residency_profiles.schema.json",
+              "sha256": "ea7a59eba140f1c5cf6b19735092aea2972214565ca540aa4d6105278aab882f"
+            },
+            {
+              "path": "docs/research/portable-residency-capability-inventory.json",
+              "sha256": "bfc28b215486e29391ab64c0471e17edd7965b42b5f591131ad2e325c51f0739"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "54f2b8d6ebe28e06392196365da76b02d32750ee8233bb24b9861120242737a2"
+            },
+            {
+              "path": "src/cpp/include/lemon/residency/catalog.h",
+              "sha256": "5f782ff049743ac01e0a9108e83a604cf57c0f9e8f8e2cc93acfaa4b0796dc24"
+            },
+            {
+              "path": "src/cpp/include/lemon/residency/generated_contract.h",
+              "sha256": "e8e2142202711a97ed8d5b380642454a3f84292a88f30b474d35e7a2a9876b4f"
+            },
+            {
+              "path": "src/cpp/resources/residency_profiles.json",
+              "sha256": "a6dc806b5f69b6c44ec8e373c8880e0ce3f00da4a01a3388d00336d267176e42"
+            },
+            {
+              "path": "src/cpp/server/residency/catalog.cpp",
+              "sha256": "172682ffd2cdc85286a393c97be7fddcf2028ac386581a0eadda5b823469b99e"
+            },
+            {
+              "path": "src/cpp/server/residency/generated_contract.cpp",
+              "sha256": "7da4eaf16cf7a69f1e6fd28d5ec3f76a9e8b02f60f23b868a94aed25715d1b62"
+            },
+            {
+              "path": "test/cpp/test_residency_contract_catalog.cpp",
+              "sha256": "c6df80a50f6f3bf3d3afa2992688a11004111b9bc7904e0ffd4f9aaf3e5fb13d"
+            },
+            {
+              "path": "test/residency/contract/catalog_public_seam.cpp",
+              "sha256": "8cfca6e052b33659fd7b8bce386952d2dc283197e9c77f83baa680d9f51109ba"
+            },
+            {
+              "path": "test/residency/contract/generated/catalog.json",
+              "sha256": "a6dc806b5f69b6c44ec8e373c8880e0ce3f00da4a01a3388d00336d267176e42"
+            },
+            {
+              "path": "test/residency/contract/generated/schema_examples.json",
+              "sha256": "e9704aefbef5dff3cd8c75584897a3f2852862265d8dd3141f22b9d162bc0fcc"
+            },
+            {
+              "path": "test/residency/contract/test_catalog_public_seam.py",
+              "sha256": "52d21a4b5d7bdae0c4f2d92b92ff6779fcaaef1e31a4876ca74569080e42aaf0"
+            },
+            {
+              "path": "test/residency/contract/test_generated_contract.py",
+              "sha256": "c065e23cfa67b54178dd1bb96fff3c286cf6be3d2673b5e42d526e6a912bbedf"
+            },
+            {
+              "path": "test/test_residency_capability_inventory_contract_registry.py",
+              "sha256": "8ed65636d214e1bc8ffee9960ed979a993b4a5ee0c95a12d33f511bfe053b198"
+            },
+            {
+              "path": "tools/residency_contract/generator.py",
+              "sha256": "548b3932661a250e4d4605b9230c3368fe2edf3d575924b307cd7a0c05416766"
+            },
+            {
+              "path": "tools/residency_contract/schemas.py",
+              "sha256": "4b29cbf4e229de85e236197bdb5e4ac8c782697f1b0f0cd538066f9281a728b5"
+            },
+            {
+              "path": "tools/residency_inventory/contract_registry.py",
+              "sha256": "ca04945d27080021cb0e4edda0c0d7e8ba8d9ee8d043ad4960946ebaad6abf3f"
+            }
+          ],
+          "red_fixture": {
+          "bundle_sha256": "0d503482d5e45070f9ab98454ac118b04fa2e4c2f5fa0ebb53c2c5b7c5971a7d",
+            "command": [
+              "python3",
+              "test/residency/contract/test_catalog_public_seam.py"
+            ],
+          "evidence_commit": "444a0cc1441017e9a862a52b0c05cd071b3bd192",
+          "evidence_tree": "d18cab8cf695bd4c95cd7207b063b394c8299d80",
+            "failure_signature": "TASK-010 residency catalog contract is unavailable",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-010/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-010/test.patch",
+            "patch_sha256": "e31b19d7f54068b3ab7fba1ddc19c79272a4465b025c26c2052999817fd3f3d1",
+            "test_paths": [
+              "test/residency/contract/catalog_public_seam.cpp",
+              "test/residency/contract/test_catalog_public_seam.py"
+            ]
+          },
+        "task_base_commit": "f225f6f59fb9ab57f15d8f4f4b04eeca7c055256",
+          "task_id": "TASK-010"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "test/residency/contract/test_explanations_public_seam.py"
+            ],
+          "commit": "42ddef5ffcf27d4f56e4fd5d431dc1f24aff3405",
+            "result": "pass",
+          "tree": "e225313b9865a4f6d2e7f694475a56aaa40d9636"
+          },
+          "outputs": [
+            {
+              "path": "CMakeLists.txt",
+              "sha256": "b02e436a1e68c95b82326262d15e1d16c8e4fdec33ef36944eb1e1450dea6b69"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "0c2c009fb87875cd923f6c90ab783cb50ad1abf15fb35e073dfa97e4166d495d"
+            },
+            {
+              "path": "src/cpp/include/lemon/residency/explanations.h",
+              "sha256": "a57bd462a8dca61880ed192cf8c0c9eb6ef67400065463c1aa5c033cf1076103"
+            },
+            {
+              "path": "src/cpp/include/lemon/residency/generated_contract.h",
+              "sha256": "def4a1764639987e092ef498cf735fed2fe25e0c23e767d39ff36add4e159ccc"
+            },
+            {
+              "path": "src/cpp/server/residency/explanations.cpp",
+              "sha256": "b85dffb9f1a4e5491233f2e665bbed64e49fbe59e349868926ca5c7c44c0531a"
+            },
+            {
+              "path": "src/cpp/server/residency/generated_contract.cpp",
+              "sha256": "fc9bcfad865a8e94320d7f378493d97240e220376ed3b5b1b89851c8713040b5"
+            },
+            {
+              "path": "test/cpp/test_residency_contract_explanations.cpp",
+              "sha256": "35004f346968178143eca03b6a864e7d677f8aba671a890e60bbd497b16d23f8"
+            },
+            {
+              "path": "test/residency/contract/explanations_public_seam.cpp",
+              "sha256": "cf33576cfd1fe09858381f54f3bf60935d17fddb1e5ca9cbd0a90082bd14288f"
+            },
+            {
+              "path": "test/residency/contract/test_explanations_public_seam.py",
+              "sha256": "4daa875f277752011b569ef56193ff2441e7e588677a51ba36b5b93375b5e937"
+            },
+            {
+              "path": "test/residency/contract/test_generated_contract.py",
+              "sha256": "1d35552a08f2b1127a7ef27207b7fed5a05bc450340b452b2c0b756b76524d40"
+            },
+            {
+              "path": "tools/residency_contract/generator.py",
+              "sha256": "dc39b75f8179ade1abad4059b977abd1c9eedf760c945482f7135b7f0f8a0a61"
+            }
+          ],
+          "red_fixture": {
+          "bundle_sha256": "b6f6082eeb2e569db5b97603d025fe44a635f0a947f8877546466a9a70201421",
+            "command": [
+              "python3",
+              "test/residency/contract/test_explanations_public_seam.py"
+            ],
+          "evidence_commit": "309bd11654f0a1cc9a81ab8e51edfa12d6a78a2f",
+          "evidence_tree": "0cb9b0def447cff3c148e68de902b0e4e6503344",
+            "failure_signature": "TASK-011 residency explanation contract is unavailable",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-011/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-011/test.patch",
+            "patch_sha256": "cb738c5b0999fb1f026258adcacc9309c7227c5ec085aed75899672b40793e19",
+            "test_paths": [
+              "test/residency/contract/explanations_public_seam.cpp",
+              "test/residency/contract/test_explanations_public_seam.py"
+            ]
+          },
+        "task_base_commit": "fbd4d3c86d6b88c53c96bcd1eb28a066a03a9a65",
+          "task_id": "TASK-011"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/contract/test_delivery_public_seam.py"
+            ],
+          "commit": "fdc3cec7ec20bcac1f904b5135b23b3ba3cf8b68",
+            "result": "pass",
+          "tree": "2bf439b14a3f390daecab3fba1257a1fb98764ef"
+          },
+          "outputs": [
+            {
+              "path": ".github/actions/install-lemonade-deb/action.yml",
+              "sha256": "5a77dfb702ac084acbc257c525b8e601082109a52ea88b391fa03863df76589f"
+            },
+            {
+              "path": ".github/actions/install-lemonade-server-dmg/action.yml",
+              "sha256": "a578fa22fccb862acb053799677fac3e28b9649d77ad84919fa8a9cd355c5547"
+            },
+            {
+              "path": ".github/actions/install-lemonade-server-msi/action.yml",
+              "sha256": "dd05ecd7f464412c59e3714270f393d173407932fdb06b61a46e3697f59d9b38"
+            },
+            {
+              "path": ".github/actions/smoke-test-embeddable/action.yml",
+              "sha256": "8914e5d50eecfcc90383a48d48b875f79c4ecdc3deb03e48f5a080aefacd3ba2"
+            },
+            {
+              "path": ".github/workflows/cpp_server_build_test_release.yml",
+              "sha256": "a9bc7b002829ba16ae59a3128e175fc84d1d5c17f2976ca956e025199a51fb73"
+            },
+            {
+              "path": ".github/workflows/docs_and_style.yml",
+              "sha256": "05e83e4d23d2b5f4ada08fce85a0e64d2899047058b0f99e22f5f349cb5a1c1b"
+            },
+            {
+              "path": "CMakeLists.txt",
+              "sha256": "172eb06d0551e42651de8125bd45089d31efe12649b86b5232562ac77134f9e7"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "f9905feda9eb509988d8899667cb3bd082d555689ef7765c174d35b16fcdf579"
+            },
+            {
+              "path": "src/cpp/installer/Product.wxs.in",
+              "sha256": "3a7dad096a7f10efb055fa79a0077a4aa5b9502e47aca5388ce6ff8caa03bf6d"
+            },
+            {
+              "path": "test/residency/contract/test_delivery_public_seam.py",
+              "sha256": "3532f37317e8a7ee1b3a928b49b0049cead07ef1cb7e6f33eb2a62ae0724ed35"
+            }
+          ],
+          "red_fixture": {
+          "bundle_sha256": "9e8bfbbd51f3056d0b291369ab657f5f5a271e2c1b424464bc222b5cf026303f",
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/contract/test_delivery_public_seam.py"
+            ],
+          "evidence_commit": "ca0e37fd6d97742908e3c26177288cfe1529390e",
+          "evidence_tree": "43e6a41026d93c9fe9a05d5bc93a4d73fa6131c7",
+            "failure_signature": "TASK-012 residency contract delivery wiring is unavailable",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-012/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-012/test.patch",
+            "patch_sha256": "8d888a56ded4e5ab195a7933fb5c54ab87efd92d069f10c78a94a667875e3fe5",
+            "test_paths": [
+              "test/residency/contract/test_delivery_public_seam.py"
+            ]
+          },
+        "task_base_commit": "42ddef5ffcf27d4f56e4fd5d431dc1f24aff3405",
+          "task_id": "TASK-012"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/contract/test_cross_component_matrix_public_seam.py"
+            ],
+          "commit": "2b35f08ae87879f7eb58d860d7b79899ab3f07e5",
+            "result": "pass",
+          "tree": "d45f1af55a8e4e01e3324e29a42344396a7486fa"
+          },
+          "outputs": [
+            {
+              "path": ".github/actions/install-lemonade-deb/action.yml",
+              "sha256": "bb782081dddbd13751c9fe49b39f3df8a942170a5db7bf39848cf5128a8ef65d"
+            },
+            {
+              "path": ".github/actions/install-lemonade-server-dmg/action.yml",
+              "sha256": "7973da72246d2042b216d1a6217e641fc6d57f13ee8d847f2a193e9a68c6c49b"
+            },
+            {
+              "path": ".github/actions/install-lemonade-server-msi/action.yml",
+              "sha256": "329e76a65e3b40e0549974da82d334f33ec1439dd8c86bc10b141ec25ed46ad4"
+            },
+            {
+              "path": ".github/actions/smoke-test-embeddable/action.yml",
+              "sha256": "1eb688b2c4086aad8a196588ce6573cb0aac82f1021d9e49ad34cb6b1351f39d"
+            },
+            {
+              "path": ".github/workflows/cpp_server_build_test_release.yml",
+              "sha256": "40c2e9d708b25ac95c49a2de3980562c0f1723b10fccc587e64faa4d86044391"
+            },
+            {
+              "path": ".github/workflows/docker-build-smoke-test.yml",
+              "sha256": "555c65ed9a8a2128ac0739c597cfc85782a5f0a63ed0af5aa5f61a608390d4e7"
+            },
+            {
+              "path": ".github/workflows/docs_and_style.yml",
+              "sha256": "e20a248176c15c8f6def91911f21c4d8a5c60cb6fc829048d703a32130cd661f"
+            },
+            {
+              "path": "CMakeLists.txt",
+              "sha256": "6e0154d17504f202c02c30c390bd5bb434e21aca98b49770f07aec825d37f2b0"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "d43032296ba0d37ce42c7c2b48ab8cc5eb9512762109b675f884ff04e4a65303"
+            },
+            {
+              "path": "test/cpp/test_residency_contract_matrix.cpp",
+              "sha256": "c3de0ad0cedb857bf02acbab40ef0f2b6b2aac412fa868511bdf7cea91a15cfb"
+            },
+            {
+              "path": "test/residency/contract/test_cross_component_matrix_public_seam.py",
+              "sha256": "c353711f8d825b6b137d5535b173c40036512687d70f75e3fd2ae5690cfd8de7"
+            }
+          ],
+          "red_fixture": {
+          "bundle_sha256": "c154eebe7f2fb9c197f7c9f5e486eb23a2a1a3a357631948187e3dd2e3fa6d2d",
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/contract/test_cross_component_matrix_public_seam.py"
+            ],
+          "evidence_commit": "df5ba71cb82376340709a440ad1d2c6f596dade8",
+          "evidence_tree": "97fd0e61d9cb4feb6bf514ccb7e1fd4ade9c2dfe",
+            "failure_signature": "TASK-013 residency cross-component matrix is unavailable",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-013/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-013/test.patch",
+            "patch_sha256": "54619de2f3ecdc01c4a56fab82048028c0e36863ad9105286b6db328a03cfdcb",
+            "test_paths": [
+              "test/cpp/test_residency_contract_matrix.cpp",
+              "test/residency/contract/test_cross_component_matrix_public_seam.py"
+            ]
+          },
+        "task_base_commit": "fdc3cec7ec20bcac1f904b5135b23b3ba3cf8b68",
+          "task_id": "TASK-013"
+        }
+      ],
+      "task_ids": [
+        "TASK-008",
+        "TASK-009",
+        "TASK-010",
+        "TASK-011",
+        "TASK-012",
+        "TASK-013"
+      ]
     }
   ],
   "pre_handoff_records": [
