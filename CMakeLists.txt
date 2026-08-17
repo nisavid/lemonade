@@ -2353,6 +2353,17 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROTOTYPE_TASK017_TEST_SRC}")
     set_tests_properties(ResidencyPrototypeContractTask017 PROPERTIES TIMEOUT 45)
 endif()
 
+set(_RESIDENCY_PROTOTYPE_TASK018_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_prototype_task018.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROTOTYPE_TASK018_TEST_SRC}")
+    add_executable(test_residency_prototype_task018
+        ${_RESIDENCY_PROTOTYPE_TASK018_TEST_SRC}
+    )
+    add_cpp_ci_test(ResidencyPrototypeContractTask018 CI ON COMMAND test_residency_prototype_task018)
+    set_tests_properties(ResidencyPrototypeContractTask018 PROPERTIES TIMEOUT 45)
+endif()
+
 # ProcessManager zombie detection and non-mutating reap contract.
 if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(_PROCESS_MANAGER_TEST_SRC
