@@ -1,0 +1,1070 @@
+diff --git 1/test/residency/prototypes/test_task016_llamacpp_rocm_sizing_public_seam.py 2/test/residency/prototypes/test_task016_llamacpp_rocm_sizing_public_seam.py
+new file mode 100644
+index 00000000..924e3ad5
+--- /dev/null
++++ 2/test/residency/prototypes/test_task016_llamacpp_rocm_sizing_public_seam.py
+@@ -0,0 +1,1064 @@
++import hashlib
++import importlib.util
++import json
++import os
++import platform
++import re
++import subprocess
++import sys
++import tempfile
++from pathlib import Path
++
++FAILURE = "TASK-016 pure-offline llama.cpp/ROCm sizing prototype is unavailable"
++TASK_BASE = "b9010857c442ee4108c1a0b2215dc03cecabb770"
++TASK_ID = "TASK-016"
++SOURCE_PATH = "test/cpp/test_residency_prototype_task016.cpp"
++EXPECTED_SOURCE_SHA256 = (
++    "eb8e01ab8b216b5e8c53eb73d0773730a62743123d2d02b78f5aa17f7b96e25e"
++)
++PROTOTYPE_ID = "pure_offline_llamacpp_rocm_sizing"
++ATTEST_RECORDED_OBSERVATION = "--attest-recorded-observation"
++
++
++def parse_replay_mode(arguments: list[str]) -> bool:
++    if not arguments:
++        return False
++    if arguments == [ATTEST_RECORDED_OBSERVATION]:
++        return True
++    print(
++        f"{Path(__file__).name}: unsupported arguments; expected no arguments or "
++        f"{ATTEST_RECORDED_OBSERVATION}",
++        file=sys.stderr,
++    )
++    raise SystemExit(2)
++
++
++UNIT_IDS = [
++    "H-ROCM-ADM-GTT-HOST-v1",
++    "H-ROCM-PRE-GTT-HOST-v1",
++    "H-ROCM-REC-GTT-HOST-OWN-v1",
++    "H-ROCM-STA-GTT-HOST-v1",
++]
++
++RUNTIME_BINDING_NAMES = [
++    "device_identity",
++    "backend_artifact_digest",
++    "source_build_dependency_closure",
++    "driver_runtime_closure",
++    "model_manifest_digest",
++    "normalized_configuration_digest",
++    "evidence_index_digest",
++    "evidence_liveness_lease",
++]
++FALLBACK_SLOTS = [
++    (
++        "admission",
++        "H-ROCM-ADM-GTT-HOST-v1",
++        "insufficient_capacity_authority",
++    ),
++    (
++        "pressure_invalid",
++        "H-ROCM-PRE-GTT-HOST-v1",
++        "invalid_reporting_evidence",
++    ),
++    (
++        "pressure_report",
++        "H-ROCM-PRE-GTT-HOST-v1",
++        "valid_reporting_without_action_authority",
++    ),
++    (
++        "recovery",
++        "H-ROCM-REC-GTT-HOST-OWN-v1",
++        "unproven_release",
++    ),
++    (
++        "startup",
++        "H-ROCM-STA-GTT-HOST-v1",
++        "insufficient_startup_authority",
++    ),
++]
++
++IDENTITY_OUTPUT_ROWS = [
++    "identity.device_identity=required",
++    "identity.backend_artifact_digest=required",
++    "identity.source_build_dependency_closure=required",
++    "identity.driver_runtime_closure=required",
++    "identity.model_manifest_digest=required",
++    "identity.normalized_configuration_digest=required",
++    "identity.evidence_index_digest=required",
++    "identity.evidence_liveness_lease=required",
++    "identity.mismatch=unknown",
++]
++EXCLUSION_OUTPUT_ROWS = [
++    "exclusion.multimodal_projector=unknown",
++    "exclusion.draft_mtp_dflash_speculative=unknown",
++    "exclusion.hf_load_remote=unknown",
++    "exclusion.memory_affecting_recipe_arguments=unknown",
++    "exclusion.prompt_slot_cache=unknown",
++    "exclusion.unmodeled_concurrency=unknown",
++]
++COMPONENT_OUTPUT_ROWS = [
++    "component.model_tensors=bounded",
++    "component.persistent_context=bounded",
++    "component.compute_attention=bounded",
++    "component.output_buffer=bounded",
++    "component.load_staging=bounded",
++    "component.residual_envelope=bounded",
++]
++COMPONENT_EFFECT_OUTPUT_ROWS = [
++    "component_effect.model_tensors=persistent_weights.host_effects",
++    "component_effect.persistent_context=fixed_cache.host_effects",
++    "component_effect.compute_attention=reconstructible_state.host_effects",
++    "component_effect.output_buffer=transient_workspace.host_effects",
++    "component_effect.load_staging=transient_workspace.host_effects",
++    "component_effect.residual_envelope=allocator_reserve.host_effects",
++]
++COMPOSITION_OUTPUT_ROWS = ["composition.lifecycle_overlap=maximized"]
++SIZING_MANIFEST_OUTPUT_ROWS = [
++    "sizing_operation_manifest.readonly_inputs=1",
++    "sizing_operation_manifest.readonly_ranges=1",
++    "sizing_operation_manifest.readonly_range_offset_bytes=0",
++    "sizing_operation_manifest.readonly_range_length_bytes=4096",
++    "sizing_operation_manifest.readonly_write_bytes=known_zero",
++    "sizing_operation_manifest.host_heap_bytes=256",
++    "sizing_operation_manifest.mmap_regions=known_zero",
++    "sizing_operation_manifest.mmap_bytes=known_zero",
++    "sizing_operation_manifest.page_cache_bytes=known_zero",
++    "sizing_operation_manifest.file_descriptors=known_zero",
++    "sizing_operation_manifest.additional_threads=known_zero",
++    "sizing_operation_manifest.duration_milliseconds=50",
++    "sizing_operation_manifest.output_bytes=128",
++    "sizing_operation_manifest.gtt_mapping_bytes=known_zero",
++    "sizing_operation_manifest.driver_allocation_bytes=known_zero",
++    "sizing_operation_manifest.process_spawn_calls=known_zero",
++    "sizing_operation_manifest.backend_spawn_calls=known_zero",
++    "sizing_operation_manifest.network_calls=known_zero",
++    "sizing_operation_manifest.device_context_initialization_calls=known_zero",
++    "sizing_operation_manifest.driver_open_calls=known_zero",
++    "sizing_operation_manifest.driver_ioctl_calls=known_zero",
++    "sizing_operation_manifest.complete=passed",
++]
++RESERVATION_OUTPUT_ROWS = [
++    "caller_reservation.status=prepared",
++    "caller_reservation.manifest_binding=matched",
++    "caller_reservation.host_peak_bytes=4480",
++    "caller_reservation.validated_before_effects=passed",
++]
++SIZING_NEGATIVE_OUTPUT_ROWS = [
++    "sizing_negative.each_missing_field=unknown",
++    "sizing_negative.arithmetic_overflow=unknown",
++    "sizing_negative.caller_reservation_missing=unknown",
++    "sizing_negative.caller_reservation_undersized=unknown",
++    "sizing_negative.caller_reservation_stale_or_mismatched=unknown",
++]
++PROJECTION_OUTPUT_ROWS = [
++    "projection.shared_gtt_alias=deduplicated",
++    "liveness.sizing_resources_released_before_dispatch=passed",
++]
++BOUND_OUTPUT_ROWS = [
++    "bound.candidate_gtt_mapping_bytes=8192",
++    "bound.candidate_host_memavailable_bytes=8192",
++    "bound.sizing_host_peak_bytes=4480",
++    "bound.operation_host_peak_bytes=8192",
++]
++MANIFEST_OUTPUT_ROWS = [
++    "operation_manifest.candidate_derivations=6",
++    "operation_manifest.lifecycle_compositions=1",
++    "operation_manifest.sizing_operations=1",
++    "operation_manifest.entries=8",
++    "operation_manifest.complete=passed",
++]
++PURITY_OUTPUT_ROWS = [
++    "purity.source_line_splices=0",
++    "purity.capability_surface=closed",
++    "purity.control=observed_calls",
++    "purity.reservation_validation_calls=1",
++    "purity.readonly_range_read_calls=1",
++    "purity.readonly_range_release_calls=1",
++    "purity.host_heap_reservation_calls=1",
++    "purity.host_heap_release_calls=1",
++    "purity.output_write_calls=1",
++    "purity.output_release_calls=1",
++    "purity.deadline_check_calls=2",
++    "purity.mmap_calls=0",
++    "purity.page_cache_calls=0",
++    "purity.file_descriptor_calls=0",
++    "purity.additional_thread_calls=0",
++    "purity.gtt_mapping_calls=0",
++    "purity.driver_allocation_calls=0",
++    "purity.process_spawn_calls=0",
++    "purity.backend_spawn_calls=0",
++    "purity.network_calls=0",
++    "purity.device_context_initialization_calls=0",
++    "purity.driver_open_calls=0",
++    "purity.driver_ioctl_calls=0",
++]
++SYNTHETIC_OUTPUT_ROWS = [
++    "synthetic.offline_sizing=passed",
++    "synthetic.purity_contract=passed",
++]
++NATIVE_OUTPUT_ROW = "hatchery.native_exact_artifact_offline_sizing=deferred"
++ALLOWED_STANDARD_HEADERS = {
++    "array",
++    "cstddef",
++    "cstdint",
++    "iostream",
++    "limits",
++}
++ALLOWED_STANDARD_SYMBOLS = {
++    "array",
++    "cout",
++    "numeric_limits",
++    "size_t",
++    "uint64_t",
++    "uint8_t",
++}
++ALLOWED_PLATFORM_DIRECTIVES = [
++    "#ifdef _WIN32",
++    "#elif defined(__APPLE__)",
++    "#elif defined(__linux__)",
++    "#else",
++    "#endif",
++]
++FORBIDDEN_SOURCE_PATTERNS = (
++    re.compile(
++        r"\b(?:extern|system|popen|posix_spawn[a-z0-9_]*|fork|vfork|clone|"
++        r"exec[a-z0-9_]*|createprocess[a-z0-9_]*|shellexecute[a-z0-9_]*|"
++        r"winexec|hip[a-z0-9_]*|hsa_[a-z0-9_]*|ioctl|syscall|dlopen|dlsym|"
++        r"loadlibrary[a-z0-9_]*|getprocaddress|open|openat|fopen|creat|"
++        r"mmap|munmap|mprotect|madvise|pthread_create|thrd_create|pipe|pipe2|"
++        r"dup|dup2|dup3|eventfd|memfd_create|socket|socketpair|accept|accept4|"
++        r"bind|listen|getaddrinfo|connect|send|recv|epoll_create[a-z0-9_]*|"
++        r"inotify_init[a-z0-9_]*|timerfd_create|signalfd|pidfd_open|"
++        r"createfile[a-z0-9_]*|wsasocket[a-z0-9_]*|winhttp[a-z0-9_]*|"
++        r"internetopen[a-z0-9_]*|__builtin_[a-z0-9_]*|_?alloca)\b"
++    ),
++    re.compile(r"\b_spawn[a-z0-9_]*\b"),
++    re.compile(r"\b(?:asm|__asm__?)\b"),
++    re.compile(
++        r"\b(?:malloc|calloc|realloc|free|new|delete|make_unique|make_shared)\b"
++    ),
++    re.compile(r"\busing\b|\bnamespace\s+(?:std\b|[a-z0-9_]+\s*=\s*std\b)"),
++)
++
++
++def expected_output_rows(platform_id: str, fallback_rows: list[str]) -> list[str]:
++    return [
++        *IDENTITY_OUTPUT_ROWS,
++        *EXCLUSION_OUTPUT_ROWS,
++        *COMPONENT_OUTPUT_ROWS,
++        *COMPONENT_EFFECT_OUTPUT_ROWS,
++        *COMPOSITION_OUTPUT_ROWS,
++        *SIZING_MANIFEST_OUTPUT_ROWS,
++        *RESERVATION_OUTPUT_ROWS,
++        *SIZING_NEGATIVE_OUTPUT_ROWS,
++        *PROJECTION_OUTPUT_ROWS,
++        *BOUND_OUTPUT_ROWS,
++        *MANIFEST_OUTPUT_ROWS,
++        *PURITY_OUTPUT_ROWS,
++        *SYNTHETIC_OUTPUT_ROWS,
++        NATIVE_OUTPUT_ROW,
++        *fallback_rows,
++        f"platform.current={platform_id}",
++        "runtime_authority=none",
++    ]
++
++
++def fail_unavailable() -> None:
++    print(FAILURE, file=sys.stderr)
++    raise SystemExit(1)
++
++
++def require(value: bool, message: str) -> None:
++    if not value:
++        raise AssertionError(message)
++
++
++def load_result_contract(repo_root: Path):
++    path = repo_root / "test/residency/prototypes/result_contract.py"
++    if not path.is_file():
++        fail_unavailable()
++    spec = importlib.util.spec_from_file_location("prototype_result_contract", path)
++    if spec is None or spec.loader is None:
++        fail_unavailable()
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++def parse_json_object(raw: bytes) -> dict:
++    def object_from_pairs(pairs):
++        result = {}
++        for key, value in pairs:
++            if key in result:
++                raise AssertionError(f"duplicate JSON key: {key}")
++            result[key] = value
++        return result
++
++    value = json.loads(raw.decode("utf-8"), object_pairs_hook=object_from_pairs)
++    require(type(value) is dict, "prototype result must be an object")
++    return value
++
++
++def require_inventory_contract(repo_root: Path) -> dict:
++    path = repo_root / "docs/research/portable-residency-capability-inventory.json"
++    inventory = parse_json_object(path.read_bytes())
++    require(
++        inventory.get("runtime_binding_kinds") == RUNTIME_BINDING_NAMES,
++        "inventory changed the closed runtime-binding vocabulary",
++    )
++    cells = inventory.get("exact_cells")
++    require(type(cells) is list, "inventory exact-cell registry is unavailable")
++    cell_by_id = {
++        cell.get("cell_id"): cell
++        for cell in cells
++        if type(cell) is dict and type(cell.get("cell_id")) is str
++    }
++    require(len(cell_by_id) == len(cells), "inventory exact-cell IDs are not unique")
++    require(
++        set(cell_by_id) == set(UNIT_IDS),
++        "inventory changed the TASK-016 exact-cell closure",
++    )
++    for unit_id in UNIT_IDS:
++        require(
++            cell_by_id[unit_id].get("runtime_bindings") == RUNTIME_BINDING_NAMES,
++            f"{unit_id} changed its runtime-binding closure",
++        )
++
++    fallback_bindings = []
++    fallback_rows = []
++    for label, unit_id, fallback_slot in FALLBACK_SLOTS:
++        fallbacks = cell_by_id[unit_id].get("fallbacks")
++        require(type(fallbacks) is dict, f"{unit_id} fallbacks are unavailable")
++        fallback_id = fallbacks.get(fallback_slot)
++        require(
++            type(fallback_id) is str and fallback_id,
++            f"{unit_id} omits {fallback_slot}",
++        )
++        fallback_rows.append(f"fallback_binding.{label}={fallback_id}")
++    for unit_id in UNIT_IDS:
++        fallbacks = cell_by_id[unit_id]["fallbacks"]
++        fallback_bindings.append({"unit_id": unit_id, "fallbacks": fallbacks})
++    require(
++        sum(len(binding["fallbacks"]) for binding in fallback_bindings)
++        == len(FALLBACK_SLOTS),
++        "TASK-016 inventory fallback closure changed",
++    )
++    return {
++        "fallback_bindings": fallback_bindings,
++        "fallback_ids": [row.split("=", 1)[1] for row in fallback_rows],
++        "fallback_rows": fallback_rows,
++    }
++
++
++def compiler_command(
++    compiler: str, source: str, output: str, platform_id: str
++) -> list[str]:
++    if platform_id == "windows":
++        return [
++            compiler,
++            "/nologo",
++            "/std:c++17",
++            "/W4",
++            "/WX",
++            "/EHsc",
++            source,
++            f"/Fe:{output}",
++        ]
++    return [
++        compiler,
++        "-std=c++17",
++        "-Wall",
++        "-Wextra",
++        "-Werror",
++        "-pedantic",
++        "-pthread",
++        source,
++        "-o",
++        output,
++    ]
++
++
++def normalized_architecture() -> str:
++    machine = platform.machine().strip().lower()
++    return {
++        "amd64": "x86_64",
++        "arm64": "aarch64",
++        "x64": "x86_64",
++    }.get(machine, machine)
++
++
++def compiler_version(compiler: str, platform_id: str) -> str:
++    compiler_name = Path(compiler).name.lower()
++    command = (
++        [compiler]
++        if platform_id == "windows" and compiler_name in {"cl", "cl.exe"}
++        else [compiler, "--version"]
++    )
++    completed = subprocess.run(
++        command, check=False, capture_output=True, text=True, timeout=30
++    )
++    lines = [
++        line.strip()
++        for line in (completed.stdout + completed.stderr).splitlines()
++        if line.strip()
++    ]
++    require(lines, f"recorded compiler {compiler} emitted no version")
++    return lines[0]
++
++
++def claim_expectations(inventory_contract: dict) -> dict:
++    bindings = {
++        binding["unit_id"]: binding
++        for binding in inventory_contract["fallback_bindings"]
++    }
++    fallback_rows = inventory_contract["fallback_rows"]
++    fallback_ids = inventory_contract["fallback_ids"]
++    sizing_evidence_rows = sorted(
++        [
++            *IDENTITY_OUTPUT_ROWS,
++            *EXCLUSION_OUTPUT_ROWS,
++            *COMPONENT_OUTPUT_ROWS,
++            *COMPONENT_EFFECT_OUTPUT_ROWS,
++            *COMPOSITION_OUTPUT_ROWS,
++            *SIZING_MANIFEST_OUTPUT_ROWS,
++            *RESERVATION_OUTPUT_ROWS,
++            *SIZING_NEGATIVE_OUTPUT_ROWS,
++            *PROJECTION_OUTPUT_ROWS,
++            *BOUND_OUTPUT_ROWS,
++            *MANIFEST_OUTPUT_ROWS,
++            "synthetic.offline_sizing=passed",
++        ]
++    )
++    purity_evidence_rows = sorted(
++        [
++            *SIZING_MANIFEST_OUTPUT_ROWS,
++            *RESERVATION_OUTPUT_ROWS,
++            *SIZING_NEGATIVE_OUTPUT_ROWS,
++            PROJECTION_OUTPUT_ROWS[1],
++            BOUND_OUTPUT_ROWS[2],
++            *MANIFEST_OUTPUT_ROWS,
++            *PURITY_OUTPUT_ROWS,
++            "synthetic.purity_contract=passed",
++        ]
++    )
++    return {
++        "hatchery_admission_native_exact_artifact_offline_sizing": {
++            "status": "deferred",
++            "units": ["H-ROCM-ADM-GTT-HOST-v1"],
++            "fallbacks": [fallback_ids[0]],
++            "bindings": [bindings["H-ROCM-ADM-GTT-HOST-v1"]],
++            "rows": sorted([fallback_rows[0], NATIVE_OUTPUT_ROW]),
++            "limitations": [
++                "The exact artifact, source/build dependency closure, and model manifest are unavailable, so native sizing remains deferred."
++            ],
++        },
++        "hatchery_pressure_native_exact_artifact_offline_sizing": {
++            "status": "deferred",
++            "units": ["H-ROCM-PRE-GTT-HOST-v1"],
++            "fallbacks": [fallback_ids[1], fallback_ids[2]],
++            "bindings": [bindings["H-ROCM-PRE-GTT-HOST-v1"]],
++            "rows": sorted([fallback_rows[1], fallback_rows[2], NATIVE_OUTPUT_ROW]),
++            "limitations": [
++                "The exact artifact, source/build dependency closure, and model manifest are unavailable, so native sizing remains deferred."
++            ],
++        },
++        "hatchery_recovery_native_exact_artifact_offline_sizing": {
++            "status": "deferred",
++            "units": ["H-ROCM-REC-GTT-HOST-OWN-v1"],
++            "fallbacks": [fallback_ids[3]],
++            "bindings": [bindings["H-ROCM-REC-GTT-HOST-OWN-v1"]],
++            "rows": sorted([fallback_rows[3], NATIVE_OUTPUT_ROW]),
++            "limitations": [
++                "The exact artifact, source/build dependency closure, and model manifest are unavailable, so native sizing remains deferred."
++            ],
++        },
++        "hatchery_startup_native_exact_artifact_offline_sizing": {
++            "status": "deferred",
++            "units": ["H-ROCM-STA-GTT-HOST-v1"],
++            "fallbacks": [fallback_ids[4]],
++            "bindings": [bindings["H-ROCM-STA-GTT-HOST-v1"]],
++            "rows": sorted([fallback_rows[4], NATIVE_OUTPUT_ROW]),
++            "limitations": [
++                "The exact artifact, source/build dependency closure, and model manifest are unavailable, so native sizing remains deferred."
++            ],
++        },
++        "synthetic_offline_sizing_contract": {
++            "status": "passed",
++            "units": UNIT_IDS,
++            "fallbacks": fallback_ids,
++            "bindings": inventory_contract["fallback_bindings"],
++            "rows": sizing_evidence_rows,
++            "limitations": [
++                "Caller-supplied in-memory inputs prove checked sizing-operation composition and fail-closed applicability only; they grant no packaged-backend, physical, or runtime authority."
++            ],
++        },
++        "synthetic_purity_contract": {
++            "status": "passed",
++            "units": UNIT_IDS,
++            "fallbacks": fallback_ids,
++            "bindings": inventory_contract["fallback_bindings"],
++            "rows": purity_evidence_rows,
++            "limitations": [
++                "The closed injected capability surface proves this sizing operation stays within its complete reserved effect budget; it does not prove physical soft release or ledger reconciliation."
++            ],
++        },
++    }
++
++
++def require_result_identity(repo_root: Path, result: dict) -> None:
++    require(
++        set(result)
++        == {
++            "schema",
++            "task_id",
++            "prototype_id",
++            "task_base_commit",
++            "source",
++            "outcome",
++            "runtime_authority",
++            "fallback_state",
++            "observations",
++            "claims",
++        },
++        "TASK-016 result fields are not closed",
++    )
++    require(
++        result["schema"] == "residency_prototype_result/v1",
++        "result schema changed",
++    )
++    require(result["task_id"] == TASK_ID, "TASK-016 result changed its task ID")
++    require(
++        result["task_base_commit"] == TASK_BASE,
++        "TASK-016 result changed its task base",
++    )
++    require(
++        result["prototype_id"] == PROTOTYPE_ID,
++        "TASK-016 result changed its prototype identity",
++    )
++    source = repo_root / SOURCE_PATH
++    require(
++        result["source"]
++        == {
++            "path": SOURCE_PATH,
++            "sha256": EXPECTED_SOURCE_SHA256,
++        },
++        "TASK-016 result does not bind its source bytes",
++    )
++    require(
++        hashlib.sha256(source.read_bytes()).hexdigest() == EXPECTED_SOURCE_SHA256,
++        "TASK-016 source differs from the audited red-seam bytes",
++    )
++    require(result["outcome"] == "mixed", "TASK-016 result must remain mixed")
++    require(
++        result["runtime_authority"] == "none",
++        "TASK-016 prototype granted runtime authority",
++    )
++    require(
++        result["fallback_state"] == {"authority": "legacy_runtime", "status": "active"},
++        "TASK-016 prototype changed the active fallback authority",
++    )
++
++
++def require_result_claims(
++    result: dict, observation_id: str, inventory_contract: dict
++) -> None:
++    expected = claim_expectations(inventory_contract)
++    claims = {claim["id"]: claim for claim in result["claims"]}
++    require(len(claims) == len(result["claims"]), "TASK-016 claim IDs must be unique")
++    require(set(claims) == set(expected), "TASK-016 result changed its claim closure")
++    for claim_id, contract_row in expected.items():
++        claim = claims[claim_id]
++        require(
++            set(claim)
++            == {
++                "id",
++                "status",
++                "platforms",
++                "affected_units",
++                "fallback_ids",
++                "fallback_bindings",
++                "evidence",
++                "limitations",
++            },
++            f"{claim_id} fields are not closed",
++        )
++        require(claim["status"] == contract_row["status"], f"{claim_id} changed status")
++        require(claim["platforms"] == ["linux"], f"{claim_id} changed platform scope")
++        require(
++            claim["affected_units"] == contract_row["units"],
++            f"{claim_id} changed its promotion-unit closure",
++        )
++        require(
++            claim["fallback_ids"] == contract_row["fallbacks"],
++            f"{claim_id} changed its fallback closure",
++        )
++        require(
++            claim["fallback_bindings"] == contract_row["bindings"],
++            f"{claim_id} cross-wired an inventory fallback",
++        )
++        require(
++            claim["evidence"]
++            == [{"observation_id": observation_id, "rows": contract_row["rows"]}],
++            f"{claim_id} changed its exact observed evidence",
++        )
++        require(
++            claim["limitations"] == contract_row["limitations"],
++            f"{claim_id} changed its bounded limitation",
++        )
++
++
++def require_result(repo_root: Path, contract=None):
++    if contract is None:
++        contract = load_result_contract(repo_root)
++    inventory_contract = require_inventory_contract(repo_root)
++    result = contract.load_task_result(repo_root, TASK_ID)
++    result_root = repo_root / "docs/research/residency-prototype-results/sha256"
++    matches = []
++    for path in sorted(result_root.glob("*.json")):
++        raw = path.read_bytes()
++        require(
++            path.stem == hashlib.sha256(raw).hexdigest(),
++            f"{path.name} is not addressed by bytes",
++        )
++        candidate = parse_json_object(raw)
++        if candidate.get("task_id") == TASK_ID:
++            matches.append(candidate)
++    require(matches == [result], "TASK-016 must have one byte-addressed result")
++    canonical = (
++        json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
++        + "\n"
++    ).encode("utf-8")
++    require(
++        any(path.read_bytes() == canonical for path in result_root.glob("*.json")),
++        "TASK-016 result is not canonical UTF-8 JSON",
++    )
++    require_result_identity(repo_root, result)
++    observations = result["observations"]
++    require(len(observations) == 1, "TASK-016 must publish one probe observation")
++    observation = observations[0]
++    require(
++        observation["environment"]["platform"] == "linux",
++        "TASK-016 initial observation must remain Linux-scoped",
++    )
++    require(
++        observation["output"]["rows"]
++        == expected_output_rows("linux", inventory_contract["fallback_rows"]),
++        "TASK-016 initial observation changed its exact row order or closure",
++    )
++    require_result_claims(result, observation["id"], inventory_contract)
++    return contract, result, inventory_contract
++
++
++def current_platform() -> str:
++    return {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}.get(
++        platform.system(), ""
++    )
++
++
++def parse_probe_output(stdout: bytes) -> tuple[list[str], dict[str, str]]:
++    require(stdout.endswith(b"\n"), "prototype probe stdout lacks its final newline")
++    lines = stdout.decode("utf-8").splitlines()
++    require(lines, "prototype probe emitted no observation rows")
++    rows = {}
++    for line in lines:
++        require(
++            line.count("=") == 1, f"prototype probe emitted a malformed row: {line}"
++        )
++        key, value = line.split("=", 1)
++        require(key and value, f"prototype probe emitted an empty row field: {line}")
++        require(key not in rows, f"prototype probe emitted duplicate row: {key}")
++        rows[key] = value
++    return lines, rows
++
++
++def recorded_observation_for_platform(result: dict, platform_id: str):
++    observed_ids = {
++        evidence["observation_id"]
++        for claim in result["claims"]
++        if claim["status"] in {"passed", "fallback"}
++        and platform_id in claim["platforms"]
++        for evidence in claim["evidence"]
++    }
++    if not observed_ids:
++        return None
++    observations = [
++        observation
++        for observation in result["observations"]
++        if observation["id"] in observed_ids
++        and observation["environment"]["platform"] == platform_id
++    ]
++    require(
++        len(observations) == 1,
++        "current passed/fallback claims do not select one recorded observation",
++    )
++    return observations[0]
++
++
++def run_probe(repo_root: Path, source: Path, contract, recorded_observation):
++    platform_id = current_platform()
++    require(platform_id, "prototype probe ran on an unsupported platform")
++    compiler_executable, compiler = contract.resolve_replay_compiler(
++        recorded_observation, platform_id, os.environ
++    )
++    version = (
++        contract.attest_recorded_observation_toolchain(
++            recorded_observation, compiler_executable, compiler, platform_id
++        )
++        if recorded_observation is not None
++        else compiler_version(compiler_executable, platform_id)
++    )
++    suffix = ".exe" if platform_id == "windows" else ""
++    executable_name = f"task016{suffix}"
++    logical_source = source.relative_to(repo_root).as_posix()
++    logical_output = f"$TMPDIR/{executable_name}"
++    logical_compile_command = compiler_command(
++        compiler, logical_source, logical_output, platform_id
++    )
++    with tempfile.TemporaryDirectory(prefix="residency-task016-") as directory:
++        executable = Path(directory) / executable_name
++        actual_compile_command = compiler_command(
++            compiler_executable, str(source), str(executable), platform_id
++        )
++        subprocess.run(actual_compile_command, cwd=directory, check=True, timeout=30)
++        run_command = [
++            (
++                f".{os.sep}{executable.name}"
++                if platform_id == "windows"
++                else f"./{executable.name}"
++            )
++        ]
++        completed = subprocess.run(
++            run_command,
++            cwd=directory,
++            check=False,
++            capture_output=True,
++            timeout=30,
++        )
++    lines, rows = parse_probe_output(completed.stdout)
++    binding = {
++        "compile_command": logical_compile_command,
++        "command": run_command,
++        "environment": {
++            "platform": platform_id,
++            "architecture": normalized_architecture(),
++        },
++        "toolchain": {"compiler": compiler, "version": version},
++        "exit_code": completed.returncode,
++        "output": {
++            "stdout_sha256": hashlib.sha256(completed.stdout).hexdigest(),
++            "stderr_sha256": hashlib.sha256(completed.stderr).hexdigest(),
++            "rows": lines,
++        },
++    }
++    return completed, lines, rows, binding
++
++
++def require_observation_binding(contract, recorded_observation, binding: dict) -> None:
++    require(
++        recorded_observation is not None,
++        "recorded-observation attestation selected no observation",
++    )
++    contract.require_recorded_observation_body(recorded_observation, binding)
++
++
++def require_exact_probe_rows(
++    lines: list[str],
++    rows: dict[str, str],
++    platform_id: str,
++    inventory_contract: dict,
++) -> None:
++    expected = expected_output_rows(platform_id, inventory_contract["fallback_rows"])
++    require(len(expected) == 103, "TASK-016 row cardinality changed")
++    require(
++        lines == expected,
++        "prototype probe changed its exact row order or closure",
++    )
++    expected_keys = {row.split("=", 1)[0] for row in expected}
++    require(set(rows) == expected_keys, "prototype probe changed its observation keys")
++
++
++def require_probe_semantics(rows: dict[str, str]) -> None:
++    candidate_gtt = int(rows["bound.candidate_gtt_mapping_bytes"])
++    candidate_host = int(rows["bound.candidate_host_memavailable_bytes"])
++    sizing_host = int(rows["bound.sizing_host_peak_bytes"])
++    operation_peak = int(rows["bound.operation_host_peak_bytes"])
++    require(candidate_gtt == 8192, "synthetic candidate GTT bound changed")
++    require(candidate_host == 8192, "synthetic candidate host bound changed")
++    require(
++        sizing_host == 4096 + 256 + 128,
++        "synthetic sizing host peak omits a live bounded resource",
++    )
++    require(
++        operation_peak == max(candidate_host, sizing_host),
++        "phase-disjoint host effects were summed or dropped",
++    )
++    require(
++        rows["liveness.sizing_resources_released_before_dispatch"] == "passed",
++        "sizing resource lifetime overlaps dispatch",
++    )
++    for row in SIZING_NEGATIVE_OUTPUT_ROWS:
++        key = row.split("=", 1)[0]
++        require(rows[key] == "unknown", f"{key} did not fail closed")
++    require(
++        rows["caller_reservation.host_peak_bytes"] == str(sizing_host)
++        and rows["caller_reservation.validated_before_effects"] == "passed",
++        "caller reservation was not exact and effect-preceding",
++    )
++    for key in (
++        "purity.mmap_calls",
++        "purity.page_cache_calls",
++        "purity.file_descriptor_calls",
++        "purity.additional_thread_calls",
++        "purity.gtt_mapping_calls",
++        "purity.driver_allocation_calls",
++        "purity.process_spawn_calls",
++        "purity.backend_spawn_calls",
++        "purity.network_calls",
++        "purity.device_context_initialization_calls",
++        "purity.driver_open_calls",
++        "purity.driver_ioctl_calls",
++    ):
++        require(rows[key] == "0", f"forbidden effect was observed: {key}")
++    for key, expected in (
++        ("purity.reservation_validation_calls", "1"),
++        ("purity.readonly_range_read_calls", "1"),
++        ("purity.readonly_range_release_calls", "1"),
++        ("purity.host_heap_reservation_calls", "1"),
++        ("purity.host_heap_release_calls", "1"),
++        ("purity.output_write_calls", "1"),
++        ("purity.output_release_calls", "1"),
++        ("purity.deadline_check_calls", "2"),
++    ):
++        require(rows[key] == expected, f"allowed effect count changed: {key}")
++    require(
++        rows["purity.source_line_splices"] == "0"
++        and rows["purity.capability_surface"] == "closed"
++        and rows["purity.control"] == "observed_calls",
++        "purity observer did not prove its detection control",
++    )
++
++
++def require_probe_source_semantics(source_bytes: bytes) -> None:
++    require(
++        b"\\\n" not in source_bytes and b"\\\r" not in source_bytes,
++        "prototype probe contains a source line splice",
++    )
++    source_text = source_bytes.decode("utf-8")
++    source_text_lower = source_text.lower()
++    require(
++        "//" not in source_text and "/*" not in source_text,
++        "prototype probe contains a comment-obscured token",
++    )
++    require(
++        "%:" not in source_text and "??=" not in source_text,
++        "prototype probe contains an alternate preprocessor token",
++    )
++    include_directive = re.compile(r"\s*#\s*include\b(.*)")
++    standard_include = re.compile(r"\s*<([a-z0-9_./]+)>\s*")
++    includes = []
++    platform_directives = []
++    for line in source_text.splitlines():
++        directive = include_directive.fullmatch(line)
++        if directive is None:
++            if line.lstrip().startswith("#"):
++                platform_directives.append(line.strip())
++            continue
++        match = standard_include.fullmatch(directive.group(1))
++        require(match is not None, "prototype probe has a non-standard include")
++        includes.append(match.group(1))
++    require(
++        set(includes) == ALLOWED_STANDARD_HEADERS
++        and len(includes) == len(ALLOWED_STANDARD_HEADERS),
++        "prototype probe changed its exact standard-library dependency closure",
++    )
++    require(
++        platform_directives == ALLOWED_PLATFORM_DIRECTIVES,
++        "prototype probe changed its closed platform-directive shape",
++    )
++    require(
++        source_text.count("#") == len(includes) + len(platform_directives),
++        "prototype probe contains an unparsed preprocessor token",
++    )
++    standard_symbols = re.findall(
++        r"\bstd\s*::\s*([a-z_][a-z0-9_]*)\b", source_text_lower
++    )
++    require(
++        set(standard_symbols) == ALLOWED_STANDARD_SYMBOLS,
++        "prototype probe changed its exact standard-library capability surface",
++    )
++    for pattern in FORBIDDEN_SOURCE_PATTERNS:
++        require(
++            pattern.search(source_text_lower) is None,
++            f"prototype probe contains forbidden effect API {pattern.pattern}",
++        )
++
++
++def require_probe_source(source: Path) -> None:
++    source_bytes = source.read_bytes()
++    require(
++        hashlib.sha256(source_bytes).hexdigest() == EXPECTED_SOURCE_SHA256,
++        "prototype probe differs from the audited red-seam bytes",
++    )
++    require_probe_source_semantics(source_bytes)
++
++
++def require_source_audit_regressions(source: Path) -> None:
++    source_text = source.read_text(encoding="utf-8")
++    marker = "int run() {"
++    require(source_text.count(marker) == 1, "prototype audit marker changed")
++    semantic_adversaries = (
++        "(void)std::cin.get();",
++        "std::string hidden_allocation(65536, 'x');",
++        "std::allocator<int> hidden_allocator;",
++        "std/**/::allocator<int> hidden_allocator;",
++        "using namespace std; string hidden_allocation(65536, 'x');",
++        "namespace hidden = std; hidden::allocator<int> allocator;",
++    )
++    for adversary in semantic_adversaries:
++        mutated = source_text.replace(marker, f"{marker}\n{adversary}", 1)
++        try:
++            require_probe_source_semantics(mutated.encode("utf-8"))
++        except AssertionError:
++            continue
++        raise AssertionError("prototype semantic audit admitted a forbidden capability")
++
++    stack_adversary = "std::array<std::uint8_t, 65536> hidden_stack{};"
++    mutated = source_text.replace(marker, f"{marker}\n{stack_adversary}", 1)
++    with tempfile.TemporaryDirectory(prefix="residency-task016-audit-") as directory:
++        mutated_source = Path(directory) / "source-digest-adversary.cpp"
++        mutated_source.write_text(mutated, encoding="utf-8")
++        try:
++            require_probe_source(mutated_source)
++        except AssertionError:
++            return
++    raise AssertionError("prototype source digest admitted an unreviewed capability")
++
++
++def require_probe(
++    repo_root: Path,
++    contract,
++    result: dict,
++    inventory_contract: dict,
++    attest_recorded_observation: bool,
++) -> None:
++    source = repo_root / SOURCE_PATH
++    if not source.is_file():
++        fail_unavailable()
++    require_source_audit_regressions(source)
++    require_probe_source(source)
++    platform_id = current_platform()
++    recorded_observation = (
++        recorded_observation_for_platform(result, platform_id)
++        if attest_recorded_observation
++        else None
++    )
++    if attest_recorded_observation:
++        contract.require_recorded_observation_environment(
++            recorded_observation,
++            platform_id,
++            normalized_architecture(),
++        )
++    completed, lines, rows, binding = run_probe(
++        repo_root, source, contract, recorded_observation
++    )
++    require(completed.returncode == 0, "prototype probe returned a nonzero exit code")
++    require(completed.stderr == b"", "prototype probe emitted stderr")
++    require_exact_probe_rows(lines, rows, platform_id, inventory_contract)
++    require_probe_semantics(rows)
++    require(
++        rows.get("platform.current") == platform_id,
++        "prototype probe did not bind its current platform",
++    )
++    require(rows.get("runtime_authority") == "none", "prototype granted authority")
++    if attest_recorded_observation:
++        require_observation_binding(contract, recorded_observation, binding)
++
++
++def require_cmake_and_plan(repo_root: Path) -> None:
++    cmake = (repo_root / "CMakeLists.txt").read_text(encoding="utf-8")
++    cmake_block = f"""set(_RESIDENCY_PROTOTYPE_TASK016_TEST_SRC
++    "${{CMAKE_CURRENT_SOURCE_DIR}}/{SOURCE_PATH}"
++)
++if(BUILD_TESTING AND EXISTS "${{_RESIDENCY_PROTOTYPE_TASK016_TEST_SRC}}")
++    add_executable(test_residency_prototype_task016
++        ${{_RESIDENCY_PROTOTYPE_TASK016_TEST_SRC}}
++    )
++    add_cpp_ci_test(ResidencyPrototypeContractTask016 CI ON COMMAND test_residency_prototype_task016)
++    set_tests_properties(ResidencyPrototypeContractTask016 PROPERTIES TIMEOUT 45)
++endif()"""
++    require(
++        cmake.count(cmake_block) == 1,
++        "TASK-016 CMake declaration is not one closed BUILD_TESTING block",
++    )
++    require(cmake.count(SOURCE_PATH) == 1, "TASK-016 C++ source is not registered once")
++
++    plan = (repo_root / "plan/architecture-portable-residency-1.md").read_text(
++        encoding="utf-8"
++    )
++    task_row = next(
++        (line for line in plan.splitlines() if line.startswith("| TASK-016 |")), ""
++    )
++    require(
++        task_row.endswith("| ✅ | 2026-08-16 |"),
++        "TASK-016 is not recorded complete",
++    )
++    output_rows = [
++        line for line in plan.splitlines() if line.startswith("| TASK-014–TASK-018 |")
++    ]
++    require(
++        len(output_rows) == 1,
++        "Phase-2 output ownership row is unavailable or ambiguous",
++    )
++    output_row = output_rows[0]
++    for required_text in (
++        "CMakeLists.txt",
++        SOURCE_PATH,
++        "test/residency/prototypes/",
++        "docs/research/residency-prototype-results/",
++        "no production authority",
++    ):
++        require(
++            required_text in output_row,
++            f"Phase-2 output ownership row omits {required_text}",
++        )
++
++
++def main(arguments: list[str]) -> int:
++    attest_recorded_observation = parse_replay_mode(arguments)
++    repo_root = Path(__file__).resolve().parents[3]
++    required = (
++        repo_root / "test/residency/prototypes/result_contract.py",
++        repo_root / SOURCE_PATH,
++    )
++    if not all(path.is_file() for path in required):
++        fail_unavailable()
++    contract = load_result_contract(repo_root)
++    try:
++        contract, result, inventory_contract = require_result(repo_root, contract)
++        require_probe(
++            repo_root,
++            contract,
++            result,
++            inventory_contract,
++            attest_recorded_observation,
++        )
++        require_cmake_and_plan(repo_root)
++    except contract.PrototypeResultError as error:
++        print(
++            f"{Path(__file__).name}: {contract.public_diagnostic(error)}",
++            file=sys.stderr,
++        )
++        return 1
++    except (AssertionError, OSError, subprocess.SubprocessError) as error:
++        print(
++            f"{Path(__file__).name}: "
++            f"{contract.public_operational_failure(attest_recorded_observation, error)}",
++            file=sys.stderr,
++        )
++        return 1
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main(sys.argv[1:]))
