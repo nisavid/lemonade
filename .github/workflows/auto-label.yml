@@ -143,7 +143,7 @@ jobs:
               ;;
           esac
 
-      - name: Run auto-labeler (LLM + priority)
+      - name: Run auto-labeler (classification when configured + priority)
         if: steps.resolve.outputs.mode == 'all'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -154,11 +154,15 @@ jobs:
             echo "No items to label."
             exit 0
           fi
-          if [ "${{ steps.resolve.outputs.dry_run }}" = "true" ]; then
-            python .github/scripts/auto_label.py $ITEMS --dry-run
-          else
-            python .github/scripts/auto_label.py $ITEMS
+          ARGS=()
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "ANTHROPIC_API_KEY is not configured; refreshing priority labels only."
+            ARGS+=(--priority-only)
           fi
+          if [ "${{ steps.resolve.outputs.dry_run }}" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          python .github/scripts/auto_label.py $ITEMS "${ARGS[@]}"
 
       - name: Run auto-labeler (priority only)
         if: steps.resolve.outputs.mode == 'priority-only'
