@@ -429,6 +429,16 @@ void test_reason_rendering() {
         "p_lifecycle", "warning", "Lifecycle changed",
         "The residency lifecycle operation was interrupted or superseded.");
 
+    const auto older_minor = render_reason_projection(
+        {1, 1}, {1, 0},
+        reason("residency_cancelled", "lifecycle", "p_lifecycle", "warning",
+               "Lifecycle changed",
+               "The residency lifecycle operation was interrupted or superseded."));
+    require(older_minor.status == ReasonRenderStatus::UnsupportedSchema,
+            "older-minor projection was rendered");
+    require(!older_minor.reason.has_value(),
+            "older-minor projection exposed a reason");
+
     const auto unknown_major = render_reason_projection(
         supported, {2, 0},
         reason("future_major_condition", "capacity", "p_capacity", "warning",
@@ -552,6 +562,31 @@ void test_update_validation() {
                           ExplanationUpdateStatus::Invalid,
                           "operation kind was accepted in the wrong family");
     }
+
+    auto forged_kind = resource_draft("forged-operation-kind", 0);
+    forged_kind.operation_kind = static_cast<OperationKind>(0x7fff);
+    require_rejection(empty.with_revision(forged_kind, at(10)),
+                      ExplanationUpdateStatus::Invalid,
+                      "forged operation kind was accepted");
+
+    auto forged_family = resource_draft("forged-operation-family", 0);
+    forged_family.family = static_cast<OperationFamily>(0x7fff);
+    require_rejection(empty.with_revision(forged_family, at(10)),
+                      ExplanationUpdateStatus::Invalid,
+                      "forged operation family was accepted");
+
+    auto forged_phase = resource_draft("forged-operation-phase", 0);
+    forged_phase.phase = static_cast<OperationPhase>(0x7fff);
+    require_rejection(empty.with_revision(forged_phase, at(10)),
+                      ExplanationUpdateStatus::Invalid,
+                      "forged operation phase was accepted");
+
+    auto forged_outcome = resource_draft(
+        "forged-terminal-outcome", 0, OperationPhase::Terminal,
+        static_cast<TerminalOutcome>(0x7fff), {success_reason()});
+    require_rejection(empty.with_revision(forged_outcome, at(10)),
+                      ExplanationUpdateStatus::Invalid,
+                      "forged terminal outcome was accepted");
 
     auto outcome_without_terminal =
         resource_draft("outcome-without-terminal", 0);

@@ -8,6 +8,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FAILURE = "TASK-012 residency contract delivery wiring is unavailable\n"
 CATALOG_PATH = REPO_ROOT / "src/cpp/resources/residency_profiles.json"
+CHECKOUT_V5_SHA = "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
 
 
 def strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -32,6 +33,14 @@ def require_match(pattern: str, content: str, message: str) -> re.Match[str]:
     match = re.search(pattern, content, flags=re.MULTILINE | re.DOTALL)
     require(match is not None, message)
     return match
+
+
+def workflow_job(workflow: str, job_name: str) -> str:
+    return require_match(
+        rf"^  {re.escape(job_name)}:\s*$\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\s*$|\Z)",
+        workflow,
+        f"{job_name} job is unavailable",
+    ).group("body")
 
 
 def require_inactive_catalog() -> None:
@@ -174,6 +183,12 @@ def require_archive_and_package_checks() -> None:
         in deb_action,
         "Debian package check omits the residency catalog",
     )
+    require_match(
+        r"DEB_FILE=\$\(ls\s+lemonade-server_\$\{VERSION\}\*_amd64\.deb\s+"
+        r"2>/dev/null\s*\|\s*head\s+-n1\s*\|\|\s*true\)",
+        deb_action,
+        "Debian package discovery is not safe under pipefail",
+    )
 
     rpm_catalog = "/opt/share/lemonade-server/resources/residency_profiles.json"
     require(
@@ -192,6 +207,31 @@ def require_archive_and_package_checks() -> None:
         in macos_action,
         "macOS package check omits the residency catalog",
     )
+
+
+def require_artifact_consumer_checkout_hardening() -> None:
+    workflow = read(".github/workflows/cpp_server_build_test_release.yml")
+    for job_name in ("test-rpm-package", "test-embeddable-windows"):
+        job = workflow_job(workflow, job_name)
+        checkout = require_match(
+            rf"^      - uses: actions/checkout@{CHECKOUT_V5_SHA} # v5\s*$\n"
+            r"^        with:\s*$\n(?P<inputs>(?:^          [^\n]+\n)+)",
+            job,
+            f"{job_name} does not use the immutable checkout v5 release",
+        )
+        require(
+            re.search(
+                r"^          persist-credentials:\s*false\s*$",
+                checkout.group("inputs"),
+                flags=re.MULTILINE,
+            )
+            is not None,
+            f"{job_name} persists the checkout credential",
+        )
+        require(
+            len(re.findall(r"actions/checkout@", job)) == 1,
+            f"{job_name} has an unexpected checkout path",
+        )
 
 
 def require_hosted_generation_checks() -> None:
@@ -250,13 +290,15 @@ def verify_delivery_contract() -> None:
     require_normal_and_embeddable_build_wiring()
     require_windows_installer_wiring()
     require_archive_and_package_checks()
+    require_artifact_consumer_checkout_hardening()
     require_hosted_generation_checks()
 
 
 def main() -> int:
     try:
         verify_delivery_contract()
-    except (AssertionError, KeyError, OSError, TypeError, ValueError):
+    except (AssertionError, KeyError, OSError, TypeError, ValueError) as error:
+        sys.stderr.write(f"{type(error).__name__}: {error}\n")
         sys.stderr.write(FAILURE)
         return 1
     return 0

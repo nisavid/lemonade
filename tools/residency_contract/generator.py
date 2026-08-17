@@ -763,7 +763,7 @@ def _render_cpp_header(
         b"const ReasonMetadata* reason_metadata(std::string_view code) noexcept;\n"
         b"const ReasonMetadata* reason_metadata(const KnownReasonCode& code) noexcept;\n"
         b"const ReasonMetadata* reason_metadata(const ReasonCode& code) noexcept;\n"
-        b"OperationFamily operation_family(OperationKind kind) noexcept;\n"
+        b"std::optional<OperationFamily> operation_family(OperationKind kind) noexcept;\n"
         b"const OperationReasonRuleMetadata* operation_reason_rule_metadata(std::string_view code) noexcept;\n"
         b"bool operation_reason_is_legal(std::string_view code, OperationKind kind, OperationPhase phase, std::optional<TerminalOutcome> terminal_outcome, bool secondary) noexcept;\n"
         b"const ReasonPresentationMetadata* reason_presentation_metadata(std::string_view presentation_id) noexcept;\n"
@@ -870,7 +870,6 @@ def _render_cpp_source(
     source = f"""#include "lemon/residency/generated_contract.h"
 
 #include <array>
-#include <exception>
 #include <string>
 
 namespace lemon::residency {{
@@ -1041,7 +1040,7 @@ const ReasonMetadata* reason_metadata(const ReasonCode& code) noexcept {{
     return known == nullptr ? nullptr : reason_metadata(*known);
 }}
 
-OperationFamily operation_family(OperationKind kind) noexcept {{
+std::optional<OperationFamily> operation_family(OperationKind kind) noexcept {{
     const auto operation_kind = wire_name(kind);
     for (const auto& metadata : operation_families) {{
         if (metadata.operation_kind == operation_kind) {{
@@ -1052,7 +1051,7 @@ OperationFamily operation_family(OperationKind kind) noexcept {{
             }}
         }}
     }}
-    std::terminate();
+    return std::nullopt;
 }}
 
 const OperationReasonRuleMetadata*
@@ -1080,7 +1079,9 @@ bool operation_reason_is_legal(
     if (terminal_outcome.has_value() && wire_name(*terminal_outcome).empty()) {{
         return false;
     }}
-    if (!operation_state_is_valid(operation_family(kind), phase, terminal_outcome)) {{
+    const auto family = operation_family(kind);
+    if (!family.has_value() ||
+        !operation_state_is_valid(*family, phase, terminal_outcome)) {{
         return false;
     }}
     const auto outcome = terminal_outcome.has_value()

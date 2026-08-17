@@ -1427,7 +1427,9 @@ jobs:
     env:
       LEMONADE_VERSION: ${{ needs.build-lemonade-rpm.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Download Lemonade .rpm Package
         uses: actions/download-artifact@v7
@@ -1653,7 +1655,9 @@ jobs:
     env:
       LEMONADE_VERSION: ${{ needs.build-lemonade-embeddable-windows.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Download embeddable archive
         uses: actions/download-artifact@v4

@@ -439,8 +439,11 @@ def require_generated_cpp_compiles(output_root: Path, files: dict[str, bytes]) -
         )
         operation_family_checks = "\n".join(
             (
-                f"    if (operation_family(OperationKind::{kind}) != "
-                f"OperationFamily::{family}) return {100 + index};"
+                f"    const auto operation_family_{index} = "
+                f"operation_family(OperationKind::{kind});\n"
+                f"    if (!operation_family_{index}.has_value() || "
+                f"*operation_family_{index} != OperationFamily::{family}) "
+                f"return {100 + index};"
             )
             for index, (kind, family) in enumerate(
                 (
@@ -466,8 +469,10 @@ def require_generated_cpp_compiles(output_root: Path, files: dict[str, bytes]) -
         operation_legality_checks_text = operation_legality_checks(registry)
         seam.write_text(
             '#include "lemon/residency/generated_contract.h"\n\n'
+            "#include <type_traits>\n\n"
             "using namespace lemon::residency;\n\n"
             "int main() {\n"
+            "    static_assert(std::is_same_v<decltype(operation_family(OperationKind::Admission)), std::optional<OperationFamily>>);\n"
             f'    if (kPackagedCatalogSha256 != "{hashlib.sha256(files["src/cpp/resources/residency_profiles.json"]).hexdigest()}") return 3;\n'
             f"{known_checks}\n"
             f"{internal_key_checks}\n"
@@ -502,6 +507,10 @@ def require_generated_cpp_compiles(output_root: Path, files: dict[str, bytes]) -
             '    const auto* status_auth = matching_reason_presentation_for_category("authentication", "p_status_authentication");\n'
             '    if (status_auth == nullptr || status_auth->title != "Status authorization required") return 140;\n'
             '    if (matching_reason_presentation_for_category("capacity", "p_action") != nullptr) return 141;\n'
+            "    if (operation_family(static_cast<OperationKind>(0x7fff)).has_value()) return 147;\n"
+            '    if (operation_reason_is_legal("residency_cancelled", static_cast<OperationKind>(0x7fff), OperationPhase::Evaluating, std::nullopt, false)) return 148;\n'
+            '    if (operation_reason_is_legal("residency_cancelled", OperationKind::Admission, static_cast<OperationPhase>(0x7fff), std::nullopt, false)) return 149;\n'
+            '    if (operation_reason_is_legal("residency_operation_succeeded", OperationKind::Admission, OperationPhase::Terminal, static_cast<TerminalOutcome>(0x7fff), false)) return 150;\n'
             "    return 0;\n"
             "}\n",
             encoding="utf-8",
@@ -763,12 +772,92 @@ def require_reason_boundaries(
     )
 
 
+def require_closed_schema_conditionals(
+    schemas: dict[str, Any],
+    resources: Registry,
+    contract_validator: Any,
+    examples: dict[str, Any],
+) -> None:
+    def mappings(value: Any) -> Any:
+        if isinstance(value, dict):
+            yield value
+            for child in value.values():
+                yield from mappings(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from mappings(child)
+
+    for name, schema in schemas.items():
+        for mapping in mappings(schema):
+            require(
+                mapping.get("then") != {},
+                f"{name} schema contains an empty conditional consequence",
+            )
+
+    authority = schemas["authority_transaction_result"]
+    require(
+        len(authority.get("allOf", [])) == 1,
+        "explicit allow-empty authority condition was emitted as a no-op",
+    )
+    authority_validator = contract_validator(authority, registry=resources)
+    require(
+        authority_validator.is_valid(examples["authority_transaction_result"]),
+        "successful authority transaction no longer permits empty reasons",
+    )
+
+
+def require_schema_translation_mutations_rejected(files: dict[str, bytes]) -> None:
+    tools_root = str(REPO_ROOT / "tools")
+    if tools_root not in sys.path:
+        sys.path.insert(0, tools_root)
+    schemas_module = import_module("residency_contract.schemas")
+    registry_module = import_module("residency_inventory.contract_registry")
+    catalog = load_json(files["src/cpp/resources/residency_profiles.json"])
+    source_registry = load_json(SOURCE.read_bytes())["contract_registry"]
+    reasons = load_json(files["test/residency/contract/generated/reasons.json"])[
+        "reasons"
+    ]
+
+    predicate_registry = json.loads(json.dumps(source_registry))
+    predicate_conditional = predicate_registry["schema_registry"][
+        "authority_transaction_result"
+    ]["conditionals"][0]
+    predicate_conditional["if"] = {"contexts": ["health_read"]}
+    try:
+        registry_module.validate_contract_registry(predicate_registry)
+    except ValueError as error:
+        require(
+            "predicate is not translatable" in str(error),
+            "schema predicate mutation diagnostic drifted",
+        )
+    else:
+        raise AssertionError("non-translatable schema predicate was accepted")
+
+    consequence_catalog = json.loads(json.dumps(catalog))
+    consequence_registry = consequence_catalog["contract_registry"]
+    consequence_conditional = consequence_registry["schema_registry"][
+        "authority_transaction_result"
+    ]["conditionals"][0]
+    consequence_conditional.pop("require_nonempty")
+    try:
+        schemas_module.build_schemas(consequence_registry, reasons, consequence_catalog)
+    except schemas_module.SchemaRenderError as error:
+        require(
+            "consequence is empty" in str(error),
+            "schema consequence mutation diagnostic drifted",
+        )
+    else:
+        raise AssertionError("empty schema consequence was accepted")
+
+
 def require_schemas_and_examples(files: dict[str, bytes]) -> None:
     schemas, resources, contract_validator = load_schema_contract(files)
     examples = require_schema_examples(files, schemas, resources, contract_validator)
     require_transitive_keywords(schemas)
     require_quarantine_provenance(schemas)
     require_reason_boundaries(schemas, resources, contract_validator, examples)
+    require_closed_schema_conditionals(schemas, resources, contract_validator, examples)
+    require_schema_translation_mutations_rejected(files)
 
 
 def require_duplicate_key_rejected() -> None:

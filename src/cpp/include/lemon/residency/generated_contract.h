@@ -66,7 +66,7 @@ DecodedValue<SchemaType> decode_schema_type(std::string_view wire);
 const ReasonMetadata* reason_metadata(std::string_view code) noexcept;
 const ReasonMetadata* reason_metadata(const KnownReasonCode& code) noexcept;
 const ReasonMetadata* reason_metadata(const ReasonCode& code) noexcept;
-OperationFamily operation_family(OperationKind kind) noexcept;
+std::optional<OperationFamily> operation_family(OperationKind kind) noexcept;
 const OperationReasonRuleMetadata* operation_reason_rule_metadata(std::string_view code) noexcept;
 bool operation_reason_is_legal(std::string_view code, OperationKind kind, OperationPhase phase, std::optional<TerminalOutcome> terminal_outcome, bool secondary) noexcept;
 const ReasonPresentationMetadata* reason_presentation_metadata(std::string_view presentation_id) noexcept;

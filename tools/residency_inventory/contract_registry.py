@@ -1173,6 +1173,20 @@ def _validate_schema_predicate(
         require_string(predicate["equals_path"], f"{label}.equals_path")
 
 
+def _schema_predicate_is_translatable(predicate: dict[str, Any]) -> bool:
+    return (
+        "reason_code" in predicate
+        or any(key.endswith("_not_in") for key in predicate)
+        or (
+            "field" in predicate
+            and any(
+                operator in predicate
+                for operator in ("equals", "not_equals", "in", "not_in")
+            )
+        )
+    )
+
+
 def _validate_schema_conditional(
     conditional: dict[str, Any],
     fields: dict[str, Any],
@@ -1199,12 +1213,10 @@ def _validate_schema_conditional(
         fail(f"{label} lacks a closed predicate")
     for key in ("if", "unless", "assert"):
         if key in conditional:
-            _validate_schema_predicate(
-                require_mapping(conditional[key], f"{label}.{key}"),
-                fields,
-                registry,
-                f"{label}.{key}",
-            )
+            predicate = require_mapping(conditional[key], f"{label}.{key}")
+            _validate_schema_predicate(predicate, fields, registry, f"{label}.{key}")
+            if key != "assert" and not _schema_predicate_is_translatable(predicate):
+                fail(f"{label}.{key} predicate is not translatable")
     for key in (
         "allow_empty",
         "forbid",

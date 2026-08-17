@@ -148,19 +148,6 @@
           "reasons"
         ]
       }
-    },
-    {
-      "if": {
-        "properties": {
-          "result": {
-            "const": "succeeded"
-          }
-        },
-        "required": [
-          "result"
-        ]
-      },
-      "then": {}
     }
   ],
   "properties": {

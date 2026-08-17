@@ -644,7 +644,7 @@ def _request_error_http_conditionals(
     return result
 
 
-def _predicate(raw: Mapping[str, Any]) -> dict[str, Any]:
+def _predicate(raw: Mapping[str, Any], label: str) -> dict[str, Any]:
     parts: list[dict[str, Any]] = []
     field = raw.get("field")
     if isinstance(field, str):
@@ -693,11 +693,11 @@ def _predicate(raw: Mapping[str, Any]) -> dict[str, Any]:
             }
         )
     if not parts:
-        return {}
+        raise SchemaRenderError(f"{label} predicate is not translatable")
     return parts[0] if len(parts) == 1 else {"allOf": parts}
 
 
-def _consequence(conditional: Mapping[str, Any]) -> dict[str, Any]:
+def _consequence(conditional: Mapping[str, Any], label: str) -> dict[str, Any] | None:
     parts: list[dict[str, Any]] = []
     if "require" in conditional:
         parts.append({"required": conditional["require"]})
@@ -729,7 +729,9 @@ def _consequence(conditional: Mapping[str, Any]) -> dict[str, Any]:
             }
         )
     if not parts:
-        return {}
+        if "allow_empty" in conditional:
+            return None
+        raise SchemaRenderError(f"{label} consequence is empty")
     return parts[0] if len(parts) == 1 else {"allOf": parts}
 
 
@@ -753,10 +755,14 @@ def _conditionals(raw_value: Any) -> list[dict[str, Any]]:
             continue
         key = "if" if "if" in conditional else "unless"
         raw_predicate = _mapping(conditional.get(key), f"schema conditional {key}")
-        predicate = _predicate(raw_predicate)
+        label = f"schema conditionals[{index}]"
+        predicate = _predicate(raw_predicate, label)
         if key == "unless":
             predicate = {"not": predicate}
-        translated = {"if": predicate, "then": _consequence(conditional)}
+        consequence = _consequence(conditional, label)
+        if consequence is None:
+            continue
+        translated = {"if": predicate, "then": consequence}
         if "contexts" in raw_predicate:
             translated["x-residency-contexts"] = raw_predicate["contexts"]
         result.append(translated)

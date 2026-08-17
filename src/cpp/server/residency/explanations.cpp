@@ -147,15 +147,17 @@ ValidatedDraft validate_draft(const OperationExplanationDraft &draft) {
         return {ExplanationUpdateStatus::Invalid, {},
                 "the plan identity is invalid"};
     }
-    if (operation_family(draft.operation_kind) != draft.family) {
+    const auto family = operation_family(draft.operation_kind);
+    if (!family.has_value() || *family != draft.family) {
         return {ExplanationUpdateStatus::Invalid, {},
                 "the operation family does not match its kind"};
     }
-    const bool terminal = draft.phase == OperationPhase::Terminal;
-    if (terminal != draft.terminal_outcome.has_value()) {
+    if (!operation_state_is_valid(draft.family, draft.phase,
+                                  draft.terminal_outcome)) {
         return {ExplanationUpdateStatus::Invalid, {},
-                "the terminal outcome does not match the operation phase"};
+                "the operation state is invalid"};
     }
+    const bool terminal = draft.phase == OperationPhase::Terminal;
     if (terminal && draft.reasons.empty()) {
         return {ExplanationUpdateStatus::Invalid, {},
                 "a terminal explanation requires a primary reason"};
@@ -223,8 +225,9 @@ ReasonRenderResult
 render_reason_projection(SchemaVersion supported_version,
                          SchemaVersion projection_version,
                          const WireReasonProjection &projection) {
-    if (projection_version.major != supported_version.major ||
-        projection_version.minor < supported_version.minor) {
+    if (classify_schema_version(supported_version, projection_version,
+                                SchemaUse::Projection) ==
+        SchemaCompatibility::Unsupported) {
         return {ReasonRenderStatus::UnsupportedSchema, std::nullopt};
     }
     if (!valid_reason_code(projection.code)) {

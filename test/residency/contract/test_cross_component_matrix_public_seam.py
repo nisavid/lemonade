@@ -75,6 +75,22 @@ def read(relative: str) -> bytes:
     return (repo_root / relative).read_bytes()
 
 
+def residency_matrix_cmake_block(cmake: str) -> str:
+    match = re.search(
+        r"^set\(_RESIDENCY_CONTRACT_MATRIX_TEST_SRC\s*\n"
+        r'\s+"\$\{CMAKE_CURRENT_SOURCE_DIR\}/test/cpp/'
+        r'test_residency_contract_matrix\.cpp"\s*\n'
+        r"^\)\s*\n"
+        r'(?P<block>^if\(BUILD_TESTING AND EXISTS "\$\{'
+        r'_RESIDENCY_CONTRACT_MATRIX_TEST_SRC\}"\)\s*\n'
+        r".*?^endif\(\)\s*$)",
+        cmake,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    require(match is not None, "residency matrix CMake block is unavailable")
+    return match.group("block")
+
+
 def collect(root: Path) -> dict[str, bytes]:
     return {
         path.relative_to(root).as_posix(): path.read_bytes()
@@ -607,30 +623,45 @@ def docker_payload_check(content: str) -> bool:
 def require_delivery_matrix_wiring() -> None:
     cmake = read("CMakeLists.txt").decode("utf-8")
     cpp_path = "test/cpp/test_residency_contract_matrix.cpp"
-    cpp_index = cmake.find(cpp_path)
-    cmake_block = cmake[cpp_index : cpp_index + 1800] if cpp_index >= 0 else ""
-    cmake_ready = (
-        cmake.count(cpp_path) == 1
-        and "test_residency_contract_matrix" in cmake_block
-        and "src/cpp/server/residency/catalog.cpp" in cmake_block
-        and "src/cpp/server/residency/explanations.cpp" in cmake_block
-        and "src/cpp/server/residency/generated_contract.cpp" in cmake_block
-        and "lemonade-digest-crypto" in cmake_block
-        and "nlohmann_json::nlohmann_json" in cmake_block
-        and re.search(
+    cmake_block = residency_matrix_cmake_block(cmake)
+    require(cmake.count(cpp_path) == 1, "matrix C++ source wiring is not unique")
+    for source in (
+        "src/cpp/server/residency/catalog.cpp",
+        "src/cpp/server/residency/explanations.cpp",
+        "src/cpp/server/residency/generated_contract.cpp",
+    ):
+        require(source in cmake_block, f"matrix CMake block omits {source}")
+    require(
+        "add_executable(test_residency_contract_matrix" in cmake_block,
+        "matrix CMake executable is unavailable",
+    )
+    require(
+        "lemonade-digest-crypto" in cmake_block,
+        "matrix CMake block omits digest crypto",
+    )
+    require(
+        "nlohmann_json::nlohmann_json" in cmake_block,
+        "matrix CMake block omits JSON support",
+    )
+    require(
+        re.search(
             r"add_cpp_ci_test\(\s*ResidencyContractMatrix\s+CI\s+ON\s+"
             r"COMMAND\s+test_residency_contract_matrix\s*\)",
             cmake_block,
             flags=re.DOTALL,
         )
-        is not None
+        is not None,
+        "matrix CMake test is not in cpp-ci",
     )
 
     docs = read(".github/workflows/docs_and_style.yml").decode("utf-8")
     command = (
         "python -S test/residency/contract/test_cross_component_matrix_public_seam.py"
     )
-    hosted_ready = docs.count(command) == 1
+    require(
+        docs.count(command) == 1,
+        "hosted cross-component matrix wiring is unavailable",
+    )
 
     embeddable = read(".github/actions/smoke-test-embeddable/action.yml").decode(
         "utf-8"
@@ -645,9 +676,11 @@ def require_delivery_matrix_wiring() -> None:
         "utf-8"
     )
     rpm_start = release.find("- name: Install and verify Lemonade (.rpm)")
+    require(rpm_start >= 0, "RPM delivery matrix step is unavailable")
     rpm_end = release.find("\n      - name:", rpm_start + 1)
     rpm = release[rpm_start : rpm_end if rpm_end >= 0 else len(release)]
     windows_start = release.find("  test-embeddable-windows:")
+    require(windows_start >= 0, "Windows delivery matrix job is unavailable")
     next_job = re.search(
         r"^  [A-Za-z0-9_-]+:\s*$",
         release[windows_start + 3 :],
@@ -657,63 +690,74 @@ def require_delivery_matrix_wiring() -> None:
         windows_start + 3 + next_job.start() if next_job is not None else len(release)
     )
     windows = release[windows_start : windows_end if windows_end >= 0 else len(release)]
-    rpm_ready = posix_payload_check(
-        rpm,
-        "/opt",
-        "/opt/share/lemonade-server/resources/residency_profiles.json",
-    ) and shell_archive_member_check(
-        rpm,
-        r"/opt/share/lemonade-server/resources/residency_profiles\.json",
-        r'rpm\s+-qpl\s+"\$RPM_FILE"',
-    )
-    embeddable_ready = posix_payload_check(
-        embeddable,
-        "$DIR",
-        "$DIR/resources/residency_profiles.json",
-    ) and shell_archive_member_check(
-        embeddable,
-        r"\$DIR/resources/residency_profiles\.json",
-        r'tar\s+tzf\s+"\$ARCHIVE"',
-    )
-    deb_ready = posix_payload_check(
-        deb,
-        "$EXTRACT_PATH",
-        "$EXTRACT_PATH/usr/share/lemonade-server/resources/residency_profiles.json",
-    ) and shell_archive_member_check(
-        deb,
-        r"\./usr/share/lemonade-server/resources/residency_profiles\.json",
-        r'dpkg-deb\s+--fsys-tarfile\s+"\$DEB_FILE"\s*\|\s*tar\s+-tf\s+-',
-    )
-    macos_ready = posix_payload_check(
-        macos,
-        "/Library/Application Support/Lemonade",
-        "/Library/Application Support/Lemonade/resources/residency_profiles.json",
-    ) and macos_archive_member_check(macos)
-
     require(
-        all(
-            (
-                cmake_ready,
-                hosted_ready,
-                embeddable_ready,
-                deb_ready,
-                macos_ready,
-                powershell_payload_check(
-                    msi,
-                    "$installPath",
-                    r"bin\resources\residency_profiles.json",
-                ),
-                rpm_ready,
-                powershell_payload_check(
-                    windows,
-                    "$archiveDir",
-                    r"resources\residency_profiles.json",
-                )
-                and windows_archive_member_check(windows),
-                docker_payload_check(docker),
-            )
+        posix_payload_check(
+            embeddable,
+            "$DIR",
+            "$DIR/resources/residency_profiles.json",
+        )
+        and shell_archive_member_check(
+            embeddable,
+            r"\$DIR/resources/residency_profiles\.json",
+            r'tar\s+tzf\s+"\$ARCHIVE"',
         ),
-        "TASK-013 delivery matrix is incomplete",
+        "POSIX embeddable delivery matrix wiring is incomplete",
+    )
+    require(
+        posix_payload_check(
+            deb,
+            "$EXTRACT_PATH",
+            "$EXTRACT_PATH/usr/share/lemonade-server/resources/residency_profiles.json",
+        )
+        and shell_archive_member_check(
+            deb,
+            r"\./usr/share/lemonade-server/resources/residency_profiles\.json",
+            r'dpkg-deb\s+--fsys-tarfile\s+"\$DEB_FILE"\s*\|\s*tar\s+-tf\s+-',
+        ),
+        "Debian delivery matrix wiring is incomplete",
+    )
+    require(
+        posix_payload_check(
+            macos,
+            "/Library/Application Support/Lemonade",
+            "/Library/Application Support/Lemonade/resources/residency_profiles.json",
+        )
+        and macos_archive_member_check(macos),
+        "macOS delivery matrix wiring is incomplete",
+    )
+    require(
+        powershell_payload_check(
+            msi,
+            "$installPath",
+            r"bin\resources\residency_profiles.json",
+        ),
+        "MSI delivery matrix wiring is incomplete",
+    )
+    require(
+        posix_payload_check(
+            rpm,
+            "/opt",
+            "/opt/share/lemonade-server/resources/residency_profiles.json",
+        )
+        and shell_archive_member_check(
+            rpm,
+            r"/opt/share/lemonade-server/resources/residency_profiles\.json",
+            r'rpm\s+-qpl\s+"\$RPM_FILE"',
+        ),
+        "RPM delivery matrix wiring is incomplete",
+    )
+    require(
+        powershell_payload_check(
+            windows,
+            "$archiveDir",
+            r"resources\residency_profiles.json",
+        )
+        and windows_archive_member_check(windows),
+        "Windows embeddable delivery matrix wiring is incomplete",
+    )
+    require(
+        docker_payload_check(docker),
+        "Docker delivery matrix wiring is incomplete",
     )
 
 
@@ -736,7 +780,8 @@ def main() -> int:
         subprocess.SubprocessError,
         TypeError,
         ValueError,
-    ):
+    ) as error:
+        sys.stderr.write(f"{type(error).__name__}: {error}\n")
         sys.stderr.write(failure)
         return 1
     return 0
