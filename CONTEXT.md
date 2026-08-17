@@ -239,6 +239,14 @@ _Avoid_: Inventing one cross-platform runtime selector for variants that do not 
 The strongest capability level that one frozen evidence program could justify for an exact runtime cell or evidence-only compatibility contract if every required gate passes. It is a campaign target, not the promotion unit's accepted capability level or current runtime authority.
 _Avoid_: Labeling a cell or contract modeled or validated merely because its planned evidence ceiling has that name.
 
+**Residency prototype behavioral replay**:
+A portable execution of a Phase-2 residency prototype that verifies its mechanism behavior and fallback disposition with a supported local toolchain. It does not reproduce or authenticate the published observation provenance.
+_Avoid_: Treating a successful behavioral replay as a recorded evidence observation.
+
+**Recorded-observation attestation**:
+An exact Phase-2 residency prototype replay whose environment and complete observation body match one published content-addressed observation. A prerequisite mismatch makes the attestation unavailable rather than changing it into behavioral replay.
+_Avoid_: Calling a portable behavioral replay an attestation or skipping an unmatched prerequisite.
+
 **Residency delivery state**:
 The implementation status of one complete runtime-cell or compatibility-contract unit: `absent`, `implemented_unverified`, or `release_verified`. Partial implementation remains `absent` for the complete unit; source presence alone never establishes its capability level, and evidence cannot make an absent unit available.
 _Avoid_: Treating accepted design, an upstream-adjacent mechanism, or passing synthetic tests as proof that the complete runtime behavior is delivered.
