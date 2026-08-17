@@ -1,0 +1,23 @@
+{
+  "command": [
+    "python3",
+    "-S",
+    "test/residency/prototypes/test_task018_flm_service_membership_public_seam.py",
+    "--attest-recorded-observation"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "g++",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-018 FLM service-membership and ownership prototype is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "67e4c3ae45ebf3caecb47c5058f005b28cfd15fe",
+  "task_id": "TASK-018"
+}
