@@ -801,6 +801,392 @@ int fsync(int file) {
     )
 
 
+def build_close_adversary(
+    source: Path,
+    compiler: str,
+    root: Path,
+    stem: str,
+    interceptor_source: str,
+) -> tuple[Path, Path]:
+    executable = root / "task014"
+    interceptor = root / f"{stem}.c"
+    library = root / f"{stem}.so"
+    interceptor.write_text(interceptor_source, encoding="utf-8")
+    subprocess.run(
+        compiler_command(compiler, str(source), str(executable), "linux"),
+        check=True,
+        timeout=30,
+    )
+    subprocess.run(
+        [
+            os.environ.get("CC", "cc"),
+            "-shared",
+            "-fPIC",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            str(interceptor),
+            "-o",
+            str(library),
+        ],
+        check=True,
+        timeout=30,
+    )
+    return executable, library
+
+
+def run_close_adversary(
+    executable: Path,
+    root: Path,
+    library: Path,
+    variables: dict[str, str],
+):
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "LD_PRELOAD": str(library),
+            "TMPDIR": str(root),
+            **variables,
+        }
+    )
+    return subprocess.run(
+        [f"./{executable.name}"],
+        cwd=root,
+        env=environment,
+        check=False,
+        capture_output=True,
+        timeout=30,
+    )
+
+
+def require_close_adversary_result(completed, expected_rows, label: str) -> None:
+    _, rows = parse_probe_output(completed.stdout)
+    require(completed.returncode == 1, f"{label} did not fail the native probe")
+    require(completed.stderr == b"", f"{label} emitted stderr")
+    require(set(rows) == EXPECTED_ROW_KEYS, f"{label} changed rows")
+    require_exact_rows(rows, expected_rows, label)
+
+
+def require_single_targeted_close_calls(trace: Path, label: str) -> None:
+    require(trace.is_file(), f"{label} did not trace a targeted close")
+    events = trace.read_text(encoding="utf-8").splitlines()
+    require(events, f"{label} did not trace a targeted close")
+    require(
+        len(events) == len(set(events)),
+        f"{label} retried a targeted close",
+    )
+
+
+CLOSE_ADVERSARY_PREFIX = r"""
+#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+static int synced_target = -1;
+static int faulted_target = -1;
+static unsigned long fault_generation = 0;
+static unsigned long faulted_generation = 0;
+
+static int is_test_target(int file);
+
+static void trace_targeted_close(int file, unsigned long generation) {
+    const char* path = getenv("TASK014_CLOSE_TRACE");
+    if (path == NULL) {
+        return;
+    }
+    char event[96];
+    const int length = snprintf(
+        event, sizeof(event), "%ld:%d:%lu\n",
+        (long)syscall(SYS_getpid), file, generation);
+    if (length <= 0 || (size_t)length >= sizeof(event)) {
+        return;
+    }
+    const int trace = (int)syscall(
+        SYS_openat, AT_FDCWD, path,
+        O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+    if (trace < 0) {
+        return;
+    }
+    (void)syscall(SYS_write, trace, event, (size_t)length);
+    (void)syscall(SYS_close, trace);
+}
+
+static int is_faulted_close_retry(int file) {
+    if (file != faulted_target) {
+        return 0;
+    }
+    errno = 0;
+    if (syscall(SYS_fcntl, file, F_GETFD) == -1 && errno == EBADF) {
+        return 1;
+    }
+    faulted_target = -1;
+    return 0;
+}
+"""
+
+CLOSE_ADVERSARY_SUFFIX = r"""
+int fsync(int file) {
+    const int result = (int)syscall(SYS_fsync, file);
+    if (result == 0 && is_test_target(file)) {
+        synced_target = file;
+    }
+    return result;
+}
+
+int close(int file) {
+    const int first_targeted_close = file == synced_target;
+    const int retrying_faulted_close =
+        !first_targeted_close && is_faulted_close_retry(file);
+    if (first_targeted_close) {
+        ++fault_generation;
+        faulted_generation = fault_generation;
+        trace_targeted_close(file, faulted_generation);
+    } else if (retrying_faulted_close) {
+        trace_targeted_close(file, faulted_generation);
+    }
+    const int result = (int)syscall(SYS_close, file);
+    if (result == 0 && first_targeted_close) {
+        faulted_target = file;
+        synced_target = -1;
+        const char* close_error = getenv("TASK014_CLOSE_ERROR");
+        errno = close_error != NULL && strcmp(close_error, "EINTR") == 0
+                    ? EINTR
+                    : EIO;
+        return -1;
+    }
+    return result;
+}
+"""
+
+
+def require_directory_sync_close_failure_rejected(source: Path, compiler: str) -> None:
+    if platform.system() != "Linux":
+        return
+    interceptor_source = CLOSE_ADVERSARY_PREFIX + r"""
+static int is_test_target(int file) {
+    struct stat metadata;
+    const char* root = getenv("TASK014_DIRECTORY_SYNC_CLOSE_ROOT");
+    if (root == NULL || fstat(file, &metadata) != 0 ||
+        !S_ISDIR(metadata.st_mode)) {
+        return 0;
+    }
+    char link_path[64];
+    char target[4096];
+    const int link_length = snprintf(
+        link_path, sizeof(link_path), "/proc/self/fd/%d", file);
+    if (link_length <= 0 || (size_t)link_length >= sizeof(link_path)) {
+        return 0;
+    }
+    const ssize_t target_length = readlink(
+        link_path, target, sizeof(target) - 1);
+    if (target_length < 0) {
+        return 0;
+    }
+    target[target_length] = '\0';
+    const size_t root_length = strlen(root);
+    return strncmp(target, root, root_length) == 0 &&
+           target[root_length] == '/';
+}
+""" + CLOSE_ADVERSARY_SUFFIX
+    with tempfile.TemporaryDirectory(
+        prefix="residency-task014-close-adversary-"
+    ) as directory:
+        root = Path(directory)
+        executable, library = build_close_adversary(
+            source,
+            compiler,
+            root,
+            "directory_close_eio",
+            interceptor_source,
+        )
+        expected_rows = {
+            "durable_root_publication": "failed",
+            "durable.crash_before_replace_old_root_valid": "failed",
+            "durable.crash_after_replace_complete_root_valid": "passed",
+            "durable.flush_failure_publication": "blocked",
+            "durable.corrupt_candidate_publication": "blocked",
+            "durable.stage_file_flushed": "failed",
+            "durable.root_replaced": "failed",
+            "durable.parent_flushed": "failed",
+            "ownership.prepared_before_spawn": "passed",
+            "identity.birth_token": "passed",
+            "membership.direct": "passed",
+            "membership.descendant": "passed",
+            "identity.mismatch_signal": "blocked",
+            "termination.containment": "passed",
+            "termination.membership_empty": "passed",
+            "containment.escape_detected": "passed",
+            "process_containment": "fallback",
+            "platform.current": "linux",
+            "runtime_authority": "none",
+        }
+        for error_name in ("EIO", "EINTR"):
+            trace = root / f"directory-close-{error_name.lower()}.trace"
+            completed = run_close_adversary(
+                executable,
+                root,
+                library,
+                {
+                    "TASK014_CLOSE_ERROR": error_name,
+                    "TASK014_CLOSE_TRACE": str(trace),
+                    "TASK014_DIRECTORY_SYNC_CLOSE_ROOT": directory,
+                },
+            )
+            require_close_adversary_result(
+                completed,
+                expected_rows,
+                f"directory close {error_name} adversary",
+            )
+            require_single_targeted_close_calls(
+                trace, f"directory close {error_name} adversary"
+            )
+
+
+def require_regular_file_close_failure_rejected(source: Path, compiler: str) -> None:
+    if platform.system() != "Linux":
+        return
+    interceptor_source = CLOSE_ADVERSARY_PREFIX + r"""
+static int is_test_target(int file) {
+    struct stat metadata;
+    const char* root = getenv("TASK014_REGULAR_CLOSE_ROOT");
+    const char* selector = getenv("TASK014_REGULAR_CLOSE_TARGET");
+    if (root == NULL || selector == NULL || fstat(file, &metadata) != 0 ||
+        !S_ISREG(metadata.st_mode)) {
+        return 0;
+    }
+    char link_path[64];
+    char target[4096];
+    const int link_length = snprintf(
+        link_path, sizeof(link_path), "/proc/self/fd/%d", file);
+    if (link_length <= 0 || (size_t)link_length >= sizeof(link_path)) {
+        return 0;
+    }
+    const ssize_t target_length = readlink(
+        link_path, target, sizeof(target) - 1);
+    if (target_length < 0) {
+        return 0;
+    }
+    target[target_length] = '\0';
+    const size_t root_length = strlen(root);
+    if (strncmp(target, root, root_length) != 0 ||
+        target[root_length] != '/') {
+        return 0;
+    }
+    const char* name = strrchr(target, '/');
+    if (name == NULL) {
+        return 0;
+    }
+    ++name;
+    return (strcmp(selector, "initial-root") == 0 &&
+            strcmp(name, "root.json") == 0) ||
+           (strcmp(selector, "stage") == 0 &&
+            strcmp(name, "root.stage") == 0) ||
+           (strcmp(selector, "ownership") == 0 &&
+            strncmp(name, "residency-task014-prepared-",
+                    strlen("residency-task014-prepared-")) == 0);
+}
+""" + CLOSE_ADVERSARY_SUFFIX
+    with tempfile.TemporaryDirectory(
+        prefix="residency-task014-regular-close-adversary-"
+    ) as directory:
+        root = Path(directory)
+        executable, library = build_close_adversary(
+            source,
+            compiler,
+            root,
+            "regular_close_eio",
+            interceptor_source,
+        )
+        cases = {
+            "initial-root": {
+                "durable_root_publication": "failed",
+                "durable.crash_before_replace_old_root_valid": "failed",
+                "durable.crash_after_replace_complete_root_valid": "passed",
+                "durable.flush_failure_publication": "blocked",
+                "durable.corrupt_candidate_publication": "blocked",
+                "durable.stage_file_flushed": "passed",
+                "durable.root_replaced": "passed",
+                "durable.parent_flushed": "failed",
+                "ownership.prepared_before_spawn": "passed",
+                "identity.birth_token": "passed",
+                "membership.direct": "passed",
+                "membership.descendant": "passed",
+                "identity.mismatch_signal": "blocked",
+                "termination.containment": "passed",
+                "termination.membership_empty": "passed",
+                "containment.escape_detected": "passed",
+                "process_containment": "fallback",
+                "platform.current": "linux",
+                "runtime_authority": "none",
+            },
+            "stage": {
+                "durable_root_publication": "failed",
+                "durable.crash_before_replace_old_root_valid": "failed",
+                "durable.crash_after_replace_complete_root_valid": "failed",
+                "durable.flush_failure_publication": "failed",
+                "durable.corrupt_candidate_publication": "failed",
+                "durable.stage_file_flushed": "failed",
+                "durable.root_replaced": "failed",
+                "durable.parent_flushed": "failed",
+                "ownership.prepared_before_spawn": "passed",
+                "identity.birth_token": "passed",
+                "membership.direct": "passed",
+                "membership.descendant": "passed",
+                "identity.mismatch_signal": "blocked",
+                "termination.containment": "passed",
+                "termination.membership_empty": "passed",
+                "containment.escape_detected": "passed",
+                "process_containment": "fallback",
+                "platform.current": "linux",
+                "runtime_authority": "none",
+            },
+            "ownership": {
+                "durable_root_publication": "passed",
+                "durable.crash_before_replace_old_root_valid": "passed",
+                "durable.crash_after_replace_complete_root_valid": "passed",
+                "durable.flush_failure_publication": "blocked",
+                "durable.corrupt_candidate_publication": "blocked",
+                "durable.stage_file_flushed": "passed",
+                "durable.root_replaced": "passed",
+                "durable.parent_flushed": "passed",
+                "ownership.prepared_before_spawn": "failed",
+                "identity.birth_token": "failed",
+                "membership.direct": "failed",
+                "membership.descendant": "failed",
+                "identity.mismatch_signal": "failed",
+                "termination.containment": "failed",
+                "termination.membership_empty": "failed",
+                "containment.escape_detected": "failed",
+                "process_containment": "fallback",
+                "platform.current": "linux",
+                "runtime_authority": "none",
+            },
+        }
+        for selector, expected_rows in cases.items():
+            for error_name in ("EIO", "EINTR"):
+                trace = root / f"{selector}-close-{error_name.lower()}.trace"
+                completed = run_close_adversary(
+                    executable,
+                    root,
+                    library,
+                    {
+                        "TASK014_CLOSE_ERROR": error_name,
+                        "TASK014_CLOSE_TRACE": str(trace),
+                        "TASK014_REGULAR_CLOSE_ROOT": directory,
+                        "TASK014_REGULAR_CLOSE_TARGET": selector,
+                    },
+                )
+                label = f"{selector} close {error_name} adversary"
+                require_close_adversary_result(completed, expected_rows, label)
+                require_single_targeted_close_calls(trace, label)
+
+
 def require_exact_rows(
     rows: dict[str, str], expected: dict[str, str], label: str
 ) -> None:
@@ -991,6 +1377,8 @@ def require_native_probe(
             contract, repo_root, result, recorded_observation, binding
         )
     require_unsupported_directory_sync_deferred(source, compiler_executable)
+    require_directory_sync_close_failure_rejected(source, compiler_executable)
+    require_regular_file_close_failure_rejected(source, compiler_executable)
 
 
 def require_cmake_and_plan(repo_root: Path) -> None:

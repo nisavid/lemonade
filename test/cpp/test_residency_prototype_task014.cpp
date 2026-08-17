@@ -561,7 +561,10 @@ DirectorySyncDisposition sync_parent_directory(const std::string& directory) {
         sync_result = fsync(handle);
     } while (sync_result != 0 && errno == EINTR);
     const int sync_error = sync_result == 0 ? 0 : errno;
-    close(handle);
+    const int close_result = close(handle);
+    if (close_result != 0) {
+        return DirectorySyncDisposition::failed;
+    }
     if (sync_result == 0) {
         return DirectorySyncDisposition::synced;
     }
@@ -578,9 +581,9 @@ DirectorySyncDisposition write_initial_root(
         return DirectorySyncDisposition::failed;
     }
     const bool stored = write_all(file, payload) && fsync(file) == 0;
-    close(file);
-    return stored ? sync_parent_directory(directory)
-                  : DirectorySyncDisposition::failed;
+    const int close_result = close(file);
+    return stored && close_result == 0 ? sync_parent_directory(directory)
+                                       : DirectorySyncDisposition::failed;
 }
 
 std::string read_posix_file(const std::string& path) {
@@ -630,7 +633,9 @@ int durable_child(
         close(file);
         return 81;
     }
-    close(file);
+    if (close(file) != 0) {
+        return 85;
+    }
     if (fault == DurableStage::crash_before_replace) {
         return 71;
     }
@@ -1102,10 +1107,11 @@ LinuxContainmentResult run_linux_containment_probe() {
         return result;
     }
     const std::string prepared = "prepared-before-spawn\n";
+    const bool record_stored = write_all(record, prepared) && fsync(record) == 0;
+    const bool record_closed = close(record) == 0;
     result.prepared =
-        write_all(record, prepared) && fsync(record) == 0 &&
+        record_stored && record_closed &&
         sync_parent_directory(temporary_root) == DirectorySyncDisposition::synced;
-    close(record);
     if (!result.prepared) {
         unlink(record_template.data());
         return result;

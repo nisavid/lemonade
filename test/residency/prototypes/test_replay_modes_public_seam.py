@@ -117,42 +117,82 @@ class PrototypeReplayModesTest(unittest.TestCase):
         sys.platform.startswith("linux"),
         "TASK-014 compiler integration requires Linux",
     )
-    def test_behavioral_replay_does_not_compare_recorded_toolchain(self):
-        compiler = shutil.which("g++")
-        if compiler is None:
-            self.skipTest("g++ is unavailable")
+    def test_behavioral_replay_uses_selected_compilers_without_path_fallback(self):
+        cxx_compiler = shutil.which("g++")
+        c_compiler = shutil.which("cc")
+        if cxx_compiler is None or c_compiler is None:
+            self.skipTest("C and C++ compilers are unavailable")
         relative_path, _ = SEAMS["TASK-014"]
         with tempfile.TemporaryDirectory(
             prefix="residency-replay-compiler-"
         ) as directory:
             root = Path(directory)
-            wrapper = root / "g++"
-            log = root / "compiler.log"
-            wrapper.write_text(
+            selected = root / "selected"
+            traps = root / "traps"
+            selected.mkdir()
+            traps.mkdir()
+            cxx_wrapper = selected / "cxx"
+            c_wrapper = selected / "cc"
+            cxx_log = root / "cxx-compiler.log"
+            c_log = root / "c-compiler.log"
+            trap_log = root / "trap.log"
+            cxx_wrapper.write_text(
                 "#!/bin/sh\n"
                 'printf "%s\\n" "$*" >> "$TASK014_COMPILER_LOG"\n'
                 'if [ "$1" = "--version" ]; then\n'
                 '  printf "%s\\n" "g++ (Fake GCC) 0.0"\n'
                 "  exit 0\n"
                 "fi\n"
-                f'exec {shlex.quote(compiler)} "$@"\n',
+                f'exec {shlex.quote(cxx_compiler)} "$@"\n',
                 encoding="utf-8",
             )
-            wrapper.chmod(0o755)
+            cxx_wrapper.chmod(0o755)
+            c_wrapper.write_text(
+                "#!/bin/sh\n"
+                'printf "%s\\n" "$*" >> "$TASK014_C_COMPILER_LOG"\n'
+                f'exec {shlex.quote(c_compiler)} "$@"\n',
+                encoding="utf-8",
+            )
+            c_wrapper.chmod(0o755)
+            for name in ("g++", "c++", "gcc", "cc"):
+                trap = traps / name
+                trap.write_text(
+                    "#!/bin/sh\n"
+                    'printf "%s\\n" "$0 $*" >> "$TASK014_TRAP_LOG"\n'
+                    "exit 97\n",
+                    encoding="utf-8",
+                )
+                trap.chmod(0o755)
+            trap_log.touch()
             environment = os.environ.copy()
-            environment.update({"CXX": str(wrapper), "TASK014_COMPILER_LOG": str(log)})
+            environment.update(
+                {
+                    "CC": str(c_wrapper),
+                    "CXX": str(cxx_wrapper),
+                    "PATH": f"{traps}{os.pathsep}{environment['PATH']}",
+                    "TASK014_COMPILER_LOG": str(cxx_log),
+                    "TASK014_C_COMPILER_LOG": str(c_log),
+                    "TASK014_TRAP_LOG": str(trap_log),
+                }
+            )
             completed = run_seam(ROOT / relative_path, environment=environment)
             self.assertEqual(completed.returncode, 0, completed.stderr)
-            compile_lines = [
-                line
-                for line in log.read_text(encoding="utf-8").splitlines()
-                if "test_residency_prototype_task014.cpp" in line
-            ]
-            self.assertEqual(
-                len(compile_lines),
-                2,
-                "the main and auxiliary probes must use the selected compiler",
+            self.assertTrue(
+                any(
+                    "test_residency_prototype_task014.cpp" in line
+                    for line in cxx_log.read_text(encoding="utf-8").splitlines()
+                ),
+                "behavioral replay did not use the selected C++ compiler",
             )
+            self.assertTrue(
+                any(
+                    argument.endswith(".c")
+                    for line in c_log.read_text(encoding="utf-8").splitlines()
+                    for argument in shlex.split(line)
+                ),
+                "behavioral replay did not use the selected C compiler",
+            )
+            self.assertEqual(trap_log.read_text(encoding="utf-8"), "")
 
     @unittest.skipUnless(
         sys.platform.startswith("linux"),

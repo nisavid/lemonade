@@ -196,6 +196,8 @@ The generated catalog must report every unit as `delivery_state=absent`; no new 
 
 Each prototype public seam has two modes. With no option, **residency prototype behavioral replay** uses the selected supported local compiler and verifies the mechanism behavior, fallback rows, and `runtime_authority=none`; it does not compare the live run with a recorded observation. With `--attest-recorded-observation`, **recorded-observation attestation** selects exactly one recorded observation, fails closed unless its platform, architecture, applicable native profile, compiler token, and compiler version match, and then compares the complete observation body. The red-fixture and green-checkpoint commands in the implementation handoff manifest always use recorded-observation attestation. Provisioning the recorded compiler remains a prerequisite of the designated evidence host.
 
+A fresh-clone Phase-2 replay or attestation requires the fork's lightweight `v11.6.0` tag to resolve to `93aac619a9df474ae1782f4bd45a0a147d6dd4b5` and the checkout to materialize the local stable ref with `git branch --track upstream-stable origin/upstream-stable`. On Linux, `CC` when set, otherwise `cc`, must resolve to a working C compiler for the filesystem fault-injection harnesses used by both modes. A missing or failing resolved compiler is a bounded, fail-closed operational prerequisite, not deferred evidence.
+
 Exit gate:
 
 ```bash
