@@ -39,15 +39,16 @@ provider recommendation:
   conditional-append authority.
 
 This conclusion applies the accepted distinction between bulk evidence storage
-and the compact [residency evidence witness](../../CONTEXT.md).
+and the compact
+[residency evidence witness](https://github.com/nisavid/lemonade/blob/6ab2880b6c2a6810d317bb59c808f73ecc8ec774/CONTEXT.md).
 It also preserves the Phase 10 rule that review cannot replace independent
 physical evidence or the external authorities required by
-[DEP-005 and DEP-007](../../plan/architecture-portable-residency-1.md#4-dependencies).
+[DEP-005 and DEP-007](https://github.com/nisavid/lemonade/blob/6ab2880b6c2a6810d317bb59c808f73ecc8ec774/plan/architecture-portable-residency-1.md#4-dependencies).
 
 ## Contract used for comparison
 
 The
-[campaign deployment binding](../../plan/architecture-portable-residency-1.md#campaign-deployment-binding)
+[campaign deployment binding](https://github.com/nisavid/lemonade/blob/6ab2880b6c2a6810d317bb59c808f73ecc8ec774/plan/architecture-portable-residency-1.md#campaign-deployment-binding)
 requires separate backup and witness authority roles.
 
 The backup authority must provide:
@@ -67,14 +68,20 @@ state transition:
 ```text
 append(namespace, expected_prior_tip, record_digest)
     -> either conflict(current_tip)
-    -> or signed_receipt(new_tip, expected_prior_tip, record_digest)
+    -> or pending(current_tip, operation_key)
+    -> or signed_receipt(namespace, new_tip, expected_prior_tip, record_digest)
 ```
 
-The idempotency key is
-`(namespace, expected_prior_tip, record_digest)`. After that key commits, every
-retry must return the stored original receipt. Reusing one
-`(namespace, expected_prior_tip)` with a different `record_digest` must return a
-conflict and must not append another record.
+The operation key and idempotency key are the same tuple,
+`(namespace, expected_prior_tip, record_digest)`. Before the application CAS,
+ordinary concurrency rules apply. After that CAS records a pending operation,
+every later append in the same namespace must return the deterministic
+`pending(current_tip, operation_key)` response without changing state until the
+original keyed operation reaches a stored receipt. Only then may an ordinary
+successor append against `current_tip` enter the CAS. After receipt persistence,
+every retry of the original key must return the stored original receipt. Reusing
+one `(namespace, expected_prior_tip)` with a different `record_digest` must then
+return a conflict and must not append another record.
 
 The expected tip comparison, record append, and new-tip persistence must be one
 atomic operation. A successful retry after a lost response must return the same
@@ -82,6 +89,12 @@ committed identity rather than append a duplicate. The receipt or checkpoint
 must verify offline or through a public read surface using a pinned verification
 key. Public availability, log append-only consistency, and application-level CAS
 are separate properties.
+
+The signed receipt payload must bind `namespace` as well as `new_tip`,
+`expected_prior_tip`, and `record_digest`. If a transport or publication
+envelope also carries a namespace, a verifier must require exact equality with
+the signed namespace and reject a mismatch before accepting the receipt or
+changing state.
 
 An object store need not sign a witness receipt. Its job is to preserve and
 serve exact bytes. Conversely, a transparency log can prove that its Merkle tree
@@ -396,9 +409,9 @@ Prototype shape:
    once.
 3. The resulting leaf enters Tessera; checkpoint publication waits for an
    independently administered C2SP witness quorum.
-4. The response is a detached receipt binding the application predecessor,
-   record digest, assigned leaf, inclusion proof, log checkpoint, and witness
-   cosignatures.
+4. The response is a detached receipt binding the namespace, application
+   predecessor, record digest, assigned leaf, inclusion proof, log checkpoint,
+   and witness cosignatures.
 5. Public static tiles/checkpoints and witness monitoring endpoints permit
    offline and independent verification.
 
@@ -483,13 +496,14 @@ required here.
 
 Either UDF path must demonstrate that a committed execution exposes a stable
 transaction identity and that the independently verified receipt binds the
-custom-table record, predecessor, digest, and idempotency result. It must also
-prove conflict behavior under concurrency, fail-closed UDF upgrades, pinned
-code identity, administrator and service-certificate governance, and recovery
-after a lost response. Preview access and terms, limited regions and pricing,
-authenticated reads, and control-plane hard deletion remain availability and
-retention gaps. Azure therefore remains an unqualified managed comparison
-candidate; the documentation does not support selecting or provisioning it.
+namespace, custom-table record, predecessor, digest, and idempotency result. It
+must also prove conflict behavior under concurrency, fail-closed UDF upgrades,
+pinned code identity, administrator and service-certificate governance, and
+recovery after a lost response. Preview access and terms, limited regions and
+pricing, authenticated reads, and control-plane hard deletion remain
+availability and retention gaps. Azure therefore remains an unqualified
+managed comparison candidate; the documentation does not support selecting or
+provisioning it.
 
 ### Sigstore Rekor
 
@@ -582,7 +596,13 @@ Run these against disposable resources before any production binding:
    fails the candidate unless a separate enforceable control preserves both.
 5. Retrieve the exact bound version anonymously from a stable production URL,
    then verify size and SHA-256. Repeat from a second network and after cache
-   purge.
+   purge. For CloudFront-backed S3, grant `s3:GetObjectVersion` to the
+   `cloudfront.amazonaws.com` service principal, scoped to the distribution;
+   create two distinct version IDs at one key with known, different payloads;
+   fetch both exact-version public locators without a purge; purge the cache and
+   fetch both again. Verify the exact bytes, recorded size, and SHA-256 of every
+   response. Any cache-key collision or origin access denial fails the
+   candidate.
 6. Revoke the upload credential, prove public reads continue, and recover access
    through the separately held break-glass path.
 7. Exercise billing suspension and provider-region outage procedures or obtain a
@@ -594,42 +614,57 @@ Run these against disposable resources before any production binding:
 Any witness prototype must pass these tests at its public API:
 
 1. Submit two concurrent records with the same `namespace` and
-   `expected_prior_tip` but different `record_digest` values. Exactly one append
-   succeeds; the other returns a conflict naming the committed tip.
+   `expected_prior_tip` but different `record_digest` values. Exactly one
+   application CAS succeeds. A request observed while that operation is pending
+   follows check 5; after receipt persistence, retrying the competing digest
+   returns a conflict naming the committed tip. Exactly one record and leaf
+   exist.
 2. Submit the identical full idempotency key concurrently. Exactly one record is
-   appended, and every later response returns the stored original receipt.
+   appended. While the operation is pending, every other response follows check
+   5; after receipt persistence, every retry returns the stored original receipt.
 3. Lose the successful response after durable commit, then retry. The retry
    uses the same `(namespace, expected_prior_tip, record_digest)` idempotency key,
    returns the stored original receipt, and does not append a second record.
    Retrying the same predecessor with a different digest returns a conflict and
    also leaves the log unchanged.
-4. Reject a stale, unknown, malformed, unauthorized, cross-namespace, or
+4. Verify that the signed receipt binds `namespace`. Reject any receipt whose
+   outer-envelope namespace differs from its signed namespace, without changing
+   state.
+5. Once application CAS records a pending operation, submit later appends in
+   that namespace using the identical operation key, the same predecessor with
+   a different digest, and the new current tip as an ordinary successor. Every
+   request must return the same deterministic
+   `pending(current_tip, operation_key)`, emit no leaf, and leave state unchanged
+   until the original keyed operation reaches a stored receipt. Then prove that
+   the original key returns that receipt and an ordinary successor enters the
+   normal CAS path.
+6. Reject a stale, unknown, malformed, unauthorized, cross-namespace, or
    digest-mismatched predecessor without changing state.
-5. Crash at every boundary between validation, application CAS, log sequencing,
+7. Crash at every boundary between validation, application CAS, log sequencing,
    checkpoint publication, witness cosigning, receipt persistence, and response.
    The durable state and restart result must match the recovery oracle below.
-6. Verify the detached receipt, inclusion proof, log checkpoint, witness quorum,
+8. Verify the detached receipt, inclusion proof, log checkpoint, witness quorum,
    key identity, and application predecessor offline from pinned trust roots.
-7. Retrieve current and historical public checkpoints without a write secret;
+9. Retrieve current and historical public checkpoints without a write secret;
    detect stale service, split view, rollback, missing liveness, and key
    rotation.
-8. Remove one witness, log node, region, billing principal, and operator. The
+10. Remove one witness, log node, region, billing principal, and operator. The
    documented quorum and recovery policy must either remain healthy or fail
    closed without issuing a receipt.
-9. Prove that log, witness, issuer, backup, and GitHub administrators cannot
+11. Prove that log, witness, issuer, backup, and GitHub administrators cannot
    impersonate one another through shared SSO, secrets, cloud account, or
    recovery contacts.
 
 Crash recovery oracle:
 
-| Crash boundary | Durable authority state | Required restart and retry result |
-| --- | --- | --- |
-| After validation, before application CAS | Prior tip only; no keyed operation or receipt | Revalidate from the prior tip; either one later append commits or a competing tip conflicts. |
-| After application CAS, before log sequencing | New tip plus the full idempotency key and a pending operation | Resume that keyed operation and submit exactly one leaf; never roll back the committed tip. |
-| After leaf sequencing, before checkpoint publication | New tip, keyed operation, and exact leaf identity or index | Publish a checkpoint over the existing leaf; never submit the leaf again. |
-| After checkpoint publication, before witness cosigning | New tip, keyed operation, leaf identity, and checkpoint digest | Request cosigning for that same checkpoint and continue the same operation. |
-| After witness cosigning, before receipt persistence | New tip, keyed operation, leaf identity, checkpoint digest, and a replay-safe cosign request identity | Replay only that cosign request if needed, then CAS-store exactly one receipt for the key. |
-| After receipt persistence, before or during response | Complete stored original receipt keyed by `(namespace, expected_prior_tip, record_digest)` | Return that receipt byte-for-byte on every retry; append no leaf and create no second receipt. |
+| Crash boundary | Durable authority state | Required restart and retry result | Later append result in the namespace |
+| --- | --- | --- | --- |
+| After validation, before application CAS | Prior tip only; no keyed operation or receipt | Revalidate from the prior tip; either one later append commits or a competing tip conflicts. | Ordinary concurrency from the prior tip; exactly one application CAS can win. |
+| After application CAS, before log sequencing | New tip plus the full idempotency key and a pending operation | Resume that keyed operation and submit exactly one leaf; never roll back the committed tip. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
+| After leaf sequencing, before checkpoint publication | New tip, keyed operation, and exact leaf identity or index | Publish a checkpoint over the existing leaf; never submit the leaf again. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
+| After checkpoint publication, before witness cosigning | New tip, keyed operation, leaf identity, and checkpoint digest | Request cosigning for that same checkpoint and continue the same operation. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
+| After witness cosigning, before receipt persistence | New tip, keyed operation, leaf identity, checkpoint digest, and a replay-safe cosign request identity | Replay only that cosign request if needed, then CAS-store exactly one receipt for the key. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
+| After receipt persistence, before or during response | Complete stored original receipt keyed by `(namespace, expected_prior_tip, record_digest)` | Return that receipt byte-for-byte on every retry; append no leaf and create no second receipt. | Admit an ordinary successor against `current_tip`; the original key still returns the stored receipt. |
 
 ## Proof gaps that block provider selection
 
