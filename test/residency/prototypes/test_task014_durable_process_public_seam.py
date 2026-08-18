@@ -102,12 +102,16 @@ def normalized_architecture() -> str:
 def compiler_version(compiler: str, platform_id: str) -> str:
     compiler_name = Path(compiler).name.lower()
     command = (
-        [compiler]
+        [compiler, "/?"]
         if platform_id == "windows" and compiler_name in {"cl", "cl.exe"}
         else [compiler, "--version"]
     )
     completed = subprocess.run(
         command, check=False, capture_output=True, text=True, timeout=30
+    )
+    require(
+        completed.returncode == 0,
+        f"recorded compiler {compiler} version probe failed",
     )
     lines = [
         line.strip()
@@ -1673,7 +1677,7 @@ def main(arguments: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    except (AssertionError, OSError, subprocess.SubprocessError) as error:
+    except (AssertionError, OSError, subprocess.SubprocessError, UnicodeError) as error:
         print(
             f"{Path(__file__).name}: "
             f"{contract.public_operational_failure(attest_recorded_observation, error)}",

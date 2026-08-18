@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -107,7 +108,7 @@ FALLBACK_OUTPUT_ROWS = [
     "fallback.recovery=hatchery_rocm_recovery_block_readiness_v1",
 ]
 SYNTHETIC_EVIDENCE_ROWS = sorted(SYNTHETIC_OUTPUT_ROWS)
-SOURCE_TOKENS = (
+REQUIRED_SOURCE_LITERALS = (
     "/proc/sys/kernel/hostname",
     "/sys/class/drm/card1/device/uevent",
     "0000:c6:00.0",
@@ -124,11 +125,55 @@ SOURCE_TOKENS = (
     "memory.current",
     "drm_pdev",
 )
-FORBIDDEN_SOURCE_TOKENS = (
-    "get_memory_usage_gb(",
-    "parse_memory_sysfs(",
-    "get_vram_usage_gb(",
-    "get_global_vram_usage_pct(",
+REQUIRED_SOURCE_IDENTIFIERS = (
+    "mem_info_gtt_total",
+    "mem_info_gtt_used",
+    "boot_id",
+    "mount_id",
+    "inode",
+    "drm_pdev",
+)
+FORBIDDEN_SOURCE_IDENTIFIERS = (
+    "get_memory_usage_gb",
+    "parse_memory_sysfs",
+    "get_vram_usage_gb",
+    "get_global_vram_usage_pct",
+)
+ALLOWED_STANDARD_HEADERS = {
+    "algorithm",
+    "array",
+    "cstdint",
+    "filesystem",
+    "fstream",
+    "iostream",
+    "limits",
+    "map",
+    "optional",
+    "set",
+    "sstream",
+    "string",
+    "string_view",
+    "tuple",
+    "utility",
+    "variant",
+    "vector",
+}
+ALLOWED_PLATFORM_DIRECTIVES = [
+    "#ifdef __linux__",
+    "#endif",
+    "#ifdef __linux__",
+    "#endif",
+    "#ifndef __linux__",
+    "#else",
+    "#endif",
+    "#ifdef _WIN32",
+    "#elif defined(__APPLE__)",
+    "#elif defined(__linux__)",
+    "#else",
+    "#endif",
+]
+CPP_STRING_OR_CHARACTER_LITERAL = re.compile(
+    r"""(?:u8|u|U|L)?"(?P<string_body>(?:\\.|[^"\\\n])*)"|(?:u8|u|U|L)?'(?:\\.|[^'\\\n])*'"""
 )
 
 
@@ -225,12 +270,16 @@ def normalized_architecture() -> str:
 def compiler_version(compiler: str, platform_id: str) -> str:
     compiler_name = Path(compiler).name.lower()
     command = (
-        [compiler]
+        [compiler, "/?"]
         if platform_id == "windows" and compiler_name in {"cl", "cl.exe"}
         else [compiler, "--version"]
     )
     completed = subprocess.run(
         command, check=False, capture_output=True, text=True, timeout=30
+    )
+    require(
+        completed.returncode == 0,
+        f"recorded compiler {compiler} version probe failed",
     )
     lines = [
         line.strip()
@@ -630,22 +679,82 @@ def parse_probe_output(stdout: bytes) -> tuple[list[str], dict[str, str]]:
     return lines, rows
 
 
-def require_probe_source(source: Path) -> None:
-    source_text = source.read_text(encoding="utf-8")
-    source_text_lower = source_text.lower()
-    for token in SOURCE_TOKENS:
-        require(token.lower() in source_text_lower, f"prototype probe omits {token}")
-    for token in FORBIDDEN_SOURCE_TOKENS:
-        require(
-            token not in source_text_lower,
-            f"prototype probe uses fail-open source token {token}",
-        )
+def require_probe_source_semantics(source_bytes: bytes) -> None:
     require(
-        not any(
-            line.lstrip().startswith('#include "') for line in source_text.splitlines()
-        ),
-        "prototype probe includes a non-standard-library header",
+        b"\\\n" not in source_bytes and b"\\\r" not in source_bytes,
+        "prototype probe contains a source line splice",
     )
+    source_text = source_bytes.decode("utf-8")
+    require(
+        "//" not in source_text and "/*" not in source_text,
+        "prototype probe contains a comment-obscured token",
+    )
+    require(
+        "%:" not in source_text and "??=" not in source_text,
+        "prototype probe contains an alternate preprocessor token",
+    )
+    require(
+        re.search(r'(?<![A-Za-z0-9_])(?:u8|[uUL])?R"', source_text) is None,
+        "prototype probe contains an unparsed raw string literal",
+    )
+
+    include_directive = re.compile(r"\s*#\s*include\b(.*)")
+    standard_include = re.compile(r"\s*<([a-z0-9_./]+)>\s*")
+    includes = []
+    platform_directives = []
+    for line in source_text.splitlines():
+        directive = include_directive.fullmatch(line)
+        if directive is not None:
+            match = standard_include.fullmatch(directive.group(1))
+            require(match is not None, "prototype probe has a non-standard include")
+            includes.append(match.group(1))
+        elif line.lstrip().startswith("#"):
+            platform_directives.append(line.strip())
+    require(
+        set(includes) == ALLOWED_STANDARD_HEADERS
+        and len(includes) == len(ALLOWED_STANDARD_HEADERS),
+        "prototype probe changed its exact standard-library dependency closure",
+    )
+    require(
+        platform_directives == ALLOWED_PLATFORM_DIRECTIVES,
+        "prototype probe changed its closed platform-directive shape",
+    )
+    require(
+        source_text.count("#") == len(includes) + len(platform_directives),
+        "prototype probe contains an unparsed preprocessor token",
+    )
+
+    literal_matches = tuple(CPP_STRING_OR_CHARACTER_LITERAL.finditer(source_text))
+    literal_payloads = "\n".join(
+        match.group("string_body")
+        for match in literal_matches
+        if match.group("string_body") is not None
+    )
+    for literal in REQUIRED_SOURCE_LITERALS:
+        require(literal in literal_payloads, f"prototype probe omits literal {literal}")
+
+    identifier_fragments = []
+    previous_end = 0
+    for match in literal_matches:
+        identifier_fragments.extend((source_text[previous_end : match.start()], " "))
+        previous_end = match.end()
+    identifier_fragments.append(source_text[previous_end:])
+    identifier_source = "".join(identifier_fragments)
+    for identifier in REQUIRED_SOURCE_IDENTIFIERS:
+        require(
+            re.search(rf"\b{re.escape(identifier)}\b", identifier_source) is not None,
+            f"prototype probe omits identifier {identifier}",
+        )
+    identifier_source_lower = identifier_source.lower()
+    for identifier in FORBIDDEN_SOURCE_IDENTIFIERS:
+        require(
+            re.search(rf"\b{re.escape(identifier)}\b", identifier_source_lower) is None,
+            f"prototype probe uses fail-open source identifier {identifier}",
+        )
+
+
+def require_probe_source(source: Path) -> None:
+    require_probe_source_semantics(source.read_bytes())
 
 
 def recorded_observation_for_platform(result: dict, platform_id: str):
@@ -819,6 +928,11 @@ def require_probe(
         if attest_recorded_observation
         else None
     )
+    if attest_recorded_observation:
+        require(
+            recorded_observation is not None,
+            "recorded-observation attestation selected no observation",
+        )
     require_unbound_observation_regression()
     require_native_profile_classifier()
     current_native_rows = native_output_rows(platform_id)
@@ -923,7 +1037,7 @@ def main(arguments: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    except (AssertionError, OSError, subprocess.SubprocessError) as error:
+    except (AssertionError, OSError, subprocess.SubprocessError, UnicodeError) as error:
         print(
             f"{Path(__file__).name}: "
             f"{contract.public_operational_failure(attest_recorded_observation, error)}",

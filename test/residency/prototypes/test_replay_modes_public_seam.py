@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shlex
@@ -184,6 +186,177 @@ class PrototypeReplayModesTest(unittest.TestCase):
                     )
                     self.assertEqual(completed.stdout, "")
                     self.assertNotIn(directory, completed.stderr)
+
+    def test_nonzero_compiler_version_probe_is_rejected_at_each_public_seam(self):
+        plausible_failure = subprocess.CompletedProcess(
+            ["g++", "--version"],
+            17,
+            stdout="g++ (Fake GCC) 0.0\n",
+            stderr="",
+        )
+        for task_id, (relative_path, _) in SEAMS.items():
+            seam = load_module(
+                ROOT / relative_path,
+                f"{task_id.lower().replace('-', '_')}_compiler_probe_test",
+            )
+            with (
+                self.subTest(path=relative_path),
+                mock.patch.object(
+                    seam.subprocess,
+                    "run",
+                    return_value=plausible_failure,
+                ),
+                self.assertRaisesRegex(
+                    AssertionError,
+                    "recorded compiler g\\+\\+ version probe failed",
+                ),
+            ):
+                seam.compiler_version("g++", "linux")
+
+    def test_windows_compiler_version_probe_uses_help_at_each_public_seam(self):
+        version_line = "Microsoft (R) C/C++ Optimizing Compiler Version 19.44"
+        successful_help = subprocess.CompletedProcess(
+            ["cl.exe", "/?"],
+            0,
+            stdout="",
+            stderr=version_line + "\n",
+        )
+        for task_id, (relative_path, _) in SEAMS.items():
+            seam = load_module(
+                ROOT / relative_path,
+                f"{task_id.lower().replace('-', '_')}_windows_compiler_probe_test",
+            )
+            with (
+                self.subTest(path=relative_path),
+                mock.patch.object(
+                    seam.subprocess,
+                    "run",
+                    return_value=successful_help,
+                ) as run,
+            ):
+                self.assertEqual(
+                    seam.compiler_version("cl.exe", "windows"),
+                    version_line,
+                )
+                self.assertEqual(run.call_args.args[0], ["cl.exe", "/?"])
+                self.assertNotIn("shell", run.call_args.kwargs)
+
+    def test_invalid_probe_text_is_bounded_at_each_public_seam(self):
+        invalid_utf8 = UnicodeDecodeError(
+            "utf-8",
+            b"\xff",
+            0,
+            1,
+            "invalid start byte",
+        )
+        for task_id, (relative_path, _) in SEAMS.items():
+            with self.subTest(path=relative_path):
+                seam = load_module(
+                    ROOT / relative_path,
+                    f"{task_id.lower().replace('-', '_')}_invalid_utf8_test",
+                )
+                probe_name = (
+                    "require_native_probe" if task_id == "TASK-014" else "require_probe"
+                )
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(
+                        seam,
+                        probe_name,
+                        side_effect=invalid_utf8,
+                    ),
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    returncode = seam.main([])
+
+                self.assertEqual(returncode, 1)
+                self.assertEqual(
+                    stderr.getvalue(),
+                    f"{Path(relative_path).name}: "
+                    "behavioral replay process is unavailable\n",
+                )
+                self.assertEqual(stderr.getvalue().count("\n"), 1)
+                self.assertNotIn("Traceback", stderr.getvalue())
+                self.assertNotIn(str(ROOT), stderr.getvalue())
+                self.assertEqual(stdout.getvalue(), "")
+
+    def test_task015_source_guard_uses_code_and_closed_preprocessor_surface(self):
+        relative_path, _ = SEAMS["TASK-015"]
+        seam = load_module(
+            ROOT / relative_path,
+            "task015_source_guard_test",
+        )
+        source = ROOT / "test/cpp/test_residency_prototype_task015.cpp"
+        source_text = source.read_text(encoding="utf-8")
+        seam.require_probe_source(source)
+
+        whitespace_standard_include = source_text.replace(
+            "#include <algorithm>",
+            "# include <algorithm>",
+            1,
+        )
+        forbidden_name_in_string = (
+            source_text + '\nconstexpr auto hidden = "get_memory_usage_gb(";\n'
+        )
+        rejected = {
+            "comment-only literal": source_text.replace(
+                '"/proc/sys/kernel/hostname"',
+                '"/proc/sys/kernel/missing-hostname"',
+                1,
+            )
+            + "\n// /proc/sys/kernel/hostname\n",
+            "comment-only identifier": source_text.replace(
+                "mem_info_gtt_total",
+                "gtt_total",
+            )
+            + "\n// mem_info_gtt_total\n",
+            "string-only identifier": source_text.replace(
+                "mem_info_gtt_total",
+                "gtt_total",
+            )
+            + '\nconstexpr auto hidden = "mem_info_gtt_total";\n',
+            "character-only identifier": source_text.replace(
+                "mem_info_gtt_total",
+                "gtt_total",
+            )
+            + "\nconstexpr auto hidden = 'mem_info_gtt_total';\n",
+            "quote-character literal boundary": source_text.replace(
+                '"/proc/sys/kernel/hostname"',
+                '"/proc/sys/kernel/missing-hostname"',
+                1,
+            )
+            + "\nconstexpr char quote = '\"';\n"
+            + "constexpr auto fake = /proc/sys/kernel/hostname;\n"
+            + 'constexpr auto end = "x";\n',
+            "whitespace-obscured forbidden identifier": source_text.replace(
+                "int run() {",
+                "int run() {\nget_memory_usage_gb ();",
+                1,
+            ),
+            "non-standard angle include": "#include <unistd.h>\n" + source_text,
+            "whitespace quoted include": '# include "local.h"\n' + source_text,
+            "source line splice": source_text + "\\\n",
+            "alternate preprocessor token": "%:include <algorithm>\n" + source_text,
+            "unexpected platform directive": "#define RESIDENCY 1\n" + source_text,
+            "raw string literal": source_text
+            + '\nconstexpr auto hidden = R"(boot_id)";\n',
+        }
+
+        with tempfile.TemporaryDirectory(
+            prefix="residency-task015-source-guard-"
+        ) as directory:
+            candidate = Path(directory) / source.name
+            candidate.write_text(whitespace_standard_include, encoding="utf-8")
+            seam.require_probe_source(candidate)
+            candidate.write_text(forbidden_name_in_string, encoding="utf-8")
+            seam.require_probe_source(candidate)
+            for label, candidate_text in rejected.items():
+                with self.subTest(label=label):
+                    candidate.write_text(candidate_text, encoding="utf-8")
+                    with self.assertRaises(AssertionError):
+                        seam.require_probe_source(candidate)
 
     @unittest.skipUnless(
         sys.platform.startswith("linux"),
@@ -725,6 +898,45 @@ class PrototypeReplayModesTest(unittest.TestCase):
         )
         self.assertIs(events[0][1], expected_observation)
         self.assertIs(raised.exception, profile_preflight_failure)
+
+    def test_task015_rejects_an_absent_attestation_observation_before_preflights(self):
+        contract = load_module(
+            ROOT / "test/residency/prototypes/result_contract.py",
+            "prototype_result_contract_task015_absent_observation_test",
+        )
+        seam = load_module(
+            ROOT
+            / "test/residency/prototypes/test_task015_hatchery_attribution_public_seam.py",
+            "task015_absent_observation_test",
+        )
+        result = contract.load_task_result(ROOT, "TASK-015")
+
+        with (
+            mock.patch.object(seam, "current_platform", return_value="linux"),
+            mock.patch.object(
+                seam,
+                "recorded_observation_for_platform",
+                return_value=None,
+            ),
+            mock.patch.object(
+                seam,
+                "require_unbound_observation_regression",
+                side_effect=AssertionError("unbound preflight ran"),
+            ) as unbound_preflight,
+            mock.patch.object(
+                seam,
+                "require_native_profile_classifier",
+                side_effect=AssertionError("profile preflight ran"),
+            ) as profile_preflight,
+            self.assertRaisesRegex(
+                AssertionError,
+                "recorded-observation attestation selected no observation",
+            ),
+        ):
+            seam.require_probe(ROOT, contract, result, True)
+
+        unbound_preflight.assert_not_called()
+        profile_preflight.assert_not_called()
 
 
 if __name__ == "__main__":
