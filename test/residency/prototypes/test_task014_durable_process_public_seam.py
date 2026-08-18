@@ -851,13 +851,24 @@ def require_signal_wait_race_closed(source: Path, compiler: str) -> None:
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 static int ready_pipe[2] = {-1, -1};
 static int release_pipe[2] = {-1, -1};
 static pid_t target_process = -1;
+static bool record_cleanup_kills = false;
+static std::vector<pid_t> cleanup_kill_targets;
 
 extern "C" int intercepted_pause();
 extern "C" int intercepted_sigsuspend(const sigset_t* mask);
+extern "C" int __real_kill(pid_t process, int signal);
+extern "C" int __wrap_kill(pid_t process, int signal) {
+    if (record_cleanup_kills) {
+        cleanup_kill_targets.push_back(process);
+        return 0;
+    }
+    return __real_kill(process, signal);
+}
 
 #define pause intercepted_pause
 #define sigsuspend intercepted_sigsuspend
@@ -931,20 +942,37 @@ static void kill_role(
     pid_t child, const char* role,
     const lemon::residency::prototype::ChildAnnouncement& announcement) {
     if (std::string(role) == "leader") {
-        (void)kill(-child, SIGKILL);
-        (void)kill(announcement.escaping, SIGKILL);
-    } else {
+        if (child > 0) {
+            (void)kill(-child, SIGKILL);
+        }
+        if (announcement.escaping > 0) {
+            (void)kill(announcement.escaping, SIGKILL);
+        }
+    } else if (child > 0) {
         (void)kill(child, SIGKILL);
     }
-    (void)waitpid(child, nullptr, 0);
+    if (child > 0) {
+        (void)waitpid(child, nullptr, 0);
+    }
 }
 
 int main(int argc, char** argv) {
     if (argc != 2 ||
         (std::string(argv[1]) != "ordinary" &&
          std::string(argv[1]) != "escaping" &&
-         std::string(argv[1]) != "leader")) {
+         std::string(argv[1]) != "leader" &&
+         std::string(argv[1]) != "cleanup")) {
         return 2;
+    }
+    if (std::string(argv[1]) == "cleanup") {
+        record_cleanup_kills = true;
+        lemon::residency::prototype::ChildAnnouncement announcement;
+        kill_role(getpid(), "leader", announcement);
+        record_cleanup_kills = false;
+        return cleanup_kill_targets.size() == 1 &&
+                       cleanup_kill_targets[0] == -getpid()
+                   ? 0
+                   : 10;
     }
     if (pipe(ready_pipe) != 0 || pipe(release_pipe) != 0) {
         return 3;
@@ -1017,6 +1045,7 @@ int main(int argc, char** argv) {
                 "-Werror",
                 "-pedantic",
                 "-pthread",
+                "-Wl,--wrap=kill",
                 "-I",
                 str(source.parent),
                 str(harness),
@@ -1040,6 +1069,18 @@ int main(int argc, char** argv) {
             )
             require(completed.stdout == b"", f"{role} worker emitted stdout")
             require(completed.stderr == b"", f"{role} worker emitted stderr")
+        completed = subprocess.run(
+            [str(executable), "cleanup"],
+            check=False,
+            capture_output=True,
+            timeout=5,
+        )
+        require(
+            completed.returncode == 0,
+            "failed leader cleanup targeted a non-positive process",
+        )
+        require(completed.stdout == b"", "failed leader cleanup emitted stdout")
+        require(completed.stderr == b"", "failed leader cleanup emitted stderr")
 
 
 def require_close_adversary_result(completed, expected_rows, label: str) -> None:

@@ -56,7 +56,50 @@ def run_seam(path: Path, *arguments: str, environment=None):
     )
 
 
+def write_failing_compiler(directory: str, platform_name: str = os.name) -> Path:
+    root = Path(directory)
+    if platform_name == "nt":
+        compiler = root / "g++.cmd"
+        compiler.write_text(
+            "@echo off\n"
+            'if "%~1"=="--version" (\n'
+            "  echo g++ ^(Fake GCC^) 0.0\n"
+            "  exit /b 0\n"
+            ")\n"
+            "echo leaked stdout %~dp0\n"
+            "echo leaked stderr %~dp0 1>&2\n"
+            "exit /b 17\n",
+            encoding="utf-8",
+        )
+        return compiler
+    compiler = root / "g++"
+    compiler.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "--version" ]; then\n'
+        "  printf '%s\\n' 'g++ (Fake GCC) 0.0'\n"
+        "  exit 0\n"
+        "fi\n"
+        f"printf '%s\\n' 'leaked stdout {directory}'\n"
+        f"printf '%s\\n' 'leaked stderr {directory}' >&2\n"
+        "exit 17\n",
+        encoding="utf-8",
+    )
+    compiler.chmod(0o755)
+    return compiler
+
+
 class PrototypeReplayModesTest(unittest.TestCase):
+    def test_failed_compiler_fixture_has_windows_command_shape(self):
+        with tempfile.TemporaryDirectory(
+            prefix="residency-replay-windows-compiler-"
+        ) as directory:
+            compiler = write_failing_compiler(directory, "nt")
+            self.assertEqual(compiler.suffix, ".cmd")
+            source = compiler.read_text(encoding="utf-8")
+            self.assertIn('if "%~1"=="--version"', source)
+            self.assertIn("exit /b 17", source)
+            self.assertIn("%~dp0", source)
+
     def test_unknown_arguments_are_rejected_at_each_public_seam(self):
         for _, (relative_path, _) in SEAMS.items():
             path = ROOT / relative_path
@@ -119,19 +162,7 @@ class PrototypeReplayModesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(
             prefix="residency-replay-failed-compiler-"
         ) as directory:
-            compiler = Path(directory) / "g++"
-            compiler.write_text(
-                "#!/bin/sh\n"
-                'if [ "$1" = "--version" ]; then\n'
-                "  printf '%s\\n' 'g++ (Fake GCC) 0.0'\n"
-                "  exit 0\n"
-                "fi\n"
-                f"printf '%s\\n' 'leaked stdout {directory}'\n"
-                f"printf '%s\\n' 'leaked stderr {directory}' >&2\n"
-                "exit 17\n",
-                encoding="utf-8",
-            )
-            compiler.chmod(0o755)
+            compiler = write_failing_compiler(directory)
             environment = os.environ.copy()
             environment["CXX"] = str(compiler)
             for _, (relative_path, _) in SEAMS.items():
