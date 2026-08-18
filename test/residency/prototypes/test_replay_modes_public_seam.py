@@ -113,6 +113,72 @@ class PrototypeReplayModesTest(unittest.TestCase):
                     self.assertNotIn(directory, completed.stderr)
                     self.assertEqual(completed.stdout, "")
 
+    def test_behavioral_replay_bounds_failed_compiler_output_at_each_public_seam(
+        self,
+    ):
+        with tempfile.TemporaryDirectory(
+            prefix="residency-replay-failed-compiler-"
+        ) as directory:
+            compiler = Path(directory) / "g++"
+            compiler.write_text(
+                "#!/bin/sh\n"
+                'if [ "$1" = "--version" ]; then\n'
+                "  printf '%s\\n' 'g++ (Fake GCC) 0.0'\n"
+                "  exit 0\n"
+                "fi\n"
+                f"printf '%s\\n' 'leaked stdout {directory}'\n"
+                f"printf '%s\\n' 'leaked stderr {directory}' >&2\n"
+                "exit 17\n",
+                encoding="utf-8",
+            )
+            compiler.chmod(0o755)
+            environment = os.environ.copy()
+            environment["CXX"] = str(compiler)
+            for _, (relative_path, _) in SEAMS.items():
+                path = ROOT / relative_path
+                with self.subTest(path=relative_path):
+                    completed = run_seam(path, environment=environment)
+                    self.assertEqual(completed.returncode, 1)
+                    self.assertEqual(
+                        completed.stderr,
+                        f"{path.name}: behavioral replay process failed\n",
+                    )
+                    self.assertEqual(completed.stdout, "")
+                    self.assertNotIn(directory, completed.stderr)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "TASK-014 auxiliary compiler integration requires Linux",
+    )
+    def test_behavioral_replay_bounds_failed_auxiliary_compiler_output(self):
+        compiler = shutil.which("g++")
+        if compiler is None:
+            self.skipTest("g++ is unavailable")
+        relative_path, _ = SEAMS["TASK-014"]
+        with tempfile.TemporaryDirectory(
+            prefix="residency-replay-failed-auxiliary-compiler-"
+        ) as directory:
+            c_compiler = Path(directory) / "cc"
+            c_compiler.write_text(
+                "#!/bin/sh\n"
+                f"printf '%s\\n' 'leaked stdout {directory}'\n"
+                f"printf '%s\\n' 'leaked stderr {directory}' >&2\n"
+                "exit 17\n",
+                encoding="utf-8",
+            )
+            c_compiler.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update({"CC": str(c_compiler), "CXX": compiler})
+            path = ROOT / relative_path
+            completed = run_seam(path, environment=environment)
+            self.assertEqual(completed.returncode, 1)
+            self.assertEqual(
+                completed.stderr,
+                f"{path.name}: behavioral replay process failed\n",
+            )
+            self.assertEqual(completed.stdout, "")
+            self.assertNotIn(directory, completed.stderr)
+
     @unittest.skipUnless(
         sys.platform.startswith("linux"),
         "TASK-014 compiler integration requires Linux",

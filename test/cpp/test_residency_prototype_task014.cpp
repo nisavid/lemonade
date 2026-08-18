@@ -887,23 +887,53 @@ extern "C" void stop_worker(int) {
     worker_stopping = 1;
 }
 
-int ordinary_descendant() {
-    std::signal(SIGTERM, stop_worker);
-    while (worker_stopping == 0) {
-        pause();
+bool arm_worker_stop(sigset_t& previous_mask) {
+    sigset_t blocked_mask;
+    sigemptyset(&blocked_mask);
+    sigaddset(&blocked_mask, SIGTERM);
+    if (sigprocmask(SIG_BLOCK, &blocked_mask, &previous_mask) != 0) {
+        return false;
     }
-    return 0;
+    struct sigaction action {};
+    action.sa_handler = stop_worker;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGTERM, &action, nullptr) == 0) {
+        return true;
+    }
+    sigprocmask(SIG_SETMASK, &previous_mask, nullptr);
+    return false;
+}
+
+bool wait_for_worker_stop(const sigset_t& previous_mask) {
+    sigset_t wait_mask = previous_mask;
+    sigdelset(&wait_mask, SIGTERM);
+    while (worker_stopping == 0) {
+        if (sigsuspend(&wait_mask) < 0 && errno == EINTR) {
+            continue;
+        }
+        sigprocmask(SIG_SETMASK, &previous_mask, nullptr);
+        return false;
+    }
+    return sigprocmask(SIG_SETMASK, &previous_mask, nullptr) == 0;
+}
+
+int ordinary_descendant() {
+    sigset_t previous_mask;
+    if (!arm_worker_stop(previous_mask)) {
+        return 2;
+    }
+    return wait_for_worker_stop(previous_mask) ? 0 : 3;
 }
 
 int escaping_descendant() {
-    if (setsid() < 0) {
+    sigset_t previous_mask;
+    if (!arm_worker_stop(previous_mask)) {
         return 2;
     }
-    std::signal(SIGTERM, stop_worker);
-    while (worker_stopping == 0) {
-        pause();
+    if (setsid() < 0) {
+        return 3;
     }
-    return 0;
+    return wait_for_worker_stop(previous_mask) ? 0 : 4;
 }
 
 struct ChildAnnouncement {
@@ -950,11 +980,14 @@ int process_group_leader(int output_pipe) {
         return 2;
     }
     worker_stopping = 0;
-    std::signal(SIGTERM, stop_worker);
+    sigset_t previous_mask;
+    if (!arm_worker_stop(previous_mask)) {
+        return 3;
+    }
     const pid_t leader = getpid();
     const pid_t ordinary = fork();
     if (ordinary < 0) {
-        return 3;
+        return 4;
     }
     if (ordinary == 0) {
         if (!arm_parent_death_signal(leader)) {
@@ -966,7 +999,7 @@ int process_group_leader(int output_pipe) {
     if (escaping < 0) {
         kill(ordinary, SIGKILL);
         waitpid(ordinary, nullptr, 0);
-        return 4;
+        return 5;
     }
     if (escaping == 0) {
         if (!arm_parent_death_signal(leader)) {
@@ -980,11 +1013,15 @@ int process_group_leader(int output_pipe) {
         kill(escaping, SIGKILL);
         waitpid(ordinary, nullptr, 0);
         waitpid(escaping, nullptr, 0);
-        return 5;
+        return 6;
     }
     close(output_pipe);
-    while (worker_stopping == 0) {
-        pause();
+    if (!wait_for_worker_stop(previous_mask)) {
+        kill(ordinary, SIGKILL);
+        kill(escaping, SIGKILL);
+        waitpid(ordinary, nullptr, 0);
+        waitpid(escaping, nullptr, 0);
+        return 7;
     }
     int status = 0;
     const auto deadline =
@@ -998,7 +1035,7 @@ int process_group_leader(int output_pipe) {
     }
     kill(ordinary, SIGKILL);
     waitpid(ordinary, nullptr, 0);
-    return 6;
+    return 8;
 }
 
 bool wait_for_membership(

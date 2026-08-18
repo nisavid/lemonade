@@ -648,7 +648,9 @@ def run_native_probe(repo_root: Path, source: Path, contract, recorded_observati
         actual_compile_command = compiler_command(
             compiler_executable, str(source), str(executable), platform_id
         )
-        subprocess.run(actual_compile_command, check=True, timeout=30)
+        subprocess.run(
+            actual_compile_command, check=True, capture_output=True, timeout=30
+        )
         run_command = [
             (
                 f".{os.sep}{executable.name}"
@@ -730,45 +732,20 @@ int fsync(int file) {
         prefix="residency-task014-adversary-"
     ) as directory:
         root = Path(directory)
-        executable = root / "task014"
-        interceptor = root / "directory_fsync_einval.c"
-        library = root / "directory_fsync_einval.so"
-        interceptor.write_text(interceptor_source, encoding="utf-8")
-        subprocess.run(
-            compiler_command(compiler, str(source), str(executable), "linux"),
-            check=True,
-            timeout=30,
+        executable, library = build_linux_adversary(
+            source,
+            compiler,
+            root,
+            "directory_fsync_einval",
+            interceptor_source,
         )
-        subprocess.run(
-            [
-                os.environ.get("CC", "cc"),
-                "-shared",
-                "-fPIC",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                str(interceptor),
-                "-o",
-                str(library),
-            ],
-            check=True,
-            timeout=30,
-        )
-        environment = os.environ.copy()
-        environment.update(
+        completed = run_linux_adversary(
+            executable,
+            root,
+            library,
             {
-                "LD_PRELOAD": str(library),
                 "TASK014_DIRECTORY_SYNC_REJECT_ROOT": directory,
-                "TMPDIR": directory,
-            }
-        )
-        completed = subprocess.run(
-            [f"./{executable.name}"],
-            cwd=directory,
-            env=environment,
-            check=False,
-            capture_output=True,
-            timeout=30,
+            },
         )
     _, rows = parse_probe_output(completed.stdout)
     require(
@@ -801,7 +778,7 @@ int fsync(int file) {
     )
 
 
-def build_close_adversary(
+def build_linux_adversary(
     source: Path,
     compiler: str,
     root: Path,
@@ -815,6 +792,7 @@ def build_close_adversary(
     subprocess.run(
         compiler_command(compiler, str(source), str(executable), "linux"),
         check=True,
+        capture_output=True,
         timeout=30,
     )
     subprocess.run(
@@ -830,12 +808,13 @@ def build_close_adversary(
             str(library),
         ],
         check=True,
+        capture_output=True,
         timeout=30,
     )
     return executable, library
 
 
-def run_close_adversary(
+def run_linux_adversary(
     executable: Path,
     root: Path,
     library: Path,
@@ -857,6 +836,210 @@ def run_close_adversary(
         capture_output=True,
         timeout=30,
     )
+
+
+def require_signal_wait_race_closed(source: Path, compiler: str) -> None:
+    if platform.system() != "Linux":
+        return
+    harness_source = r"""
+#include <cerrno>
+#include <chrono>
+#include <csignal>
+#include <cstdlib>
+#include <poll.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <thread>
+#include <unistd.h>
+
+static int ready_pipe[2] = {-1, -1};
+static int release_pipe[2] = {-1, -1};
+static pid_t target_process = -1;
+
+extern "C" int intercepted_pause();
+extern "C" int intercepted_sigsuspend(const sigset_t* mask);
+
+#define pause intercepted_pause
+#define sigsuspend intercepted_sigsuspend
+#define main task014_original_main
+#include "test_residency_prototype_task014.cpp"
+#undef main
+#undef sigsuspend
+#undef pause
+
+static bool target_blocks_sigterm() {
+    sigset_t current;
+    return sigprocmask(SIG_SETMASK, nullptr, &current) == 0 &&
+           sigismember(&current, SIGTERM) == 1;
+}
+
+static void enter_wait_window() {
+    if (getpid() != target_process) {
+        return;
+    }
+    const char ready = 'R';
+    if (write(ready_pipe[1], &ready, 1) != 1) {
+        _exit(120);
+    }
+    char release = 0;
+    while (read(release_pipe[0], &release, 1) < 0 && errno == EINTR) {
+    }
+    if (!target_blocks_sigterm()) {
+        while (lemon::residency::prototype::worker_stopping == 0) {
+            std::this_thread::yield();
+        }
+    }
+}
+
+extern "C" int intercepted_pause() {
+    enter_wait_window();
+    return ::pause();
+}
+
+extern "C" int intercepted_sigsuspend(const sigset_t* mask) {
+    enter_wait_window();
+    return ::sigsuspend(mask);
+}
+
+static bool wait_until_ready() {
+    pollfd descriptor{ready_pipe[0], POLLIN, 0};
+    if (poll(&descriptor, 1, 2000) != 1) {
+        return false;
+    }
+    char ready = 0;
+    return read(ready_pipe[0], &ready, 1) == 1 && ready == 'R';
+}
+
+static bool wait_for_clean_exit(pid_t child) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    int status = 0;
+    while (std::chrono::steady_clock::now() < deadline) {
+        const pid_t waited = waitpid(child, &status, WNOHANG);
+        if (waited == child) {
+            return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+        }
+        if (waited < 0) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return false;
+}
+
+static void kill_role(
+    pid_t child, const char* role,
+    const lemon::residency::prototype::ChildAnnouncement& announcement) {
+    if (std::string(role) == "leader") {
+        (void)kill(-child, SIGKILL);
+        (void)kill(announcement.escaping, SIGKILL);
+    } else {
+        (void)kill(child, SIGKILL);
+    }
+    (void)waitpid(child, nullptr, 0);
+}
+
+int main(int argc, char** argv) {
+    if (argc != 2 ||
+        (std::string(argv[1]) != "ordinary" &&
+         std::string(argv[1]) != "escaping" &&
+         std::string(argv[1]) != "leader")) {
+        return 2;
+    }
+    if (pipe(ready_pipe) != 0 || pipe(release_pipe) != 0) {
+        return 3;
+    }
+    int announcement_pipe[2] = {-1, -1};
+    if (std::string(argv[1]) == "leader" && pipe(announcement_pipe) != 0) {
+        return 4;
+    }
+    const pid_t child = fork();
+    if (child < 0) {
+        return 5;
+    }
+    if (child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        target_process = getpid();
+        if (std::string(argv[1]) == "ordinary") {
+            _exit(lemon::residency::prototype::ordinary_descendant());
+        }
+        if (std::string(argv[1]) == "escaping") {
+            _exit(lemon::residency::prototype::escaping_descendant());
+        }
+        close(announcement_pipe[0]);
+        _exit(lemon::residency::prototype::process_group_leader(
+            announcement_pipe[1]));
+    }
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    lemon::residency::prototype::ChildAnnouncement announcement;
+    if (std::string(argv[1]) == "leader") {
+        close(announcement_pipe[1]);
+        if (!lemon::residency::prototype::read_announcement(
+                announcement_pipe[0], announcement)) {
+            kill_role(child, argv[1], announcement);
+            return 6;
+        }
+    }
+    if (!wait_until_ready()) {
+        kill_role(child, argv[1], announcement);
+        return 7;
+    }
+    const int signal_result = std::string(argv[1]) == "leader"
+                                  ? kill(-child, SIGTERM)
+                                  : kill(child, SIGTERM);
+    const char release = 'G';
+    if (signal_result != 0 || write(release_pipe[1], &release, 1) != 1) {
+        kill_role(child, argv[1], announcement);
+        return 8;
+    }
+    if (!wait_for_clean_exit(child)) {
+        kill_role(child, argv[1], announcement);
+        return 9;
+    }
+    return 0;
+}
+"""
+    with tempfile.TemporaryDirectory(
+        prefix="residency-task014-signal-wait-"
+    ) as directory:
+        root = Path(directory)
+        harness = root / "signal_wait_race.cpp"
+        executable = root / "signal_wait_race"
+        harness.write_text(harness_source, encoding="utf-8")
+        subprocess.run(
+            [
+                compiler,
+                "-std=c++17",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-pedantic",
+                "-pthread",
+                "-I",
+                str(source.parent),
+                str(harness),
+                "-o",
+                str(executable),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        for role in ("ordinary", "escaping", "leader"):
+            completed = subprocess.run(
+                [str(executable), role],
+                check=False,
+                capture_output=True,
+                timeout=5,
+            )
+            require(
+                completed.returncode == 0,
+                f"{role} worker slept after handling SIGTERM",
+            )
+            require(completed.stdout == b"", f"{role} worker emitted stdout")
+            require(completed.stderr == b"", f"{role} worker emitted stderr")
 
 
 def require_close_adversary_result(completed, expected_rows, label: str) -> None:
@@ -998,7 +1181,7 @@ static int is_test_target(int file) {
         prefix="residency-task014-close-adversary-"
     ) as directory:
         root = Path(directory)
-        executable, library = build_close_adversary(
+        executable, library = build_linux_adversary(
             source,
             compiler,
             root,
@@ -1028,7 +1211,7 @@ static int is_test_target(int file) {
         }
         for error_name in ("EIO", "EINTR"):
             trace = root / f"directory-close-{error_name.lower()}.trace"
-            completed = run_close_adversary(
+            completed = run_linux_adversary(
                 executable,
                 root,
                 library,
@@ -1096,7 +1279,7 @@ static int is_test_target(int file) {
         prefix="residency-task014-regular-close-adversary-"
     ) as directory:
         root = Path(directory)
-        executable, library = build_close_adversary(
+        executable, library = build_linux_adversary(
             source,
             compiler,
             root,
@@ -1171,7 +1354,7 @@ static int is_test_target(int file) {
         for selector, expected_rows in cases.items():
             for error_name in ("EIO", "EINTR"):
                 trace = root / f"{selector}-close-{error_name.lower()}.trace"
-                completed = run_close_adversary(
+                completed = run_linux_adversary(
                     executable,
                     root,
                     library,
@@ -1376,6 +1559,7 @@ def require_native_probe(
         require_observation_binding(
             contract, repo_root, result, recorded_observation, binding
         )
+    require_signal_wait_race_closed(source, compiler_executable)
     require_unsupported_directory_sync_deferred(source, compiler_executable)
     require_directory_sync_close_failure_rejected(source, compiler_executable)
     require_regular_file_close_failure_rejected(source, compiler_executable)
