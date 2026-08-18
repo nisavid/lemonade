@@ -1248,6 +1248,328 @@
         "TASK-012",
         "TASK-013"
       ]
+    },
+    {
+      "phase": 2,
+      "phase_checkpoint_commit": "cfabb40e0829a2985c1df859d31dcf686684428b",
+      "phase_checkpoint_tree": "a7eceb22ade721e76abde2a5a79816e2014f18ec",
+      "record_digest": "6c0cc686457dbfa047933bb54c6ecd52c62a159bbe1d0e5f6e6b12762fba4946",
+      "task_evidence": [
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/prototypes/test_task014_durable_process_public_seam.py",
+              "--attest-recorded-observation"
+            ],
+            "commit": "e8ddc859387fdff11a9452d60a7e4f1b133537bd",
+            "result": "pass",
+            "tree": "c69f333f16d27c9ebbb6e1e14167b6285e54e784"
+          },
+          "outputs": [
+            {
+              "path": "CMakeLists.txt",
+              "sha256": "e1fd87c0ad89659ed675bb353d5834a7df56a32d90b7228cc82f820d137083fe"
+            },
+            {
+              "path": "CONTEXT.md",
+              "sha256": "e76bb06da79fc6f1bf9cf74526063148608167a31ef6b138b323aeda52a2cd5b"
+            },
+            {
+              "path": "docs/research/residency-prototype-results/sha256/c004b79e78604e293ba1eaa0daede04f92c86b07d36738825dc61d2a911aafd7.json",
+              "sha256": "c004b79e78604e293ba1eaa0daede04f92c86b07d36738825dc61d2a911aafd7"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "6b27a7860a2b208c9a1bd7b24e46c611dbca2efd568009016e10b60b7b4318e5"
+            },
+            {
+              "path": "test/cpp/test_residency_prototype_task014.cpp",
+              "sha256": "01a8449f392109c04c2ec7defda931eb3750b6f7026052916ad23c4115c7f080"
+            },
+            {
+              "path": "test/residency/prototypes/result_contract.py",
+              "sha256": "0ed023086f4d40938313dbe8d4a34821b70d445e38ecb067e7aa4f6a87d21714"
+            },
+            {
+              "path": "test/residency/prototypes/test_task014_durable_process_public_seam.py",
+              "sha256": "167dc6dde42371be3f34446e4d0b0aed20c4fcd51489e76206ab9db5cdb2d495"
+            }
+          ],
+          "red_fixture": {
+            "bundle_sha256": "a7f297e4c8d5f3ba3ef73767233a30f66318239cf63f50f85d6afbb0040c7a72",
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/prototypes/test_task014_durable_process_public_seam.py",
+              "--attest-recorded-observation"
+            ],
+            "evidence_commit": "1e499675635667d30894e33492398e087f4b3c61",
+            "evidence_tree": "00430a6e634ad4ab9635a76ab4b1a1232425998e",
+            "failure_signature": "TASK-014 durable-root and process-ownership prototype is unavailable",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-014/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-014/test.patch",
+            "patch_sha256": "df340e294a5c3a8a32ed6005160ac83560f73d932f10c337a43362fbb856b67c",
+            "test_paths": [
+              "test/residency/prototypes/test_task014_durable_process_public_seam.py"
+            ]
+          },
+          "task_base_commit": "63619c3cc45549fd277d0a83802074b54b9f4c24",
+          "task_id": "TASK-014"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/prototypes/test_task015_hatchery_attribution_public_seam.py",
+              "--attest-recorded-observation"
+            ],
+            "commit": "b9010857c442ee4108c1a0b2215dc03cecabb770",
+            "result": "pass",
+            "tree": "23035e3182ece7e1d677d1b9ccc7f69ec393607b"
+          },
+          "outputs": [
+            {
+              "path": "CMakeLists.txt",
+              "sha256": "33b613e3f75513af4ccf4e1004e794b4af69640a13de0064aad432e447a83297"
+            },
+            {
+              "path": "docs/research/residency-prototype-results/sha256/04537eee32c3e78034e5b4450a969f4e32b76ad534e68f64d9dc90e50d5beca6.json",
+              "sha256": "04537eee32c3e78034e5b4450a969f4e32b76ad534e68f64d9dc90e50d5beca6"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "49f66828d1cd78c6918f9b08f993e7d3ec427209be2656218fc36505209de8c9"
+            },
+            {
+              "path": "test/cpp/test_residency_prototype_task015.cpp",
+              "sha256": "6273ba0ae4ac07c03c1a3243d3eefccaed3f189f979ac7e0ac685a9cd2552592"
+            },
+            {
+              "path": "test/residency/prototypes/test_task015_hatchery_attribution_public_seam.py",
+              "sha256": "1657bf7cc781fd00a0250d153443fd0582b692bad2e07bf56a38047578b6f283"
+            }
+          ],
+          "red_fixture": {
+            "bundle_sha256": "603eeaa6296a68b44aa9b3a3e6a7764c6d831a919b7abf2e67f0256fb0f1811a",
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/prototypes/test_task015_hatchery_attribution_public_seam.py",
+              "--attest-recorded-observation"
+            ],
+            "evidence_commit": "99b7d72b0879aef15f05fcce4eb61c6435a8d557",
+            "evidence_tree": "55b0d3495dbe0d62245682dbce2f39686fc3ff78",
+            "failure_signature": "TASK-015 Hatchery causal attribution prototype is unavailable",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-015/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-015/test.patch",
+            "patch_sha256": "9fed979afcdcc2cd3bd071d502493ef2f7f3f5b0638b155b0ee22d3921485caa",
+            "test_paths": [
+              "test/residency/prototypes/test_task015_hatchery_attribution_public_seam.py"
+            ]
+          },
+          "task_base_commit": "e8ddc859387fdff11a9452d60a7e4f1b133537bd",
+          "task_id": "TASK-015"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/prototypes/test_task016_llamacpp_rocm_sizing_public_seam.py",
+              "--attest-recorded-observation"
+            ],
+            "commit": "2435ada864f4d801bef9411356ae32f261826d8d",
+            "result": "pass",
+            "tree": "14a38176c52ecec0145106149dbbd45c3de04ca7"
+          },
+          "outputs": [
+            {
+              "path": "CMakeLists.txt",
+              "sha256": "7a76c2f1ebd20a3b9ecaf006475ea3f6dc537253a9fb0af4ba943191811c2d1f"
+            },
+            {
+              "path": "docs/research/residency-prototype-results/sha256/30ad03518ea48b1be9de20f99f93e94327f5c2f9a47a3c31de6c90d65f1b8e98.json",
+              "sha256": "30ad03518ea48b1be9de20f99f93e94327f5c2f9a47a3c31de6c90d65f1b8e98"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "a1472f90bc6d43876250f3b6b7b32f657ae4834ecb3d38721ff06f1a8cc79fc2"
+            },
+            {
+              "path": "test/cpp/test_residency_prototype_task016.cpp",
+              "sha256": "eb8e01ab8b216b5e8c53eb73d0773730a62743123d2d02b78f5aa17f7b96e25e"
+            },
+            {
+              "path": "test/residency/prototypes/test_task016_llamacpp_rocm_sizing_public_seam.py",
+              "sha256": "9565ca44aa413f98b3054b4bcd685b876333da2d5c3805490cccf710e11b0f02"
+            }
+          ],
+          "red_fixture": {
+            "bundle_sha256": "8f9b1f6c98420227cdc165e77258c88e577ae16d9ee5d7f3fdb52908117d7df1",
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/prototypes/test_task016_llamacpp_rocm_sizing_public_seam.py",
+              "--attest-recorded-observation"
+            ],
+            "evidence_commit": "552475b5246da57a546ebd31229e9aea57456b2d",
+            "evidence_tree": "52cc96be0603e249dafc959ac45dd1eeb4ec8ae5",
+            "failure_signature": "TASK-016 pure-offline llama.cpp/ROCm sizing prototype is unavailable",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-016/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-016/test.patch",
+            "patch_sha256": "c49eaf5c7f2851e0ff2cbf19fa79902f5d5d2a11ebee130febe651e82be6d791",
+            "test_paths": [
+              "test/residency/prototypes/test_task016_llamacpp_rocm_sizing_public_seam.py"
+            ]
+          },
+          "task_base_commit": "b9010857c442ee4108c1a0b2215dc03cecabb770",
+          "task_id": "TASK-016"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/prototypes/test_task017_llamacpp_soft_release_public_seam.py",
+              "--attest-recorded-observation"
+            ],
+            "commit": "67e4c3ae45ebf3caecb47c5058f005b28cfd15fe",
+            "result": "pass",
+            "tree": "f3378dcd4d95a40a41b80f5b2979d7e0572cbeac"
+          },
+          "outputs": [
+            {
+              "path": "CMakeLists.txt",
+              "sha256": "751bf9b08a5c295ff24cedb5e65392064defdcce9dda66348bc774d6fba279e5"
+            },
+            {
+              "path": "docs/research/residency-prototype-results/sha256/2e97cd2e1c9aca89b223e97344d30f81f8ba53639b25cf7240a91daf0a1135fe.json",
+              "sha256": "2e97cd2e1c9aca89b223e97344d30f81f8ba53639b25cf7240a91daf0a1135fe"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "881241ccdaaa184709b03e824e2ed038aeef6e83b47897b57fa6913d442cb18e"
+            },
+            {
+              "path": "test/cpp/test_residency_prototype_task017.cpp",
+              "sha256": "c9dfc7d88b47fef2c0831d0238b4337cb26ab2152e11d66b472f33e4bc2512be"
+            },
+            {
+              "path": "test/residency/prototypes/test_task017_llamacpp_soft_release_public_seam.py",
+              "sha256": "6d7e71764497896d06c302642efa381ccd215f59782ea1363a8ec9ad382981da"
+            }
+          ],
+          "red_fixture": {
+            "bundle_sha256": "b3c962da6dd995a2a0ed88e0a2e75acc34f049bf37ee090b04434a1dfbfc6e90",
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/prototypes/test_task017_llamacpp_soft_release_public_seam.py",
+              "--attest-recorded-observation"
+            ],
+            "evidence_commit": "e59811573c3ad46d591b2107c8261dbd10c7e983",
+            "evidence_tree": "2f5ea1e380a82fa8b89696ef2075ec3723eabd1f",
+            "failure_signature": "TASK-017 llama.cpp soft-release prototype is unavailable",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-017/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-017/test.patch",
+            "patch_sha256": "535b32586abcd5789c6bde69045a0acc002080d2812584781d8e9381eb6e7f2d",
+            "test_paths": [
+              "test/residency/prototypes/test_task017_llamacpp_soft_release_public_seam.py"
+            ]
+          },
+          "task_base_commit": "2435ada864f4d801bef9411356ae32f261826d8d",
+          "task_id": "TASK-017"
+        },
+        {
+          "fallback_state": {
+            "authority": "legacy_runtime",
+            "status": "active"
+          },
+          "green_checkpoint": {
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/prototypes/test_task018_flm_service_membership_public_seam.py",
+              "--attest-recorded-observation"
+            ],
+            "commit": "a07f518a9afaf73571eef87b46a657306c3a13bf",
+            "result": "pass",
+            "tree": "20a5a2aeb2021a749f81c203f2c105890e4330b8"
+          },
+          "outputs": [
+            {
+              "path": "CMakeLists.txt",
+              "sha256": "11a915a345b32634f122b69bc354d874383622e78cd216e4259bd16fb39dffc1"
+            },
+            {
+              "path": "docs/research/residency-prototype-results/sha256/51c9923d551ffc5187f21ed2e823bbcb9cd9f018cca5f9ac4a58184c4b411a9f.json",
+              "sha256": "51c9923d551ffc5187f21ed2e823bbcb9cd9f018cca5f9ac4a58184c4b411a9f"
+            },
+            {
+              "path": "plan/architecture-portable-residency-1.md",
+              "sha256": "607a1322d0bee19c7b56301fdb50472ba6cc29c89c6f6ce2de55f981bc3411a1"
+            },
+            {
+              "path": "test/cpp/test_residency_prototype_task018.cpp",
+              "sha256": "d8d115a4e88dd0af628fda5b97539aa076380fd83cb099750ee97d93fa9010c0"
+            },
+            {
+              "path": "test/residency/prototypes/test_replay_modes_public_seam.py",
+              "sha256": "4d8ceae8b514eebffdd4efc35acd3f0ce22728bd60ea3482dfad2f79ba397f2a"
+            },
+            {
+              "path": "test/residency/prototypes/test_task018_flm_service_membership_public_seam.py",
+              "sha256": "a9247350e8ac82790a0cb3a3d103054447e910418bc8d8d920ae175955831065"
+            }
+          ],
+          "red_fixture": {
+            "bundle_sha256": "ab522be3529389912235ec2720801ae6e002eda8e4d47d19d56206d22b7a6835",
+            "command": [
+              "python3",
+              "-S",
+              "test/residency/prototypes/test_task018_flm_service_membership_public_seam.py",
+              "--attest-recorded-observation"
+            ],
+            "evidence_commit": "23e2d828cdd7f2d3e393f451c8c760c7bcac431a",
+            "evidence_tree": "b7ae30bc8d303bc3b6cefb4c012b5bac6a38ea75",
+            "failure_signature": "TASK-018 FLM service-membership and ownership prototype is unavailable",
+            "metadata_path": "plan/evidence/red-fixtures/TASK-018/result.json",
+            "patch_path": "plan/evidence/red-fixtures/TASK-018/test.patch",
+            "patch_sha256": "0e92b865d8a984746eef154f0ded6b6cc8de49eff593af690370fc199b2f6007",
+            "test_paths": [
+              "test/residency/prototypes/test_task018_flm_service_membership_public_seam.py"
+            ]
+          },
+          "task_base_commit": "67e4c3ae45ebf3caecb47c5058f005b28cfd15fe",
+          "task_id": "TASK-018"
+        }
+      ],
+      "task_ids": [
+        "TASK-014",
+        "TASK-015",
+        "TASK-016",
+        "TASK-017",
+        "TASK-018"
+      ]
     }
   ],
   "pre_handoff_records": [
