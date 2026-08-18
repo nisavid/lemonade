@@ -69,6 +69,7 @@ state transition:
 append(namespace, expected_prior_tip, record_digest)
     -> either conflict(current_tip)
     -> or pending(current_tip, operation_key)
+    -> or quarantined(current_tip, operation_key)
     -> or signed_receipt(namespace, new_tip, expected_prior_tip, record_digest)
 ```
 
@@ -77,11 +78,25 @@ The operation key and idempotency key are the same tuple,
 ordinary concurrency rules apply. After that CAS records a pending operation,
 every later append in the same namespace must return the deterministic
 `pending(current_tip, operation_key)` response without changing state until the
-original keyed operation reaches a stored receipt. Only then may an ordinary
-successor append against `current_tip` enter the CAS. After receipt persistence,
-every retry of the original key must return the stored original receipt. Reusing
-one `(namespace, expected_prior_tip)` with a different `record_digest` must then
-return a conflict and must not append another record.
+original keyed operation reaches a stored receipt or the namespace enters the
+terminal quarantine defined below. Only receipt persistence permits an ordinary
+successor append against `current_tip` to enter the CAS. After receipt
+persistence, every retry of the original key must return the stored original
+receipt. Reusing one `(namespace, expected_prior_tip)` with a different
+`record_digest` must then return a conflict and must not append another record.
+
+Temporary dependency failure leaves the operation pending. Only recovery of the
+exact keyed operation may clear that state by reaching one stored receipt. If a
+required log, witness, receipt store, or durable recovery identity becomes
+permanently unavailable, the only terminal transition is a one-way namespace
+quarantine. It preserves the committed tip, full operation key, all surviving
+operation evidence, and the failure record. Every later append in that namespace
+returns deterministic `quarantined(current_tip, operation_key)`. No operator may
+roll back or skip the pending operation, clear the quarantine, substitute another
+operation, or synthesize a receipt. The quarantined namespace and failed
+recovery run do not qualify. Future authority requires a separately authorized
+and requalified namespace that inherits no tip, receipt, checkpoint, or
+authority from the quarantined one.
 
 The expected tip comparison, record append, and new-tip persistence must be one
 atomic operation. A successful retry after a lost response must return the same
@@ -409,9 +424,9 @@ Prototype shape:
    once.
 3. The resulting leaf enters Tessera; checkpoint publication waits for an
    independently administered C2SP witness quorum.
-4. The response is a detached receipt binding the namespace, application
-   predecessor, record digest, assigned leaf, inclusion proof, log checkpoint,
-   and witness cosignatures.
+4. The response is a detached signed receipt binding `namespace`, `new_tip`,
+   `expected_prior_tip`, `record_digest`, assigned leaf, inclusion proof, log
+   checkpoint, and witness cosignatures.
 5. Public static tiles/checkpoints and witness monitoring endpoints permit
    offline and independent verification.
 
@@ -495,15 +510,15 @@ by itself prove the exact concurrency, atomicity, retry, and receipt semantics
 required here.
 
 Either UDF path must demonstrate that a committed execution exposes a stable
-transaction identity and that the independently verified receipt binds the
-namespace, custom-table record, predecessor, digest, and idempotency result. It
-must also prove conflict behavior under concurrency, fail-closed UDF upgrades,
-pinned code identity, administrator and service-certificate governance, and
-recovery after a lost response. Preview access and terms, limited regions and
-pricing, authenticated reads, and control-plane hard deletion remain
-availability and retention gaps. Azure therefore remains an unqualified
-managed comparison candidate; the documentation does not support selecting or
-provisioning it.
+transaction identity and that the signed, independently verified receipt binds
+`namespace`, `new_tip`, `expected_prior_tip`, `record_digest`, custom-table
+record, and idempotency result. It must also prove conflict behavior under
+concurrency, fail-closed UDF upgrades, pinned code identity, administrator and
+service-certificate governance, and recovery after a lost response. Preview
+access and terms, limited regions and pricing, authenticated reads, and
+control-plane hard deletion remain availability and retention gaps. Azure
+therefore remains an unqualified managed comparison candidate; the
+documentation does not support selecting or provisioning it.
 
 ### Sigstore Rekor
 
@@ -635,9 +650,9 @@ Any witness prototype must pass these tests at its public API:
    a different digest, and the new current tip as an ordinary successor. Every
    request must return the same deterministic
    `pending(current_tip, operation_key)`, emit no leaf, and leave state unchanged
-   until the original keyed operation reaches a stored receipt. Then prove that
-   the original key returns that receipt and an ordinary successor enters the
-   normal CAS path.
+   until the original keyed operation reaches a stored receipt or enters the
+   terminal quarantine in check 13. In the receipt case, prove that the original
+   key returns that receipt and an ordinary successor enters the normal CAS path.
 6. Reject a stale, unknown, malformed, unauthorized, cross-namespace, or
    digest-mismatched predecessor without changing state.
 7. Crash at every boundary between validation, application CAS, log sequencing,
@@ -654,6 +669,22 @@ Any witness prototype must pass these tests at its public API:
 11. Prove that log, witness, issuer, backup, and GitHub administrators cannot
    impersonate one another through shared SSO, secrets, cloud account, or
    recovery contacts.
+12. Hold log sequencing, checkpoint publication, witness cosigning, and receipt
+   persistence unavailable in turn across repeated service restarts. Each case
+   must preserve the exact pending key, tip, and stage identity. When the
+   dependency returns, only the original keyed operation may resume, and it must
+   produce no duplicate leaf or receipt; any replay must use the exact durable
+   stage identity.
+13. At every post-CAS pre-receipt boundary, permanently remove a required service
+   or durable recovery identity. Prove the namespace enters one-way quarantine,
+   retains its committed tip and surviving operation evidence across restart and
+   outage, and rejects rollback, skip, pending-state clearance, synthetic receipt,
+   exact-key retry, competing digest, and ordinary successor append without
+   emitting another leaf or receipt. The quarantined namespace and failed
+   recovery run must fail qualification; the candidate passes this fault case
+   only by enforcing every preceding result. A separately authorized and
+   requalified namespace must start with no inherited tip, receipt, checkpoint,
+   or authority from the quarantined namespace.
 
 Crash recovery oracle:
 
@@ -665,6 +696,7 @@ Crash recovery oracle:
 | After checkpoint publication, before witness cosigning | New tip, keyed operation, leaf identity, and checkpoint digest | Request cosigning for that same checkpoint and continue the same operation. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
 | After witness cosigning, before receipt persistence | New tip, keyed operation, leaf identity, checkpoint digest, and a replay-safe cosign request identity | Replay only that cosign request if needed, then CAS-store exactly one receipt for the key. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
 | After receipt persistence, before or during response | Complete stored original receipt keyed by `(namespace, expected_prior_tip, record_digest)` | Return that receipt byte-for-byte on every retry; append no leaf and create no second receipt. | Admit an ordinary successor against `current_tip`; the original key still returns the stored receipt. |
+| Any post-CAS pre-receipt boundary after permanent recovery loss | Committed tip, full operation key, all surviving stage evidence, failure record, and one-way namespace quarantine | Preserve the evidence and quarantine across every restart; no rollback, skip, operation substitution, or synthetic receipt is valid. | Return deterministic `quarantined(current_tip, operation_key)`; admit no append. |
 
 ## Proof gaps that block provider selection
 
