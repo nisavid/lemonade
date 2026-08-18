@@ -73,6 +73,39 @@ append(namespace, expected_prior_tip, record_digest)
     -> or signed_receipt(namespace, new_tip, expected_prior_tip, record_digest)
 ```
 
+This API requires a dedicated closed result envelope,
+`residency.witness_append_result/1.0`. It must not reuse
+[`residency.authority_transaction_result/1.0`](../api/schemas/residency/authority_transaction_result.schema.json),
+which is the configuration and pin-preference transaction envelope and cannot
+represent witness `pending` or `quarantined` states or an operation key. The
+witness result discriminator and required top-level fields are:
+
+| `result` | Required fields |
+| --- | --- |
+| `conflict` | `schema`, `result`, `namespace`, `current_tip` |
+| `pending` | `schema`, `result`, `namespace`, `current_tip`, `operation_key` |
+| `quarantined` | `schema`, `result`, `namespace`, `current_tip`, `operation_key` |
+| `signed_receipt` | `schema`, `result`, `namespace`, `new_tip`, `expected_prior_tip`, `record_digest`, `receipt` |
+
+The payload `schema` discriminator and the JSON Schema `$id` must both equal
+`residency.witness_append_result/1.0`. Each table row is the variant's exhaustive
+top-level field set; no other top-level property is valid. Candidate-specific
+fields may exist only inside `receipt` under that receipt type's own closed,
+versioned schema.
+
+`operation_key` is a closed object containing exactly `namespace`,
+`expected_prior_tip`, and `record_digest`, with values equal to the canonical
+append request; its `namespace` must equal the outer `namespace`. For `pending`
+and `quarantined`, `current_tip` must equal the new tip already committed by that
+operation's application CAS. For `conflict`, it is the current durable namespace
+tip that rejected the request. `receipt` contains the detached candidate-specific
+signed proof; its signed payload must bind the same outer `namespace`, `new_tip`,
+`expected_prior_tip`, and `record_digest`. The result schema and outcome mapper
+must reject unknown discriminators, a wrong `schema` value, missing or undeclared
+fields, fields that claim a second variant, a mismatched outer namespace,
+operation key, or committed tip, and any attempt to coerce a witness result
+through the shared authority-transaction schema.
+
 The operation key and idempotency key are the same tuple,
 `(namespace, expected_prior_tip, record_digest)`. Before the application CAS,
 ordinary concurrency rules apply. After that CAS records a pending operation,
@@ -685,6 +718,16 @@ Any witness prototype must pass these tests at its public API:
    only by enforcing every preceding result. A separately authorized and
    requalified namespace must start with no inherited tip, receipt, checkpoint,
    or authority from the quarantined namespace.
+14. Validate every append response against
+   `residency.witness_append_result/1.0`. Exercise all four discriminators and
+   reject an unknown discriminator, a wrong or cross-envelope `schema` value,
+   every missing required or undeclared top-level field, every cross-variant
+   field combination, a noncanonical or mismatched operation key, a wrong
+   `current_tip`, and every outer/key or outer/receipt namespace mismatch. Prove
+   each application outcome maps to exactly one wire variant, pending and
+   quarantined responses survive restart byte-for-byte for the same state, and
+   neither witness results nor existing configuration or pin-preference results
+   validate against the other envelope.
 
 Crash recovery oracle:
 
@@ -714,6 +757,11 @@ Crash recovery oracle:
 - Tessera plus C2SP requires a new application-tip sequencer, receipt format,
   deployment, public monitor, independent witness operators, and service-level
   contract.
+- `residency.witness_append_result/1.0` does not yet exist. Before TASK-069
+  implements either candidate adapter or append path, it must add the dedicated
+  versioned schema, generated bindings and validators, exact outcome mapping,
+  and the qualification cases above. The existing configuration and
+  pin-preference authority-transaction schema remains unchanged.
 - Azure Confidential Ledger's preview UDF paths still lack qualified
   enforcement, concurrency, idempotency, receipt-binding, code-governance, and
   recovery behavior. Data-plane retrieval is authenticated, a control-plane
