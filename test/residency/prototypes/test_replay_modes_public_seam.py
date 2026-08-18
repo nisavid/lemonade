@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 FLAG = "--attest-recorded-observation"
@@ -209,6 +210,43 @@ class PrototypeReplayModesTest(unittest.TestCase):
             )
             self.assertEqual(completed.stdout, "")
             self.assertNotIn(directory, completed.stderr)
+
+    def test_task014_native_compile_runs_in_temporary_directory(self):
+        relative_path, _ = SEAMS["TASK-014"]
+        seam = load_module(
+            ROOT / relative_path,
+            "task014_native_compile_directory_test",
+        )
+        source = ROOT / "test/cpp/test_residency_prototype_task014.cpp"
+
+        class ReplayContract:
+            @staticmethod
+            def resolve_replay_compiler(_observation, _platform_id, _environment):
+                return "cl.exe", "cl"
+
+        def run_process(command, **_kwargs):
+            stdout = b"" if str(source) in command else b"platform.current=windows\n"
+            return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr=b"")
+
+        with mock.patch.object(seam, "current_platform", return_value="windows"):
+            with mock.patch.object(
+                seam, "compiler_version", return_value="Microsoft C/C++ 19"
+            ):
+                with mock.patch.object(
+                    seam.subprocess, "run", side_effect=run_process
+                ) as run:
+                    seam.run_native_probe(ROOT, source, ReplayContract(), None)
+
+        compile_call = next(
+            call for call in run.call_args_list if str(source) in call.args[0]
+        )
+        output_argument = next(
+            argument for argument in compile_call.args[0] if argument.startswith("/Fe:")
+        )
+        self.assertEqual(
+            compile_call.kwargs.get("cwd"),
+            str(Path(output_argument.removeprefix("/Fe:")).parent),
+        )
 
     @unittest.skipUnless(
         sys.platform.startswith("linux"),

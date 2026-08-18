@@ -649,7 +649,11 @@ def run_native_probe(repo_root: Path, source: Path, contract, recorded_observati
             compiler_executable, str(source), str(executable), platform_id
         )
         subprocess.run(
-            actual_compile_command, check=True, capture_output=True, timeout=30
+            actual_compile_command,
+            cwd=directory,
+            check=True,
+            capture_output=True,
+            timeout=30,
         )
         run_command = [
             (
