@@ -8,11 +8,14 @@ Status: research for Issue
 
 No evidence authority is selected or qualified. The bounded backup paper screen
 finds documented paths through the required retention, conditional-write, public
-read, and administrative-boundary gates for Google Cloud Storage Bucket Lock,
-Amazon S3 Object Lock in compliance mode, and Azure Blob Immutable Storage.
-Each still requires the same destructive qualification. Backblaze B2 Object
-Lock lacks reviewed first-party proof of an exact create-only upload primitive,
-and Cloudflare R2's documented lock rules remain removable.
+read, and administrative-boundary gates for Azure Blob Immutable Storage.
+Google Cloud Storage Bucket Lock and Amazon S3 Object Lock in compliance mode
+meet the object-level gates but remain conditional because their documented
+project or account deletion paths do not preserve retained objects and their
+public locators. Each candidate still requires the same destructive
+qualification. Backblaze B2 Object Lock lacks reviewed first-party proof of an
+exact create-only upload primitive, and Cloudflare R2's documented lock rules
+remain removable.
 
 No surveyed witness satisfies the complete Phase 10 contract as documented.
 Tessera plus C2SP witnesses can prove append-only log growth, but a dedicated
@@ -45,7 +48,7 @@ physical evidence or the external authorities required by
 
 The
 [campaign deployment binding](../../plan/architecture-portable-residency-1.md#campaign-deployment-binding)
-requires two different authorities.
+requires separate backup and witness authority roles.
 
 The backup authority must provide:
 
@@ -66,6 +69,12 @@ append(namespace, expected_prior_tip, record_digest)
     -> either conflict(current_tip)
     -> or signed_receipt(new_tip, expected_prior_tip, record_digest)
 ```
+
+The idempotency key is
+`(namespace, expected_prior_tip, record_digest)`. After that key commits, every
+retry must return the stored original receipt. Reusing one
+`(namespace, expected_prior_tip)` with a different `record_digest` must return a
+conflict and must not append another record.
 
 The expected tip comparison, record append, and new-tip persistence must be one
 atomic operation. A successful retry after a lost response must return the same
@@ -99,8 +108,8 @@ that every witness product has been surveyed.
 
 | Candidate | Immutable retention | Conditional write | Public exact retrieval | Administrative and operational boundary | Research disposition |
 | --- | --- | --- | --- | --- | --- |
-| Google Cloud Storage Bucket Lock | Strong after irreversible policy lock | Strong generation preconditions | Supported | Separate Google Cloud project, IAM principals, and recovery identity are possible | Paper-screen pass; unqualified |
-| Amazon S3 Object Lock, compliance mode | Strong per protected object version | Strong `If-None-Match` and `If-Match` controls | Supported directly or through CloudFront | Separate AWS account, roles, and recovery identity are possible | Paper-screen pass; unqualified |
+| Google Cloud Storage Bucket Lock | Strong inside an active project after irreversible policy lock; project deletion remains possible after lien removal | Strong generation preconditions | Supported while the project and account remain active | Separate Google Cloud project, IAM principals, and recovery identity are possible | Conditional: project and account deletion |
+| Amazon S3 Object Lock, compliance mode | Strong per protected object version inside an active account; account deletion is a documented bypass | Strong `If-None-Match` and `If-Match` controls | Supported directly or through CloudFront while the account remains active | Separate AWS account, roles, and recovery identity are possible | Conditional: account deletion |
 | Azure Blob Immutable Storage | Strong under a locked time-based policy | Strong `If-None-Match` and `If-Match` controls | Supported for an exact version when anonymous access is enabled | Separate Azure subscription, tenant principals, and recovery identity are possible | Paper-screen pass; unqualified |
 | Backblaze B2 Object Lock, compliance mode | Strong for 1–3,000 days per documented file retention | Not established by reviewed docs | Supported by public buckets | Bucket/prefix-scoped application keys are available | Paper screen incomplete: conditional write |
 | Cloudflare R2 Bucket Lock | Lock prevents overwrite/delete while the rule applies, but rules are removable | Strong ETag conditions | Supported by custom domain or `r2.dev` | Bucket-scoped tokens are available | Paper screen incomplete: retention authority |
@@ -116,6 +125,11 @@ Facts:
   objects are covered. Object metadata remains editable, so metadata is not an
   integrity authority. See the official
   [Bucket Lock contract](https://docs.cloud.google.com/storage/docs/bucket-lock).
+- The automatically applied project lien is a separate, removable control.
+  Removing it requires `resourcemanager.projects.updateLiens`, which is included
+  in `roles/owner` and `roles/resourcemanager.lienModifier`; project deletion
+  requires removing the lien first. See the official
+  [project-lien contract](https://docs.cloud.google.com/resource-manager/docs/project-liens).
 - Cloud Storage write preconditions support exact object generations.
   `ifGenerationMatch=0` makes an upload succeed only when there is no live object
   at that name; a mismatched generation fails with `412 Precondition Failed`.
@@ -144,15 +158,18 @@ Facts:
 
 Fit and gaps:
 
-- The first-party material documents both irreversible bucket retention and a
-  native create-only upload precondition, so GCS passes the paper screen.
+- The first-party material documents irreversible bucket retention and a native
+  create-only upload precondition, but the explicit project and account deletion
+  paths prevent a full retention pass. GCS remains conditional unless an
+  external control preserves both the retained object and its public locator.
 - A locator must bind the object generation, SHA-256, and size. A mutable object
   name without a generation is insufficient even when replacement is delayed.
 - The independence proof must establish a separate Google Cloud project and
   recovery authority, not merely a different hostname reached by GitHub Actions.
 - A prototype must confirm that the permanent public locator exposes the exact
-  generation and that account, project, IAM, and billing failure modes do not
-  bypass the required retention period.
+  generation. It must exercise lien removal and attempted project deletion while
+  an object remains under retention, and prove that account, project, IAM, and
+  billing failure modes do not bypass the required retention period.
 
 ### Amazon S3 Object Lock
 
@@ -175,7 +192,16 @@ Facts:
   availability, and storage across at least three Availability Zones. See
   [S3 storage durability](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DataDurability.html).
 - A private bucket can be served publicly through CloudFront while origin access
-  control limits direct bucket reads. See the
+  control limits direct bucket reads. An exact S3 version is selected with the
+  `versionId` query parameter and requires `s3:GetObjectVersion`. A CloudFront
+  locator that retains the query form must forward `versionId` to S3 and, when
+  caching is enabled, include it in the cache key. The alternatives are a
+  version-specific immutable path mapping or disabled caching with `versionId`
+  still forwarded. See the
+  [S3 object-version retrieval contract](https://docs.aws.amazon.com/AmazonS3/latest/userguide/RetrievingObjectVersions.html),
+  [S3 `GetObject`](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html),
+  [CloudFront cache-key contract](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cache-key-understand-cache-policy.html),
+  and
   [CloudFront S3 origin contract](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html).
 - AWS recommends least-privilege IAM roles and temporary credentials instead of
   stored long-lived access keys. See the
@@ -185,13 +211,17 @@ Facts:
 
 Fit and gaps:
 
-- Compliance mode plus create-only conditional writes is a strong backup fit.
+- Compliance mode plus create-only conditional writes is a strong object-level
+  backup fit, but AWS documents account deletion as the way to delete a protected
+  version early. S3 remains conditional unless an enforceable external control
+  preserves both the retained bytes and public locator through the retention
+  period.
 - The deployment binding must name the exact S3 version ID as well as the key,
   SHA-256, and size. Object Lock protects a version; it does not stop a newer
   version or delete marker from becoming current.
-- The account-deletion exception, CloudFront configuration, KMS/key policy if
-  used, billing recovery, and root recovery controls need an explicit operator
-  risk decision.
+- Exact-version CloudFront cache behavior, KMS/key policy if used, billing
+  recovery, and root recovery controls need an explicit operator risk decision;
+  that decision cannot waive the account-deletion qualification gate.
 - The independence proof must bind a separate AWS account and non-GitHub recovery
   principals. A GitHub OIDC role may be a narrow uploader, but it cannot be the
   sole administrator or recovery path.
@@ -515,10 +545,18 @@ A provider name is not evidence of administrative independence. Before freezing
   retention, deletion, suspension, and account-recovery boundaries; and
 - signed results of the destructive and recovery checks below.
 
-The evidence backup and witness should not share the same cloud account,
-credential root, billing failure domain, or operator recovery path. The primary
-GitHub Release, backup store, and witness should remain three independently
-identifiable authorities.
+The evidence backup and witness are distinct authority roles, but they need not
+use different provider companies. One provider may operate both only when the
+signed proof binds explicit backup-administration and witness-append boundaries:
+the backup writer or retention administrator cannot exercise witness append,
+administration, or key custody, and the witness operator cannot change retained
+backup bytes. Shared provider, account, credential-root, billing, or recovery
+dependencies must be recorded as correlated failure rather than claimed as
+independence. Qualification must exercise each role's authorized credentials and
+simulate role or account suspension in turn, proving that the other role's
+retained evidence or append state cannot be changed. The primary GitHub Release,
+backup authority, and witness authority remain three independently identifiable
+authority identities.
 
 ## Required qualification checks
 
@@ -536,7 +574,12 @@ Run these against disposable resources before any production binding:
    the bound object.
 4. Attempt delete, overwrite, metadata mutation, retention shortening, policy
    removal, bucket deletion, and project/account deletion with the writer,
-   administrator, and root-equivalent principals. Record every response.
+   administrator, and root-equivalent principals. For GCS, remove the automatic
+   project lien with a principal holding `resourcemanager.projects.updateLiens`,
+   then attempt project deletion while the retained object still exists. Record
+   every response. A blocked attempt is insufficient when a removable lien is
+   the blocker; deletion or loss of public retrieval before retention expiry
+   fails the candidate unless a separate enforceable control preserves both.
 5. Retrieve the exact bound version anonymously from a stable production URL,
    then verify size and SHA-256. Repeat from a second network and after cache
    purge.
@@ -550,26 +593,43 @@ Run these against disposable resources before any production binding:
 
 Any witness prototype must pass these tests at its public API:
 
-1. Submit two concurrent records with the same `expected_prior_tip`. Exactly one
-   append succeeds; the other returns a conflict naming the committed tip.
-2. Lose the successful response after durable commit, then retry. The retry
-   returns the original receipt and does not append a second record.
-3. Reject a stale, unknown, malformed, unauthorized, cross-namespace, or
+1. Submit two concurrent records with the same `namespace` and
+   `expected_prior_tip` but different `record_digest` values. Exactly one append
+   succeeds; the other returns a conflict naming the committed tip.
+2. Submit the identical full idempotency key concurrently. Exactly one record is
+   appended, and every later response returns the stored original receipt.
+3. Lose the successful response after durable commit, then retry. The retry
+   uses the same `(namespace, expected_prior_tip, record_digest)` idempotency key,
+   returns the stored original receipt, and does not append a second record.
+   Retrying the same predecessor with a different digest returns a conflict and
+   also leaves the log unchanged.
+4. Reject a stale, unknown, malformed, unauthorized, cross-namespace, or
    digest-mismatched predecessor without changing state.
-4. Crash at every boundary between validation, application CAS, log sequencing,
-   checkpoint publication, witness cosigning, and response. Restart must expose
-   exactly one recoverable authority state.
-5. Verify the detached receipt, inclusion proof, log checkpoint, witness quorum,
+5. Crash at every boundary between validation, application CAS, log sequencing,
+   checkpoint publication, witness cosigning, receipt persistence, and response.
+   The durable state and restart result must match the recovery oracle below.
+6. Verify the detached receipt, inclusion proof, log checkpoint, witness quorum,
    key identity, and application predecessor offline from pinned trust roots.
-6. Retrieve current and historical public checkpoints without a write secret;
+7. Retrieve current and historical public checkpoints without a write secret;
    detect stale service, split view, rollback, missing liveness, and key
    rotation.
-7. Remove one witness, log node, region, billing principal, and operator. The
+8. Remove one witness, log node, region, billing principal, and operator. The
    documented quorum and recovery policy must either remain healthy or fail
    closed without issuing a receipt.
-8. Prove that log, witness, issuer, backup, and GitHub administrators cannot
+9. Prove that log, witness, issuer, backup, and GitHub administrators cannot
    impersonate one another through shared SSO, secrets, cloud account, or
    recovery contacts.
+
+Crash recovery oracle:
+
+| Crash boundary | Durable authority state | Required restart and retry result |
+| --- | --- | --- |
+| After validation, before application CAS | Prior tip only; no keyed operation or receipt | Revalidate from the prior tip; either one later append commits or a competing tip conflicts. |
+| After application CAS, before log sequencing | New tip plus the full idempotency key and a pending operation | Resume that keyed operation and submit exactly one leaf; never roll back the committed tip. |
+| After leaf sequencing, before checkpoint publication | New tip, keyed operation, and exact leaf identity or index | Publish a checkpoint over the existing leaf; never submit the leaf again. |
+| After checkpoint publication, before witness cosigning | New tip, keyed operation, leaf identity, and checkpoint digest | Request cosigning for that same checkpoint and continue the same operation. |
+| After witness cosigning, before receipt persistence | New tip, keyed operation, leaf identity, checkpoint digest, and a replay-safe cosign request identity | Replay only that cosign request if needed, then CAS-store exactly one receipt for the key. |
+| After receipt persistence, before or during response | Complete stored original receipt keyed by `(namespace, expected_prior_tip, record_digest)` | Return that receipt byte-for-byte on every retry; append no leaf and create no second receipt. |
 
 ## Proof gaps that block provider selection
 
