@@ -814,14 +814,14 @@ def require_probe(
         fail_unavailable()
     require_probe_source(source)
     platform_id = current_platform()
-    require_unbound_observation_regression()
-    require_native_profile_classifier()
-    current_native_rows = native_output_rows(platform_id)
     recorded_observation = (
         recorded_observation_for_platform(result, platform_id)
         if attest_recorded_observation
         else None
     )
+    require_unbound_observation_regression()
+    require_native_profile_classifier()
+    current_native_rows = native_output_rows(platform_id)
     if attest_recorded_observation:
         native_profile_row = next(
             row

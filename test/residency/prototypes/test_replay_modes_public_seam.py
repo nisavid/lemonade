@@ -115,11 +115,18 @@ class PrototypeReplayModesTest(unittest.TestCase):
                 self.assertEqual(completed.stdout, "")
 
     def test_flagged_red_fixture_checks_artifacts_before_environment(self):
+        environment = os.environ.copy()
+        environment["PATH"] = ""
+        environment.pop("CC", None)
+        environment.pop("CXX", None)
         for _, (relative_path, unavailable) in SEAMS.items():
             source = ROOT / relative_path
-            with self.subTest(path=relative_path), tempfile.TemporaryDirectory(
-                prefix="residency-replay-red-"
-            ) as directory:
+            with (
+                self.subTest(path=relative_path),
+                tempfile.TemporaryDirectory(
+                    prefix="residency-replay-red-"
+                ) as directory,
+            ):
                 root = Path(directory)
                 target = root / relative_path
                 target.parent.mkdir(parents=True)
@@ -127,7 +134,7 @@ class PrototypeReplayModesTest(unittest.TestCase):
                 completed = subprocess.run(
                     [sys.executable, "-S", str(target), FLAG],
                     cwd=root,
-                    env={"PATH": ""},
+                    env=environment,
                     capture_output=True,
                     text=True,
                     check=False,
@@ -580,8 +587,9 @@ class PrototypeReplayModesTest(unittest.TestCase):
             ),
         )
         for function, arguments, message in cases:
-            with self.subTest(message=message), self.assertRaisesRegex(
-                contract.PrototypeResultError, message
+            with (
+                self.subTest(message=message),
+                self.assertRaisesRegex(contract.PrototypeResultError, message),
             ):
                 function(*arguments)
 
@@ -680,8 +688,43 @@ class PrototypeReplayModesTest(unittest.TestCase):
             "task015_replay_mode_test",
         )
         result = contract.load_task_result(ROOT, "TASK-015")
-        observation = seam.recorded_observation_for_platform(result, "linux")
-        self.assertIs(observation, result["observations"][0])
+        expected_observation = result["observations"][0]
+        events = []
+        select_observation = seam.recorded_observation_for_platform
+        profile_preflight_failure = RuntimeError("profile preflight stopped")
+
+        def record_selection(candidate_result, platform_id):
+            observation = select_observation(candidate_result, platform_id)
+            events.append(("selection", observation))
+            return observation
+
+        def fail_profile_preflight():
+            events.append(("profile_preflight", None))
+            raise profile_preflight_failure
+
+        with (
+            mock.patch.object(seam, "current_platform", return_value="linux"),
+            mock.patch.object(seam, "require_unbound_observation_regression"),
+            mock.patch.object(
+                seam,
+                "recorded_observation_for_platform",
+                side_effect=record_selection,
+            ),
+            mock.patch.object(
+                seam,
+                "require_native_profile_classifier",
+                side_effect=fail_profile_preflight,
+            ),
+            self.assertRaises(RuntimeError) as raised,
+        ):
+            seam.require_probe(ROOT, contract, result, True)
+
+        self.assertEqual(
+            [event for event, _ in events],
+            ["selection", "profile_preflight"],
+        )
+        self.assertIs(events[0][1], expected_observation)
+        self.assertIs(raised.exception, profile_preflight_failure)
 
 
 if __name__ == "__main__":
