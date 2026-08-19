@@ -160,7 +160,7 @@ Every Tessera receipt is evaluated under one closed
 SHA-256 digest are frozen in `hatchery_deployment_binding/v1`. The policy has
 the following exhaustive shape; `authorized_cosigners` contains 1 through 32
 entries, is sorted by logical `key_id`, and contains no duplicate logical key,
-C2SP key ID, cosigner name, or public-key digest.
+C2SP key ID, cosigner name, public-key digest, or resolved 32-byte public key.
 
 ```json
 {"authorized_cosigners":[{"c2sp_key_id":"<8-lowercase-hex>","cosigner_name":"<C2SP-key-name>","key_id":"<logical-key-id>","public_key_digest":"<64-lowercase-hex>"}],"checkpoint_coverage":"c2sp.tlog-cosignature/v1.0.1:whole-checkpoint-note-body","cosignature_algorithm":"ed25519","cosignature_domain":"cosignature/v1","log_key_id":"<log-key-id>","log_origin":"<log-origin>","quorum_threshold":"<1..32>","schema":"residency.c2sp_witness_policy/1.0","witness_policy_id":"<witness-policy-id>"}
@@ -175,25 +175,52 @@ of authorized cosigners. Each `public_key_digest` is the SHA-256 of the exact
 32-byte Ed25519 public key distributed for that entry. Its `c2sp_key_id` must
 equal the first four bytes of
 `SHA-256(cosigner_name || "\n" || 0x04 || public_key)`, encoded as lowercase
-hexadecimal.
+hexadecimal. Policy loading must resolve every entry through the authorized key
+bundle, verify the digest against the exact key bytes, and reject any alias that
+maps distinct logical or native witness identities to the same key bytes or
+digest. A quorum counts valid unique resolved cryptographic keys, not names or
+policy slots; one private key can contribute at most once.
 
-Each `signature_b64u` decodes to the C2SP note-signature payload, the 4-byte key
-ID followed by the 72-byte timestamped signature. Under the pinned
+Each `signature_b64u` must first pass the strict canonical unpadded base64url
+rules above and decode to exactly 76 bytes:
+`c2sp_key_id[4] || timestamp[8] || ed25519_signature[64]`. The timestamp is an
+unsigned big-endian integer no greater than `2^63 - 1`. The adapter then
+re-encodes those same 76 bytes with canonical padded standard Base64 and
+reconstructs the exact
+[C2SP signed-note v1.0.0](https://c2sp.org/signed-note@v1.0.0) signature line:
+`UTF8("— " || cosigner_name || " ") ||
+ASCII(BASE64_STANDARD_PADDED(raw_note_signature)) || b"\n"`, where `—` is
+U+2014. Standard Base64 uses only `A-Za-z0-9+/`, canonical zero pad bits, and
+exactly `==` padding for the 76-byte payload. The pinned signed-note verifier is
+configured with the policy entry whose name, native key ID, and public key match
+the decoded bytes, and receives exactly
+`checkpoint_note_body || b"\n" || reconstructed_signature_line`: the body's
+existing final newline, one separating blank-line newline, and the signature
+line. The receipt field must round-trip to the identical unpadded base64url
+spelling, and the reconstructed standard-Base64 payload must decode back to the
+identical 76 bytes. Receipt-side `+`, `/`, `=`, whitespace, or an alternate
+spelling, and a reconstructed line with a changed alphabet, missing or excess
+padding, or noncanonical pad bits, are invalid.
+
+Under the pinned
 [C2SP transparency-log cosignature v1.0.1](https://c2sp.org/tlog-cosignature@v1.0.1)
-profile, the timestamped signature is Ed25519 over the newline-terminated
-`cosignature/v1` domain line, the canonical `time <timestamp>` line, and the
-whole checkpoint note body parsed from the decoded `log_checkpoint_b64u`,
-including its final newline and excluding every signature line. The policy's
-checkpoint-coverage value names exactly that rule. The cosignatures authenticate
-the checkpoint, not the JSON receipt directly; the verified log signature and
-inclusion proof must bind that same checkpoint to `leaf_digest`, which in turn
-binds the exact canonical `signed_payload` bytes. A receipt is valid only when
-every listed cosignature maps to one unique authorized policy entry, its native
-name, key ID, public key, algorithm, domain, and covered checkpoint all match,
-and the number of valid unique authorized cosigners meets the positive
-threshold. Empty, duplicate, unknown, malformed, invalid, insufficient,
-wrong-checkpoint, wrong-policy, or policy-mismatched sets invalidate the receipt
-rather than contributing zero or being ignored.
+profile, the Ed25519 signature covers exactly
+`b"cosignature/v1\n" || b"time " || ASCII(canonical_decimal(timestamp)) ||
+b"\n" || checkpoint_note_body`. The checkpoint body comes from decoded
+`log_checkpoint_b64u`, includes its final newline, and excludes every signature
+line. The receipt's base64url text, either Base64 padding or alphabet, and the
+reconstructed signature line are transport framing and are never part of that
+signed message. The policy's checkpoint-coverage value names exactly this rule.
+The cosignatures authenticate the checkpoint, not the JSON receipt directly;
+the verified log signature and inclusion proof must bind that same checkpoint
+to `leaf_digest`, which in turn binds the exact canonical `signed_payload`
+bytes. A receipt is valid only when every listed cosignature maps to one unique
+authorized policy entry and resolved cryptographic key, its native name, key ID,
+public key, algorithm, domain, and covered checkpoint all match, and the number
+of valid unique resolved keys meets the positive threshold. Empty, duplicate,
+unknown, malformed, invalid, insufficient, wrong-checkpoint, wrong-policy, or
+policy-mismatched sets invalidate the receipt rather than contributing zero or
+being ignored.
 
 For Tessera, the leaf data is exactly the canonical signed-payload bytes and
 `leaf_digest` is the lowercase hexadecimal RFC 6962 leaf hash,
@@ -906,8 +933,26 @@ Any witness prototype must pass these tests at its public API:
    signature invalid or cover another checkpoint; change the policy ID, digest,
    log identity, threshold, algorithm, domain, coverage rule, logical key ID,
    C2SP key ID, cosigner name, public-key digest, or distributed public key.
-   Reject every mutation and prove that no unconfigured or duplicate cosigner
-   contributes to the threshold.
+   Add distinct logical key IDs, cosigner names, and C2SP key IDs that resolve to
+   the same public-key digest or exact 32-byte key; alias one key under a forged
+   second digest; and alias two key-bundle entries to the same key bytes. Reject
+   every mutation at policy load or receipt validation and prove that quorum
+   counting uses unique verified key bytes and digests, so no unconfigured,
+   duplicate, or relabeled cosigner contributes twice.
+19. For the C2SP encoding boundary, publish shared golden vectors containing the
+   exact `signature_b64u`, decoded 76-byte hex, canonical padded standard-Base64
+   text, reconstructed UTF-8 signature-line hex, decoded timestamp, checkpoint
+   note-body hex, and signed-message hex. Include a payload whose receipt spelling
+   contains both `-` and `_` and whose standard-Base64 spelling contains both `+`
+   and `/`; require every adapter and offline verifier to reproduce all bytes.
+   Independently add receipt padding or whitespace, substitute the standard
+   alphabet into the receipt, change a base64url character or pad bit, omit or
+   add standard-Base64 padding, or make either representation decode to other
+   bytes. Also mutate the domain line, timestamp decimal spelling or byte order,
+   newline placement, checkpoint final newline, and presence of checkpoint
+   signature lines. Reject every mutation and prove that only the exact canonical
+   signed-message bytes, never either transport encoding or reconstructed
+   signature-line bytes, reach Ed25519 verification.
 
 Crash recovery oracle:
 
@@ -951,7 +996,8 @@ candidate's recovery shape.
   result and signed-payload schemas, all three closed candidate-receipt schemas,
   a dedicated versioned C2SP witness-policy schema, generated bindings and
   strict canonical validators, authorized key distribution and verification,
-  exact outcome, candidate, policy, and quorum mapping,
+  exact outcome, candidate, policy, unique-key quorum, and base64url-to-C2SP
+  verifier mapping with shared golden vectors,
   provider-authoritative lookup/dedup recovery, and the qualification cases
   above. The existing configuration and pin-preference authority-transaction
   schema remains unchanged.
