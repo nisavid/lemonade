@@ -2,7 +2,7 @@
 goal: Implement portable, recovery-safe model residency and qualify Hatchery
 version: 1.0
 date_created: 2026-08-14
-last_updated: 2026-08-16
+last_updated: 2026-08-18
 owner: Ivan D Vasin
 status: Planned
 tags: [architecture, residency, recovery, validation]
@@ -106,7 +106,7 @@ Every implementation task after the TASK-005 bootstrap that changes code or gene
 | TASK-005–TASK-007, TASK-093, TASK-108–TASK-109 | `plan/portable-residency-implementation-base.json`; content-addressed per-task bundles under `plan/evidence/red-fixtures/`; `tools/validate_residency_implementation_handoff.py`; `test/test_residency_implementation_handoff.py`; exact implementation-base scout outputs and created GitHub issue IDs recorded in the manifest. |
 | TASK-008–TASK-013 | `.github/actions/{install-lemonade-deb,install-lemonade-server-dmg,install-lemonade-server-msi,smoke-test-embeddable}/action.yml`; `.github/workflows/{cpp_server_build_test_release,docs_and_style}.yml`; `.github/workflows/docker-build-smoke-test.yml`; `CMakeLists.txt`; `docs/research/portable-residency-capability-inventory.json`; `tools/generate_residency_contract.py`; `tools/residency_contract/`; `tools/residency_inventory/{contract_registry,promotions,schema}.py`; `src/cpp/installer/Product.wxs.in`; `src/cpp/resources/residency_profiles.json`; `src/cpp/include/lemon/residency/{types,generated_contract,catalog,explanations}.h`; `src/cpp/server/residency/{generated_contract,catalog,explanations}.cpp`; `docs/api/schemas/residency/`; `test/cpp/test_residency_contract_{types,catalog,explanations}.cpp`; `test/cpp/test_residency_contract_matrix.cpp`; `test/residency/contract/`; `test/test_residency_capability_inventory_{contract_registry,source}.py`; `test/test_residency_later_promotion_roster.py`. |
 | TASK-014–TASK-018 | `CMakeLists.txt`; `test/cpp/test_residency_prototype_task014.cpp`; `test/cpp/test_residency_prototype_task015.cpp`; `test/cpp/test_residency_prototype_task016.cpp`; `test/cpp/test_residency_prototype_task017.cpp`; `test/cpp/test_residency_prototype_task018.cpp`; `test/residency/prototypes/`, including `test_replay_modes_public_seam.py`; content-addressed results under `docs/research/residency-prototype-results/`; no production authority. |
-| TASK-019–TASK-025, TASK-094–TASK-095 | `src/cpp/include/lemon/residency/{journal,claims,recovery,recovery_store}.h`; `src/cpp/server/residency/{journal,claims,recovery,recovery_store}.cpp`; `src/cpp/server/residency/platform/`; `test/residency/recovery/`. |
+| TASK-019–TASK-025, TASK-094–TASK-095 | `CMakeLists.txt`; `CONTEXT.md`; `docs/agents/architecture-map.md`; `plan/architecture-portable-residency-1.md`; `src/cpp/include/lemon/residency/{journal,claims,recovery,recovery_store}.h`; `src/cpp/server/residency/{journal,claims,recovery,recovery_store}.cpp`; `src/cpp/server/residency/platform/`; `test/cpp/test_residency_journal.cpp`; `test/residency/recovery/`. |
 | TASK-026–TASK-030 | `src/cpp/include/lemon/residency/provider.h`; `src/cpp/server/residency/providers/{system_provider,backend_provider}.cpp`; `test/residency/{fakes,providers}/`. |
 | TASK-031–TASK-042 | `src/cpp/include/lemon/residency/planner.h`; `src/cpp/server/residency/planner.cpp`; one file per operation under `src/cpp/server/residency/plans/`; `src/cpp/server/residency/coordinator.cpp`; `test/residency/planner/`. |
 | TASK-043–TASK-046, TASK-072–TASK-075, TASK-105–TASK-106 | `src/cpp/include/lemon/{router,wrapped_server}.h`; `src/cpp/server/{router,residency/lifecycle,residency/cutover,residency/ownership_universe}.cpp`; `test/residency/{lifecycle,cutover}/`. The current fork entry is `lemon::plan_gpu_memory_admission`; stable symbols are recorded by TASK-006. |
@@ -216,7 +216,7 @@ Each prototype publishes a pass record or the exact catalog fallback/deferred-ce
 
 | Task | Depends on | Description | Completed | Date |
 |---|---|---|---|---|
-| TASK-019 | TASK-013 | Define journal records, authority roots, claim families, resident states, recovery dispositions, and quarantine origins with schema, sequence, predecessor, daemon epoch, operation identity, complete claim closure, and checksum. | | |
+| TASK-019 | TASK-013 | Define journal-record candidates, opaque validated history, authority-root candidates, claim families, resident states, recovery dispositions, and quarantine origins with schema, sequence, predecessor, daemon epoch, operation identity, complete claim closure, and checksum. | ✅ | 2026-08-18 |
 | TASK-020 | TASK-014, TASK-019 | Implement crash-safe append, fsync, atomic root publication, replay, compaction, and downgrade export through platform durable-file adapters. | | |
 | TASK-021 | TASK-019 | Implement checked nonnegative claim algebra and current, provisional, retained, quarantine, and conservative-overlay projections. | | |
 | TASK-094 | TASK-019 | Define and implement the content-addressed recovery-origin store with durable hash verification before references, transactional reachability/tombstone/deleting states, safe revival/GC, missing-object corruption fencing, and topology/catalog rebind. | | |
