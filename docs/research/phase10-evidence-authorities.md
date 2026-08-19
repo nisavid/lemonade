@@ -93,18 +93,89 @@ top-level field set; no other top-level property is valid. Candidate-specific
 fields may exist only inside `receipt` under that receipt type's own closed,
 versioned schema.
 
-`operation_key` is a closed object containing exactly `namespace`,
-`expected_prior_tip`, and `record_digest`, with values equal to the canonical
-append request; its `namespace` must equal the outer `namespace`. For `pending`
-and `quarantined`, `current_tip` must equal the new tip already committed by that
-operation's application CAS. For `conflict`, it is the current durable namespace
-tip that rejected the request. `receipt` contains the detached candidate-specific
-signed proof; its signed payload must bind the same outer `namespace`, `new_tip`,
-`expected_prior_tip`, and `record_digest`. The result schema and outcome mapper
+Wire identity is byte-exact:
+
+- `namespace` and provider operation identifiers (`log_origin`, `log_key_id`,
+  `ledger_id`, `udf_name`, `endpoint_id`, `transaction_id`, and witness
+  `key_id`) are 1 through 128 UTF-8 bytes and match
+  `[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}`;
+- `expected_prior_tip`, `new_tip`, `record_digest`, and every named SHA-256
+  digest are exactly 64 lowercase hexadecimal digits; a namespace's initial
+  append uses its separately frozen 64-digit genesis tip rather than null or an
+  empty string;
+- Tessera `leaf_index` is the canonical unsigned decimal string `0` or
+  `[1-9][0-9]{0,19}` and must fit in 64 bits; and
+- fields ending in `_b64u` use the base64url alphabet without padding and must
+  round-trip to the same unpadded spelling.
+
+All identity-bearing strings are printable ASCII, so a decoder rejects
+non-ASCII rather than normalizing it. It also rejects invalid UTF-8, a BOM,
+duplicate or unknown object keys, wrong types, uppercase or wrong-width
+digests, noncanonical decimals or base64url, and values outside their bounds.
+Canonical JSON is UTF-8 with no BOM, insignificant whitespace, or trailing
+newline; object member names are sorted by ascending UTF-8 byte sequence, and
+strings use the shortest required JSON escapes. Array order is semantic and is
+specified by its field. The canonical serializer operates only after the strict
+duplicate-aware parser and closed schema accept the values.
+
+`operation_key` is the following closed object. These exact canonical bytes are
+the idempotency-key material; an index may hash them only if it also retains and
+compares the full bytes to reject a collision.
+
+```json
+{"expected_prior_tip":"<64-lowercase-hex>","namespace":"<namespace>","record_digest":"<64-lowercase-hex>"}
+```
+
+Every successful candidate proof authenticates the exact canonical bytes of
+the closed `residency.witness_append_signed_payload/1.0` object below. The
+`operation_key` member is the byte-identical object derived above, not a second
+independently populated tuple.
+
+```json
+{"candidate_receipt_schema":"<allowed-receipt-schema>","expected_prior_tip":"<64-lowercase-hex>","namespace":"<namespace>","new_tip":"<64-lowercase-hex>","operation_key":{"expected_prior_tip":"<64-lowercase-hex>","namespace":"<namespace>","record_digest":"<64-lowercase-hex>"},"record_digest":"<64-lowercase-hex>","schema":"residency.witness_append_signed_payload/1.0"}
+```
+
+The shortlisted authority paths map to these `receipt.schema` discriminators
+and exhaustive receipt fields:
+
+| `receipt.schema` | Authority path | Exhaustive fields after `schema` |
+| --- | --- | --- |
+| `residency.tessera_c2sp_witness_receipt/1.0` | Tessera application personality plus C2SP witness quorum | `signed_payload`, `log_origin`, `log_key_id`, `leaf_index`, `leaf_digest`, `inclusion_path`, `log_checkpoint_b64u`, `witness_cosignatures` |
+| `residency.azure_confidential_ledger_simple_udf_witness_receipt/1.0` | Confidential Ledger simple UDF, API `2024-12-09-preview` | `signed_payload`, `ledger_id`, `api_version`, `udf_name`, `udf_code_digest`, `transaction_id`, `custom_table_record_digest`, `ledger_receipt_b64u`, `service_certificate_digest` |
+| `residency.azure_confidential_ledger_advanced_udf_witness_receipt/1.0` | Confidential Ledger advanced custom endpoint, API `2024-08-22-preview` | `signed_payload`, `ledger_id`, `api_version`, `endpoint_id`, `application_bundle_digest`, `transaction_id`, `custom_table_record_digest`, `ledger_receipt_b64u`, `service_certificate_digest` |
+
+`signed_payload` is the exact object above. `inclusion_path` is an ordered array
+of lowercase fixed-width SHA-256 nodes. `witness_cosignatures` is an array of
+closed `{key_id, signature_b64u}` objects sorted by `key_id`, with no duplicate
+key. Each `api_version` is the exact version named by its row. Every other named
+digest follows the 64-digit grammar above. No Rekor receipt discriminator is
+allowed because Rekor remains only a secondary mirror, not a shortlisted
+conditional-append authority.
+
+For Tessera, the leaf data is exactly the canonical signed-payload bytes and
+`leaf_digest` is the lowercase hexadecimal RFC 6962 leaf hash,
+`SHA-256(0x00 || signed_payload_bytes)`, produced by
+[`NewEntry`](https://github.com/transparency-dev/tessera/blob/8e9e6b45722a1a8534a0ebb3b2218d874c3c3f47/entry.go#L57-L65).
+The inclusion path, log checkpoint, log signature, and required witness
+cosignatures must authenticate that leaf. For either Confidential Ledger route,
+the authoritative custom-table record is
+exactly those bytes, `custom_table_record_digest` is their SHA-256, and the
+service receipt must authenticate the transaction that wrote that record under
+the pinned service-certificate digest. The receipt discriminator must equal
+`signed_payload.candidate_receipt_schema`; every signed-payload value must equal
+the corresponding outer result and operation-key value. An unknown receipt
+schema, cross-route field, unclosed provider proof, mismatched discriminator,
+or proof over any other bytes is invalid.
+
+For `pending` and `quarantined`, `operation_key.namespace` must equal the outer
+`namespace`, and `current_tip` must equal the new tip already committed by that
+operation's application CAS. For `conflict`, `current_tip` is the current durable
+namespace tip that rejected the request. The result schema and outcome mapper
 must reject unknown discriminators, a wrong `schema` value, missing or undeclared
 fields, fields that claim a second variant, a mismatched outer namespace,
-operation key, or committed tip, and any attempt to coerce a witness result
-through the shared authority-transaction schema.
+operation key, committed tip, candidate receipt, or signed payload, and any
+attempt to coerce a witness result through the shared authority-transaction
+schema.
 
 The operation key and idempotency key are the same tuple,
 `(namespace, expected_prior_tip, record_digest)`. Before the application CAS,
@@ -130,6 +201,18 @@ operation, or synthesize a receipt. The quarantined namespace and failed
 recovery run do not qualify. Future authority requires a separately authorized
 and requalified namespace that inherits no tip, receipt, checkpoint, or
 authority from the quarantined one.
+
+A provider commit and local persistence of its leaf or transaction identity are
+not one atomic operation. Before any initial or repeated provider submission,
+the adapter must use a provider-authoritative append-or-get operation that
+deduplicates by `(namespace, operation_key)`, or an authoritative lookup that
+recovers the already committed identity before a deduplicating append. A
+separate absence check followed by an unconditional append is insufficient. If
+lookup is unavailable or cannot distinguish absent from committed, the operation
+remains pending and the adapter must not submit another leaf. If the exact
+identity becomes permanently unrecoverable, the existing one-way quarantine
+rule applies and the candidate fails qualification; an operator may not guess
+an identity, append a replacement, or synthesize a receipt.
 
 The expected tip comparison, record append, and new-tip persistence must be one
 atomic operation. A successful retry after a lost response must return the same
@@ -457,9 +540,11 @@ Prototype shape:
    once.
 3. The resulting leaf enters Tessera; checkpoint publication waits for an
    independently administered C2SP witness quorum.
-4. The response is a detached signed receipt binding `namespace`, `new_tip`,
-   `expected_prior_tip`, `record_digest`, assigned leaf, inclusion proof, log
-   checkpoint, and witness cosignatures.
+4. The response is a
+   `residency.tessera_c2sp_witness_receipt/1.0` detached receipt. Its exact
+   canonical signed-payload bytes are the leaf, and the receipt binds the
+   assigned leaf identity, inclusion proof, log checkpoint, and witness
+   cosignatures to that payload.
 5. Public static tiles/checkpoints and witness monitoring endpoints permit
    offline and independent verification.
 
@@ -552,6 +637,14 @@ access and terms, limited regions and pricing, authenticated reads, and
 control-plane hard deletion remain availability and retention gaps. Azure
 therefore remains an unqualified managed comparison candidate; the
 documentation does not support selecting or provisioning it.
+
+The simple-UDF route maps only to
+`residency.azure_confidential_ledger_simple_udf_witness_receipt/1.0`; the
+advanced custom endpoint maps only to
+`residency.azure_confidential_ledger_advanced_udf_witness_receipt/1.0`. Their
+separate discriminators bind the preview API, code-governance path, and closed
+receipt fields instead of treating two distinct enforcement surfaces as one
+interchangeable proof.
 
 ### Sigstore Rekor
 
@@ -688,9 +781,10 @@ Any witness prototype must pass these tests at its public API:
    key returns that receipt and an ordinary successor enters the normal CAS path.
 6. Reject a stale, unknown, malformed, unauthorized, cross-namespace, or
    digest-mismatched predecessor without changing state.
-7. Crash at every boundary between validation, application CAS, log sequencing,
-   checkpoint publication, witness cosigning, receipt persistence, and response.
-   The durable state and restart result must match the recovery oracle below.
+7. Crash at every applicable boundary between validation, application CAS,
+   provider commit and identity recovery, proof publication or retrieval,
+   Tessera witness cosigning, receipt persistence, and response. The durable
+   state and restart result must match the recovery oracle below.
 8. Verify the detached receipt, inclusion proof, log checkpoint, witness quorum,
    key identity, and application predecessor offline from pinned trust roots.
 9. Retrieve current and historical public checkpoints without a write secret;
@@ -702,12 +796,13 @@ Any witness prototype must pass these tests at its public API:
 11. Prove that log, witness, issuer, backup, and GitHub administrators cannot
    impersonate one another through shared SSO, secrets, cloud account, or
    recovery contacts.
-12. Hold log sequencing, checkpoint publication, witness cosigning, and receipt
-   persistence unavailable in turn across repeated service restarts. Each case
-   must preserve the exact pending key, tip, and stage identity. When the
-   dependency returns, only the original keyed operation may resume, and it must
-   produce no duplicate leaf or receipt; any replay must use the exact durable
-   stage identity.
+12. Hold each candidate's applicable proof stages unavailable in turn across
+   repeated service restarts: Tessera leaf sequencing, checkpoint publication,
+   and witness cosigning; Confidential Ledger transaction-receipt retrieval; and
+   local receipt persistence for either path. Each case must preserve the exact
+   pending key, tip, and stage identity. When the dependency returns, only the
+   original keyed operation may resume, and it must produce no duplicate leaf,
+   transaction, or receipt; any replay must use the exact durable stage identity.
 13. At every post-CAS pre-receipt boundary, permanently remove a required service
    or durable recovery identity. Prove the namespace enters one-way quarantine,
    retains its committed tip and surviving operation evidence across restart and
@@ -728,16 +823,50 @@ Any witness prototype must pass these tests at its public API:
    quarantined responses survive restart byte-for-byte for the same state, and
    neither witness results nor existing configuration or pin-preference results
    validate against the other envelope.
+15. Use shared golden vectors to derive the operation-key and signed-payload
+   bytes independently in the application, every candidate adapter, and an
+   offline verifier. Require byte equality. Reject each vector after separately
+   adding a BOM, whitespace or a trailing newline; reordering, duplicating,
+   omitting, or adding a key; using invalid UTF-8 or non-ASCII; changing digest
+   case or width; using a noncanonical decimal or base64url spelling; crossing an
+   identifier bound; or changing one duplicated tuple value.
+16. Exercise all three allowed `receipt.schema` discriminators and reject an
+   unknown discriminator, a receipt/signed-payload discriminator mismatch,
+   every missing, unknown, or cross-route field, an unsorted or duplicate
+   witness key, the wrong preview API version, code or certificate identity, and
+   a provider proof over bytes other than the exact canonical signed payload.
+   Prove the Tessera leaf data and each Confidential Ledger custom-table record
+   equal those bytes, the Tessera leaf digest equals
+   `SHA-256(0x00 || signed_payload_bytes)`, and the pinned candidate verifier
+   accepts the complete proof.
+17. For every shortlisted authority path, crash after the provider commits the
+   leaf or transaction but before its identity is stored locally. On every
+   restart and retry, require provider-authoritative lookup or append-or-get by
+   `(namespace, operation_key)` to return that one existing identity before
+   progress. Make lookup return absent, unavailable, ambiguous, and permanently
+   unrecoverable in separate cases. Only a provider-side deduplicating append may
+   follow a proven absence; unavailable or ambiguous lookup stays pending with no
+   submission; permanent loss enters one-way quarantine and fails qualification.
+   Every case must end with at most one leaf or transaction and one stored
+   receipt, and later appends must remain blocked until that receipt exists.
 
 Crash recovery oracle:
+
+Rows apply only where the candidate has that stage. Tessera separates the
+application CAS, leaf commit, checkpoint publication, and witness cosigning.
+Each Confidential Ledger route performs the application CAS and custom-table
+record commit in one ledger transaction, then retrieves and verifies the
+service receipt. A candidate must not invent or skip a stage to force the other
+candidate's recovery shape.
 
 | Crash boundary | Durable authority state | Required restart and retry result | Later append result in the namespace |
 | --- | --- | --- | --- |
 | After validation, before application CAS | Prior tip only; no keyed operation or receipt | Revalidate from the prior tip; either one later append commits or a competing tip conflicts. | Ordinary concurrency from the prior tip; exactly one application CAS can win. |
-| After application CAS, before log sequencing | New tip plus the full idempotency key and a pending operation | Resume that keyed operation and submit exactly one leaf; never roll back the committed tip. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
-| After leaf sequencing, before checkpoint publication | New tip, keyed operation, and exact leaf identity or index | Publish a checkpoint over the existing leaf; never submit the leaf again. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
-| After checkpoint publication, before witness cosigning | New tip, keyed operation, leaf identity, and checkpoint digest | Request cosigning for that same checkpoint and continue the same operation. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
-| After witness cosigning, before receipt persistence | New tip, keyed operation, leaf identity, checkpoint digest, and a replay-safe cosign request identity | Replay only that cosign request if needed, then CAS-store exactly one receipt for the key. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
+| After application CAS, before provider submission is known to commit | New tip plus the full idempotency key and a pending operation | Use provider-authoritative append-or-get or lookup by `(namespace, operation_key)`. Recover an existing identity, or append only through provider-side dedup after proven absence; never submit unconditionally. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
+| After provider leaf or transaction commit, before local identity persistence | New tip and full key are durable locally; the provider has one committed identity that is not yet stored locally | Recover and persist that exact identity through provider-authoritative lookup before continuing. Unavailable or ambiguous lookup stays pending with no submission; permanent loss quarantines the namespace and fails qualification. | Return deterministic `pending(current_tip, operation_key)` while recoverable, or the accepted deterministic `quarantined(current_tip, operation_key)` after permanent loss; admit no append. |
+| After exact provider identity is durable locally, before provider proof recovery or publication | New tip, keyed operation, and exact leaf or transaction identity | For Tessera, publish or recover the checkpoint over the existing leaf. For Confidential Ledger, retrieve and verify the service receipt for the existing transaction. Never submit another leaf or transaction. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
+| Tessera only: after checkpoint publication, before witness cosigning | New tip, keyed operation, leaf identity, and checkpoint digest | Request cosigning for that same checkpoint and continue the same operation. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
+| Tessera only: after witness cosigning, before receipt persistence | New tip, keyed operation, leaf identity, checkpoint digest, and a replay-safe cosign request identity | Replay only that cosign request if needed, then CAS-store exactly one receipt for the key. | Return deterministic `pending(current_tip, operation_key)` without changing state. |
 | After receipt persistence, before or during response | Complete stored original receipt keyed by `(namespace, expected_prior_tip, record_digest)` | Return that receipt byte-for-byte on every retry; append no leaf and create no second receipt. | Admit an ordinary successor against `current_tip`; the original key still returns the stored receipt. |
 | Any post-CAS pre-receipt boundary after permanent recovery loss | Committed tip, full operation key, all surviving stage evidence, failure record, and one-way namespace quarantine | Preserve the evidence and quarantine across every restart; no rollback, skip, operation substitution, or synthetic receipt is valid. | Return deterministic `quarantined(current_tip, operation_key)`; admit no append. |
 
@@ -754,14 +883,17 @@ Crash recovery oracle:
   SHA-256 handling at the authority boundary.
 - R2 lacks proof of irreversible compliance retention against a privileged
   administrator.
-- Tessera plus C2SP requires a new application-tip sequencer, receipt format,
+- Tessera plus C2SP requires a new application-tip sequencer, provider-side
+  operation-key deduplication or authoritative leaf lookup, receipt format,
   deployment, public monitor, independent witness operators, and service-level
   contract.
 - `residency.witness_append_result/1.0` does not yet exist. Before TASK-069
-  implements either candidate adapter or append path, it must add the dedicated
-  versioned schema, generated bindings and validators, exact outcome mapping,
-  and the qualification cases above. The existing configuration and
-  pin-preference authority-transaction schema remains unchanged.
+  implements any candidate adapter or append path, it must add the dedicated
+  result and signed-payload schemas, all three closed candidate-receipt schemas,
+  generated bindings and strict canonical validators, exact outcome and
+  candidate mapping, provider-authoritative lookup/dedup recovery, and the
+  qualification cases above. The existing configuration and pin-preference
+  authority-transaction schema remains unchanged.
 - Azure Confidential Ledger's preview UDF paths still lack qualified
   enforcement, concurrency, idempotency, receipt-binding, code-governance, and
   recovery behavior. Data-plane retrieval is authenticated, a control-plane
