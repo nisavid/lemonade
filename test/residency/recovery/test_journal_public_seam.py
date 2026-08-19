@@ -238,14 +238,31 @@ def require_posix_command_contract() -> None:
         "MBEDCRYPTO_LIBRARY": "/fixture/libmbedcrypto.a",
     }
     configured = compiler_command(output, configured=["c++"], environment=environment)
-    for include in ("/fixture/nlohmann", "/fixture/mbedtls"):
-        include_index = configured.index(include)
-        if configured[include_index - 1] != "-I":
-            raise AssertionError(f"POSIX journal seam miswired include {include}")
+    require_posix_include_contract(
+        configured, ("/fixture/nlohmann", "/fixture/mbedtls")
+    )
     if "/fixture/libmbedcrypto.a" not in configured:
         raise AssertionError("POSIX journal seam ignored MBEDCRYPTO_LIBRARY")
     if "-lmbedcrypto" in configured:
         raise AssertionError("POSIX journal seam kept fallback with an override")
+
+    try:
+        require_posix_include_contract(["c++"], ("/fixture/missing",))
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("POSIX journal seam accepted a missing configured include")
+
+
+def require_posix_include_contract(
+    configured: list[str], includes: tuple[str, ...]
+) -> None:
+    for include in includes:
+        if include not in configured:
+            raise AssertionError(f"POSIX journal seam omitted include {include}")
+        include_index = configured.index(include)
+        if configured[include_index - 1] != "-I":
+            raise AssertionError(f"POSIX journal seam miswired include {include}")
 
 
 def require_msvc_command_contract() -> None:

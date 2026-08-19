@@ -1267,29 +1267,47 @@ JournalHistoryResult advance_history(JournalHistory &&history, const ParsedJourn
             candidate.resident_state(),
         };
 
+        auto next_live_resident_count = history.state_->live_resident_count;
+        auto next_stale_epoch_live_resident_count =
+            history.state_->stale_epoch_live_resident_count;
+        if (epoch_changed) {
+            if (next_live_resident_count == 0) {
+                next_live_resident_count = 1;
+                next_stale_epoch_live_resident_count = 0;
+            } else {
+                next_stale_epoch_live_resident_count = next_live_resident_count - 1;
+            }
+        } else {
+            if (new_resident) {
+                if (next_live_resident_count == std::numeric_limits<std::uint64_t>::max()) {
+                    reject(JournalStatus::InvalidHistory,
+                           "journal history counters are inconsistent");
+                }
+                ++next_live_resident_count;
+            } else if (latest_was_stale) {
+                if (next_stale_epoch_live_resident_count == 0) {
+                    reject(JournalStatus::InvalidHistory,
+                           "journal history counters are inconsistent");
+                }
+                --next_stale_epoch_live_resident_count;
+            }
+            if (candidate.resident_state() == ResidentState::Released) {
+                if (next_live_resident_count == 0) {
+                    reject(JournalStatus::InvalidHistory,
+                           "journal history counters are inconsistent");
+                }
+                --next_live_resident_count;
+            }
+        }
+
         if (new_resident) {
             history.state_->resident_heads.emplace(resident_id, std::move(next_head));
         } else {
             resident->second = std::move(next_head);
         }
-        if (epoch_changed) {
-            if (history.state_->live_resident_count == 0) {
-                history.state_->live_resident_count = 1;
-                history.state_->stale_epoch_live_resident_count = 0;
-            } else {
-                history.state_->stale_epoch_live_resident_count =
-                    history.state_->live_resident_count - 1;
-            }
-        } else {
-            if (new_resident) {
-                ++history.state_->live_resident_count;
-            } else if (latest_was_stale) {
-                --history.state_->stale_epoch_live_resident_count;
-            }
-            if (candidate.resident_state() == ResidentState::Released) {
-                --history.state_->live_resident_count;
-            }
-        }
+        history.state_->live_resident_count = next_live_resident_count;
+        history.state_->stale_epoch_live_resident_count =
+            next_stale_epoch_live_resident_count;
         history.state_->daemon_epoch = std::move(next_daemon_epoch);
         history.state_->tip_sequence = candidate.sequence();
         history.state_->tip_predecessor_checksum_sha256 = std::move(next_predecessor);

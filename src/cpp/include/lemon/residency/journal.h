@@ -14,6 +14,8 @@ namespace lemon::residency {
 
 inline constexpr SchemaVersion supported_journal_schema{1, 0};
 inline constexpr std::size_t max_journal_input_bytes = 64 * 1024;
+// Journal identifiers are opaque protocol values, not filesystem path components. Durable
+// adapters must encode them or enforce an independent path-component validation contract.
 inline constexpr std::size_t max_journal_identifier_bytes = 128;
 inline constexpr std::size_t max_journal_array_entries = 256;
 inline constexpr std::size_t max_journal_diagnostic_bytes = 256;
