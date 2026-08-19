@@ -97,12 +97,15 @@ Wire identity is byte-exact:
 
 - `namespace` and provider operation identifiers (`log_origin`, `log_key_id`,
   `ledger_id`, `udf_name`, `endpoint_id`, `transaction_id`, and witness
-  `key_id`) are 1 through 128 UTF-8 bytes and match
+  `key_id`, `cosigner_name`, and `witness_policy_id`) are 1 through 128 UTF-8
+  bytes and match
   `[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}`;
 - `expected_prior_tip`, `new_tip`, `record_digest`, and every named SHA-256
   digest are exactly 64 lowercase hexadecimal digits; a namespace's initial
   append uses its separately frozen 64-digit genesis tip rather than null or an
   empty string;
+- a C2SP `c2sp_key_id` is exactly 8 lowercase hexadecimal digits, and a
+  `quorum_threshold` is a canonical decimal string from `1` through `32`;
 - Tessera `leaf_index` is the canonical unsigned decimal string `0` or
   `[1-9][0-9]{0,19}` and must fit in 64 bits; and
 - fields ending in `_b64u` use the base64url alphabet without padding and must
@@ -140,7 +143,7 @@ and exhaustive receipt fields:
 
 | `receipt.schema` | Authority path | Exhaustive fields after `schema` |
 | --- | --- | --- |
-| `residency.tessera_c2sp_witness_receipt/1.0` | Tessera application personality plus C2SP witness quorum | `signed_payload`, `log_origin`, `log_key_id`, `leaf_index`, `leaf_digest`, `inclusion_path`, `log_checkpoint_b64u`, `witness_cosignatures` |
+| `residency.tessera_c2sp_witness_receipt/1.0` | Tessera application personality plus C2SP witness quorum | `signed_payload`, `log_origin`, `log_key_id`, `leaf_index`, `leaf_digest`, `inclusion_path`, `log_checkpoint_b64u`, `witness_policy_id`, `witness_policy_digest`, `witness_cosignatures` |
 | `residency.azure_confidential_ledger_simple_udf_witness_receipt/1.0` | Confidential Ledger simple UDF, API `2024-12-09-preview` | `signed_payload`, `ledger_id`, `api_version`, `udf_name`, `udf_code_digest`, `transaction_id`, `custom_table_record_digest`, `ledger_receipt_b64u`, `service_certificate_digest` |
 | `residency.azure_confidential_ledger_advanced_udf_witness_receipt/1.0` | Confidential Ledger advanced custom endpoint, API `2024-08-22-preview` | `signed_payload`, `ledger_id`, `api_version`, `endpoint_id`, `application_bundle_digest`, `transaction_id`, `custom_table_record_digest`, `ledger_receipt_b64u`, `service_certificate_digest` |
 
@@ -151,6 +154,46 @@ key. Each `api_version` is the exact version named by its row. Every other named
 digest follows the 64-digit grammar above. No Rekor receipt discriminator is
 allowed because Rekor remains only a secondary mirror, not a shortlisted
 conditional-append authority.
+
+Every Tessera receipt is evaluated under one closed
+`residency.c2sp_witness_policy/1.0` object whose exact canonical bytes and
+SHA-256 digest are frozen in `hatchery_deployment_binding/v1`. The policy has
+the following exhaustive shape; `authorized_cosigners` contains 1 through 32
+entries, is sorted by logical `key_id`, and contains no duplicate logical key,
+C2SP key ID, cosigner name, or public-key digest.
+
+```json
+{"authorized_cosigners":[{"c2sp_key_id":"<8-lowercase-hex>","cosigner_name":"<C2SP-key-name>","key_id":"<logical-key-id>","public_key_digest":"<64-lowercase-hex>"}],"checkpoint_coverage":"c2sp.tlog-cosignature/v1.0.1:whole-checkpoint-note-body","cosignature_algorithm":"ed25519","cosignature_domain":"cosignature/v1","log_key_id":"<log-key-id>","log_origin":"<log-origin>","quorum_threshold":"<1..32>","schema":"residency.c2sp_witness_policy/1.0","witness_policy_id":"<witness-policy-id>"}
+```
+
+`witness_policy_digest` is the SHA-256 of those exact canonical policy bytes.
+The receipt's policy ID and digest, log origin, and log key ID must equal the
+values frozen in the deployment binding. The verifier must load that bound
+policy rather than selecting one from receipt fields; a receipt-supplied
+alternative is not a trust root. `quorum_threshold` must not exceed the number
+of authorized cosigners. Each `public_key_digest` is the SHA-256 of the exact
+32-byte Ed25519 public key distributed for that entry. Its `c2sp_key_id` must
+equal the first four bytes of
+`SHA-256(cosigner_name || "\n" || 0x04 || public_key)`, encoded as lowercase
+hexadecimal.
+
+Each `signature_b64u` decodes to the C2SP note-signature payload, the 4-byte key
+ID followed by the 72-byte timestamped signature. Under the pinned
+[C2SP transparency-log cosignature v1.0.1](https://c2sp.org/tlog-cosignature@v1.0.1)
+profile, the timestamped signature is Ed25519 over the newline-terminated
+`cosignature/v1` domain line, the canonical `time <timestamp>` line, and the
+whole checkpoint note body parsed from the decoded `log_checkpoint_b64u`,
+including its final newline and excluding every signature line. The policy's
+checkpoint-coverage value names exactly that rule. The cosignatures authenticate
+the checkpoint, not the JSON receipt directly; the verified log signature and
+inclusion proof must bind that same checkpoint to `leaf_digest`, which in turn
+binds the exact canonical `signed_payload` bytes. A receipt is valid only when
+every listed cosignature maps to one unique authorized policy entry, its native
+name, key ID, public key, algorithm, domain, and covered checkpoint all match,
+and the number of valid unique authorized cosigners meets the positive
+threshold. Empty, duplicate, unknown, malformed, invalid, insufficient,
+wrong-checkpoint, wrong-policy, or policy-mismatched sets invalidate the receipt
+rather than contributing zero or being ignored.
 
 For Tessera, the leaf data is exactly the canonical signed-payload bytes and
 `leaf_digest` is the lowercase hexadecimal RFC 6962 leaf hash,
@@ -512,7 +555,7 @@ Facts:
   persist the newer checkpoint before responding, and return a timestamped
   cosignature. This is a real conditional update for the witness's per-log
   checkpoint state. See the stable
-  [C2SP transparency-log witness protocol](https://c2sp.org/tlog-witness).
+  [C2SP transparency-log witness protocol](https://c2sp.org/tlog-witness@v1.0.0).
 - The reference witness implementation tracks one checkpoint per log, verifies
   append-only evolution, implements the C2SP HTTP API, and can run as
   OmniWitness. It is software that an operator deploys; the reviewed material
@@ -539,12 +582,13 @@ Prototype shape:
    state, stores the immutable record, and advances the namespace tip exactly
    once.
 3. The resulting leaf enters Tessera; checkpoint publication waits for an
-   independently administered C2SP witness quorum.
+   independently administered C2SP witness quorum under the exact policy ID and
+   digest frozen in the deployment binding.
 4. The response is a
    `residency.tessera_c2sp_witness_receipt/1.0` detached receipt. Its exact
    canonical signed-payload bytes are the leaf, and the receipt binds the
-   assigned leaf identity, inclusion proof, log checkpoint, and witness
-   cosignatures to that payload.
+   assigned leaf identity, inclusion proof, log checkpoint, immutable witness
+   policy, and qualifying cosignatures to that payload.
 5. Public static tiles/checkpoints and witness monitoring endpoints permit
    offline and independent verification.
 
@@ -688,6 +732,10 @@ A provider name is not evidence of administrative independence. Before freezing
   log origin, and witness identities;
 - immutable policy and retention-class identities, including effective time and
   any account-deletion exception;
+- for a Tessera route, the exact witness-policy ID and canonical digest, log
+  identity, authorized cosigner key identities and public-key digests,
+  signature profile and domain, checkpoint-coverage rule, and positive quorum
+  threshold;
 - separate principals for upload/append, public read, retention administration,
   key use, monitoring, billing recovery, and break-glass recovery;
 - the verification-key digest and where the private witness key is generated,
@@ -849,6 +897,17 @@ Any witness prototype must pass these tests at its public API:
    submission; permanent loss enters one-way quarantine and fails qualification.
    Every case must end with at most one leaf or transaction and one stored
    receipt, and later appends must remain blocked until that receipt exists.
+18. For the Tessera route, freeze one
+   `residency.c2sp_witness_policy/1.0` object and verify a receipt with the exact
+   configured policy ID, canonical digest, log identity, and a threshold set of
+   unique authorized cosigners over its exact checkpoint. Independently make the
+   set empty, duplicate or unknown a key, delete any required policy or
+   cosignature field, or supply fewer valid keys than the threshold; make one
+   signature invalid or cover another checkpoint; change the policy ID, digest,
+   log identity, threshold, algorithm, domain, coverage rule, logical key ID,
+   C2SP key ID, cosigner name, public-key digest, or distributed public key.
+   Reject every mutation and prove that no unconfigured or duplicate cosigner
+   contributes to the threshold.
 
 Crash recovery oracle:
 
@@ -885,15 +944,17 @@ candidate's recovery shape.
   administrator.
 - Tessera plus C2SP requires a new application-tip sequencer, provider-side
   operation-key deduplication or authoritative leaf lookup, receipt format,
-  deployment, public monitor, independent witness operators, and service-level
-  contract.
+  deployment, public monitor, independent witness operators, immutable witness
+  policy and key distribution, quorum verifier, and service-level contract.
 - `residency.witness_append_result/1.0` does not yet exist. Before TASK-069
   implements any candidate adapter or append path, it must add the dedicated
   result and signed-payload schemas, all three closed candidate-receipt schemas,
-  generated bindings and strict canonical validators, exact outcome and
-  candidate mapping, provider-authoritative lookup/dedup recovery, and the
-  qualification cases above. The existing configuration and pin-preference
-  authority-transaction schema remains unchanged.
+  a dedicated versioned C2SP witness-policy schema, generated bindings and
+  strict canonical validators, authorized key distribution and verification,
+  exact outcome, candidate, policy, and quorum mapping,
+  provider-authoritative lookup/dedup recovery, and the qualification cases
+  above. The existing configuration and pin-preference authority-transaction
+  schema remains unchanged.
 - Azure Confidential Ledger's preview UDF paths still lack qualified
   enforcement, concurrency, idempotency, receipt-binding, code-governance, and
   recovery behavior. Data-plane retrieval is authenticated, a control-plane
