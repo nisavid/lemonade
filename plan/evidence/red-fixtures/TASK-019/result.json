@@ -1,0 +1,21 @@
+{
+  "command": [
+    "python3",
+    "test/residency/recovery/test_journal_public_seam.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "c++ (GCC) 16.2.1",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-019 durable residency journal contract is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "6ab2880b6c2a6810d317bb59c808f73ecc8ec774",
+  "task_id": "TASK-019"
+}
