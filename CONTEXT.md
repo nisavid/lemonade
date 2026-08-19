@@ -288,8 +288,28 @@ The typed server policy requested for one operation, recorded with source `fixed
 _Avoid_: Copying raw configuration keys into explanations or using configured intent as proof that automation is currently available.
 
 **Residency authority root**:
-The validated, atomically published generation that makes one residency configuration, pin-preference, or migration state effective. Prepared journal entries remain unpublished until their complete source vector commits.
-_Avoid_: Reading staged files as effective state, silently substituting defaults when no valid root exists, or letting a degraded prior root authorize new dependent work.
+The atomically published authority-root candidate that makes one validated residency generation effective through an external compare-and-swap boundary.
+_Avoid_: Treating a candidate, parsed document, or staged file as published authority, or letting a degraded prior root authorize new dependent work.
+
+**Residency authority-root candidate**:
+One canonical, checksummed direct generation over an opaque validated journal-history head. It remains non-authorizing until atomic publication succeeds.
+_Avoid_: Constructing a candidate from parsed record bytes, skipping a generation, or using candidate creation as publication proof.
+
+**Residency journal record candidate**:
+One canonical, checksummed entry proposed for the global residency stream. Parsing verifies its closed schema and content but does not grant replay or root authority.
+_Avoid_: Treating checksum validity as proof of global predecessor, resident lifecycle, epoch, or recovery-origin continuity.
+
+**Residency journal history**:
+The opaque, validated global stream tip plus latest state for every resident. Successor and authority-root-candidate construction derive their stream and resident predecessors from this history.
+_Avoid_: Accepting a caller-selected latest resident, advancing from parsed bytes without validation, or restarting a released resident after interleaved records.
+
+**Residency journal epoch barrier**:
+Until every nonreleased prior-epoch resident has one verified `prior_epoch_recovery` quarantine record, only another outstanding survivor may advance.
+_Avoid_: Advancing a migrated resident, an ordinary transition, a new resident, or another epoch before the barrier completes.
+
+**Residency recovery origin**:
+Content-addressed evidence that authorizes one quarantined lifecycle record only after an independent verifier binds it to the journal, resident, and daemon epoch.
+_Avoid_: Letting a raw digest authorize quarantine or substituting artifact-quarantine store vocabulary for lifecycle-origin kinds.
 
 **Residency explanation revision**:
 An immutable, bounded projection committed with an authoritative lifecycle transition. It supplies the current operation phase, outcome, reasons, capability, effective mode, evidence, actions, and retention state to APIs and logs.

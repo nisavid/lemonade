@@ -2237,6 +2237,24 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_CONTRACT_TYPES_TEST_SRC}")
     )
 endif()
 
+set(_RESIDENCY_JOURNAL_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_journal.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_JOURNAL_TEST_SRC}")
+    add_executable(test_residency_journal
+        ${_RESIDENCY_JOURNAL_TEST_SRC}
+        src/cpp/server/residency/journal.cpp
+    )
+    target_include_directories(test_residency_journal PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+    )
+    target_link_libraries(test_residency_journal PRIVATE
+        lemonade-digest-crypto
+        nlohmann_json::nlohmann_json
+    )
+    add_cpp_ci_test(ResidencyJournal CI ON COMMAND test_residency_journal)
+endif()
+
 set(_RESIDENCY_CONTRACT_CATALOG_TEST_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_contract_catalog.cpp"
 )
