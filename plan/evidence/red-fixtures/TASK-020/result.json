@@ -1,0 +1,45 @@
+{
+  "command": [
+    "python3",
+    "-B",
+    "test/residency/recovery/test_durable_journal_public_seam.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "c++ (GCC) 16.2.1 20260810",
+      "clang++ 22.1.8",
+      "python3"
+    ]
+  },
+  "fallback_state": "production_cutover_inactive",
+  "fixture_sha256": {
+    "test/residency/recovery/durable_journal_private_authority_gate.cpp": "9869521ed951ae3df9e9947d118665f65e3eda04edb854fd7711aa2160d31f63",
+    "test/residency/recovery/durable_journal_public_seam.cpp": "5ecadcea7ac2c0ed17a4ae95474f0b46f6848acf780c1b418ddaa02ebf1af30e",
+    "test/residency/recovery/journal_persistence_test_support.cpp": "27598da43517dbf829345a9d8cc2d1d61812a8669c21d25f3f4fd9217e827561",
+    "test/residency/recovery/journal_persistence_test_support.h": "24f2a89d3b670708157d69c1fca5565fd72dc3ebaa69c11cd59f072f58334e01",
+    "test/residency/recovery/test_durable_journal_public_seam.py": "8be11f9d6fa5fb7a22a2b50197a884855bad6d23739d3f44f2b23486730388a6"
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-020 durable residency persistence contract is unavailable",
+    "stderr": {
+      "byte_count": 63,
+      "hex": "5441534b2d3032302064757261626c65207265736964656e63792070657273697374656e636520636f6e747261637420697320756e617661696c61626c650a",
+      "sha256": "d2ca24f571d2a1612a465a936dcc18cba69ef749892879244128bdf929aaddf4"
+    },
+    "stdout": {
+      "byte_count": 0,
+      "hex": "",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "patch": {
+    "path": "plan/evidence/red-fixtures/TASK-020/test.patch",
+    "sha256": "0e1dc4d01f848c19c41aade640b14f9ea656d00f358b8d82a58f8099fda12213"
+  },
+  "schema": "portable_residency_red_fixture_result/v2",
+  "task_base_commit": "0c93411bc9b0463eee0f56d38cd97fffb0bae633",
+  "task_id": "TASK-020"
+}
