@@ -1,1 +1,3 @@
 *.py text eol=lf
+src/cpp/include/lemon/residency/journal.h text eol=lf
+src/cpp/server/residency/journal.cpp text eol=lf

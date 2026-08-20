@@ -4,11 +4,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
+from unittest import mock
+
+from tools.residency_handoff.contract import HandoffError
+from tools.residency_handoff.validation import (
+    GitRepository,
+    RedFixtureObservation,
+    _apply_patch,
+    _patch_paths,
+    _patched_fixture_digests,
+    _red_fixture_metadata,
+    _red_fixture_metadata_v2,
+    _run_at_commit,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = REPO_ROOT / "tools" / "validate_residency_implementation_handoff.py"
@@ -44,6 +59,44 @@ LATER_UNIT_IDS = (
         for operation in ("ADM", "LFR", "STA", "REC", "UNL", "PIN")
     ),
 )
+TASK_020_COMMAND = [
+    "python3",
+    "-B",
+    "test/residency/recovery/test_durable_journal_public_seam.py",
+]
+TASK_020_FAILURE = "TASK-020 durable residency persistence contract is unavailable"
+TASK_020_BASE = "0c93411bc9b0463eee0f56d38cd97fffb0bae633"
+TASK_020_EVIDENCE = "27d2291335e3b334ba7436e2a3cd686bf34c61f7"
+TASK_020_BUNDLE = "4e9ff6284e599bfb3869d929416b2f915524eab14506620abd1d7fe95f93a650"
+TASK_020_PATCH_PATH = "plan/evidence/red-fixtures/TASK-020/test.patch"
+TASK_020_PATCH_SHA256 = (
+    "0e1dc4d01f848c19c41aade640b14f9ea656d00f358b8d82a58f8099fda12213"
+)
+TASK_020_RESULT_PATH = "plan/evidence/red-fixtures/TASK-020/result.json"
+TASK_020_FIXTURE_PATHS = (
+    "test/residency/recovery/durable_journal_private_authority_gate.cpp",
+    "test/residency/recovery/durable_journal_public_seam.cpp",
+    "test/residency/recovery/journal_persistence_test_support.cpp",
+    "test/residency/recovery/journal_persistence_test_support.h",
+    "test/residency/recovery/test_durable_journal_public_seam.py",
+)
+TASK_020_FIXTURE_SHA256 = {
+    TASK_020_FIXTURE_PATHS[0]: (
+        "9869521ed951ae3df9e9947d118665f65e3eda04edb854fd7711aa2160d31f63"
+    ),
+    TASK_020_FIXTURE_PATHS[1]: (
+        "5ecadcea7ac2c0ed17a4ae95474f0b46f6848acf780c1b418ddaa02ebf1af30e"
+    ),
+    TASK_020_FIXTURE_PATHS[2]: (
+        "27598da43517dbf829345a9d8cc2d1d61812a8669c21d25f3f4fd9217e827561"
+    ),
+    TASK_020_FIXTURE_PATHS[3]: (
+        "24f2a89d3b670708157d69c1fca5565fd72dc3ebaa69c11cd59f072f58334e01"
+    ),
+    TASK_020_FIXTURE_PATHS[4]: (
+        "8be11f9d6fa5fb7a22a2b50197a884855bad6d23739d3f44f2b23486730388a6"
+    ),
+}
 
 
 def _sha256(value: bytes) -> str:
@@ -714,6 +767,615 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("must change exactly the manifest path", result.stderr)
+
+
+class ResidencyImplementationHandoffV2Test(unittest.TestCase):
+    @staticmethod
+    def _inputs() -> tuple[GitRepository, dict[str, object], bytes]:
+        repo = GitRepository(REPO_ROOT)
+        metadata = json.loads(
+            repo.blob(TASK_020_EVIDENCE, TASK_020_RESULT_PATH).decode()
+        )
+        patch = repo.blob(TASK_020_EVIDENCE, TASK_020_PATCH_PATH)
+        return repo, metadata, patch
+
+    def _validate_metadata(
+        self,
+        metadata: dict[str, object],
+        *,
+        evidence_commit: str = TASK_020_EVIDENCE,
+        bundle_sha256: str = TASK_020_BUNDLE,
+        task_base: str = TASK_020_BASE,
+        command: list[str] | None = None,
+        patch_path: str = TASK_020_PATCH_PATH,
+        patch: bytes | None = None,
+    ) -> RedFixtureObservation:
+        repo, _, accepted_patch = self._inputs()
+        return _red_fixture_metadata_v2(
+            repo,
+            metadata,
+            evidence_commit,
+            bundle_sha256,
+            "TASK-020",
+            task_base,
+            TASK_020_COMMAND if command is None else command,
+            TASK_020_FAILURE,
+            patch_path,
+            accepted_patch if patch is None else patch,
+            list(TASK_020_FIXTURE_PATHS),
+            "task_evidence[TASK-020]",
+        )
+
+    def _assert_invalid(
+        self,
+        metadata_mutator: Callable[[dict[str, object]], None],
+        expected: str,
+    ) -> None:
+        _, metadata, _ = self._inputs()
+        metadata_mutator(metadata)
+        with self.assertRaises(HandoffError) as raised:
+            self._validate_metadata(metadata)
+        self.assertIn(expected, str(raised.exception))
+
+    def test_task020_v2_binds_exact_fixture_and_binary_red_result(self) -> None:
+        repo, _, patch = self._inputs()
+
+        self.assertEqual(_sha256(patch), TASK_020_PATCH_SHA256)
+        self.assertEqual(
+            _patched_fixture_digests(
+                repo,
+                TASK_020_BASE,
+                patch,
+                list(TASK_020_FIXTURE_PATHS),
+                "task_evidence[TASK-020]",
+            ),
+            TASK_020_FIXTURE_SHA256,
+        )
+
+        observed = _red_fixture_metadata(
+            repo,
+            TASK_020_EVIDENCE,
+            TASK_020_BUNDLE,
+            TASK_020_RESULT_PATH,
+            "TASK-020",
+            TASK_020_BASE,
+            TASK_020_COMMAND,
+            TASK_020_FAILURE,
+            TASK_020_PATCH_PATH,
+            patch,
+            list(TASK_020_FIXTURE_PATHS),
+            "task_evidence[TASK-020]",
+        )
+        replay = _run_at_commit(
+            repo,
+            TASK_020_BASE,
+            TASK_020_COMMAND,
+            patch,
+            text=False,
+        )
+
+        self.assertEqual(observed.exit_code, 1)
+        self.assertEqual(observed.stdout, b"")
+        self.assertEqual(observed.stderr, f"{TASK_020_FAILURE}\n".encode())
+        self.assertEqual(replay.returncode, observed.exit_code)
+        self.assertEqual(replay.stdout, observed.stdout)
+        self.assertEqual(replay.stderr, observed.stderr)
+
+    def test_task020_v2_missing_patched_fixture_fails_closed(self) -> None:
+        repo, _, patch = self._inputs()
+
+        with self.assertRaises(HandoffError) as raised:
+            _patched_fixture_digests(
+                repo,
+                TASK_020_BASE,
+                patch,
+                [*TASK_020_FIXTURE_PATHS, "test/residency/recovery/missing.cpp"],
+                "task_evidence[TASK-020]",
+            )
+
+        self.assertIn("missing.cpp cannot be read", str(raised.exception))
+
+    def test_git_materialization_ignores_ambient_attributes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            ambient = root / "ambient"
+            destination = root / "destination"
+            source.mkdir()
+            ambient.mkdir()
+            destination.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+            subprocess.run(["git", "init", "-q"], cwd=ambient, check=True)
+            (source / "fixture.cpp").write_bytes(b"frozen\n")
+            subprocess.run(["git", "add", "fixture.cpp"], cwd=source, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Residency Handoff Test",
+                    "-c",
+                    "user.email=residency-handoff@example.invalid",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                ],
+                cwd=source,
+                check=True,
+            )
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=source,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            (source / ".git" / "info").mkdir(parents=True, exist_ok=True)
+            (ambient / ".git" / "info").mkdir(parents=True, exist_ok=True)
+            (source / ".git" / "info" / "attributes").write_text(
+                "*.cpp export-ignore\n",
+                encoding="utf-8",
+            )
+            (ambient / ".git" / "info" / "attributes").write_text(
+                "*.cpp text eol=crlf\n",
+                encoding="utf-8",
+            )
+            template = root / "template"
+            (template / "info").mkdir(parents=True)
+            (template / "info" / "attributes").write_text(
+                "*.cpp text eol=crlf\n",
+                encoding="utf-8",
+            )
+            global_attributes = root / "global-attributes"
+            global_attributes.write_text(
+                "*.cpp text eol=crlf\n",
+                encoding="utf-8",
+            )
+            xdg = root / "xdg"
+            home = root / "home"
+            (xdg / "git").mkdir(parents=True)
+            home.mkdir()
+            (home / ".gitconfig").write_text("[broken\n", encoding="utf-8")
+            config = xdg / "git" / "config"
+            hooks = root / "hooks"
+            hooks.mkdir()
+            reference_transaction = hooks / "reference-transaction"
+            reference_transaction.write_text(
+                "#!/bin/sh\nexit 1\n",
+                encoding="utf-8",
+            )
+            reference_transaction.chmod(0o755)
+            subprocess.run(
+                [
+                    "git",
+                    "config",
+                    "--file",
+                    str(config),
+                    "init.templateDir",
+                    str(template),
+                ],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "config",
+                    "--file",
+                    str(config),
+                    "core.hooksPath",
+                    str(hooks),
+                ],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "config",
+                    "--file",
+                    str(config),
+                    "core.attributesFile",
+                    str(global_attributes),
+                ],
+                check=True,
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GIT_DIR": str(ambient / ".git"),
+                    "HOME": str(home),
+                    "XDG_CONFIG_HOME": str(xdg),
+                },
+            ):
+                GitRepository(source).materialize("HEAD", destination)
+
+            self.assertEqual(
+                (destination / "fixture.cpp").read_bytes(),
+                b"frozen\n",
+            )
+            self.assertFalse((destination / ".git" / "info" / "attributes").exists())
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=destination,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip(),
+                commit,
+            )
+
+    def test_git_materialization_rejects_committed_export_subst(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            destination = root / "destination"
+            source.mkdir()
+            destination.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+            (source / ".gitattributes").write_text(
+                "fixture.txt export-subst\n",
+                encoding="utf-8",
+            )
+            (source / "fixture.txt").write_text(
+                "$Format:%H$\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=source, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Residency Handoff Test",
+                    "-c",
+                    "user.email=residency-handoff@example.invalid",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                ],
+                cwd=source,
+                check=True,
+            )
+
+            with self.assertRaises(HandoffError) as raised:
+                GitRepository(source).materialize("HEAD", destination)
+
+            self.assertIn("export-subst", str(raised.exception))
+            self.assertIn("fixture.txt", str(raised.exception))
+            self.assertEqual(list(destination.iterdir()), [])
+
+    def test_git_materialization_rejects_committed_export_ignore(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            destination = root / "destination"
+            source.mkdir()
+            destination.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+            (source / ".gitattributes").write_text(
+                "omitted.txt export-ignore\n",
+                encoding="utf-8",
+            )
+            (source / "omitted.txt").write_text("frozen\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=source, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Residency Handoff Test",
+                    "-c",
+                    "user.email=residency-handoff@example.invalid",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                ],
+                cwd=source,
+                check=True,
+            )
+
+            with self.assertRaises(HandoffError) as raised:
+                GitRepository(source).materialize("HEAD", destination)
+
+            self.assertIn("export-ignore", str(raised.exception))
+            self.assertIn("omitted.txt", str(raised.exception))
+            self.assertEqual(list(destination.iterdir()), [])
+
+    def test_git_repository_queries_ignore_ambient_global_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            home = root / "home"
+            xdg = root / "xdg"
+            source.mkdir()
+            home.mkdir()
+            xdg.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+            (source / "fixture.txt").write_text("fixture\n", encoding="utf-8")
+            subprocess.run(["git", "add", "fixture.txt"], cwd=source, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Residency Handoff Test",
+                    "-c",
+                    "user.email=residency-handoff@example.invalid",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                ],
+                cwd=source,
+                check=True,
+            )
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=source,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            (home / ".gitconfig").write_text("[broken\n", encoding="utf-8")
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": str(home), "XDG_CONFIG_HOME": str(xdg)},
+            ):
+                repo = GitRepository.discover(source)
+                self.assertEqual(repo.resolve("HEAD"), commit)
+                self.assertTrue(repo.is_ancestor(commit, commit))
+
+    def test_git_repository_ignores_replace_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            destination = root / "destination"
+            source.mkdir()
+            destination.mkdir()
+            fixture_path = source / "fixture.txt"
+
+            def git(*arguments: str, cwd: Path = source) -> str:
+                return subprocess.run(
+                    ["git", *arguments],
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+
+            def commit(contents: str, message: str) -> str:
+                fixture_path.write_text(contents, encoding="utf-8")
+                git("add", "fixture.txt")
+                git("commit", "-qm", message)
+                return git("rev-parse", "HEAD")
+
+            git("init", "-q")
+            git("config", "user.name", "Residency Handoff Test")
+            git("config", "user.email", "residency-handoff@example.invalid")
+            original_parent = commit("original parent\n", "original parent")
+            original = commit("original\n", "original")
+
+            git("checkout", "-q", "--orphan", "replacement")
+            git("rm", "-q", "-rf", ".")
+            replacement_parent = commit("replacement parent\n", "replacement parent")
+            replacement = commit("replacement\n", "replacement")
+            git("replace", original, replacement)
+
+            self.assertEqual(git("show", f"{original}:fixture.txt"), "replacement")
+            replaced_history = git("rev-list", "--parents", "-n", "1", original).split()
+            self.assertEqual(replaced_history, [original, replacement_parent])
+
+            repo = GitRepository(source)
+            self.assertEqual(repo.blob(original, "fixture.txt"), b"original\n")
+            self.assertEqual(repo.parents(original), [original_parent])
+            repo.materialize(original, destination)
+            self.assertEqual((destination / "fixture.txt").read_bytes(), b"original\n")
+            self.assertEqual(git("rev-parse", "HEAD", cwd=destination), original)
+            self.assertEqual(
+                git(
+                    "rev-list", "--parents", "-n", "1", original, cwd=destination
+                ).split(),
+                [original, original_parent],
+            )
+
+    def test_patch_inspection_ignores_ambient_global_config(self) -> None:
+        patch = b"""diff --git a/fixture.txt b/fixture.txt
+new file mode 100644
+--- /dev/null
++++ b/fixture.txt
+@@ -0,0 +1 @@
++fixture
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            xdg = root / "xdg"
+            home.mkdir()
+            xdg.mkdir()
+            (home / ".gitconfig").write_text("[broken\n", encoding="utf-8")
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": str(home), "XDG_CONFIG_HOME": str(xdg)},
+            ):
+                self.assertEqual(_patch_paths(patch, "fixture patch"), ["fixture.txt"])
+
+    def test_task020_patch_application_preserves_checkout_control_path(
+        self,
+    ) -> None:
+        patch = b"""diff --git a/fixture.txt b/fixture.txt
+--- a/fixture.txt
++++ b/fixture.txt
+@@ -1 +1 @@
+-old
++new
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory)
+            control = checkout / ".handoff-red.patch"
+            fixture = checkout / "fixture.txt"
+            control.write_bytes(b"checkout-owned\n")
+            fixture.write_bytes(b"old\n")
+
+            _apply_patch(checkout, patch, "fixture patch does not apply")
+
+            self.assertEqual(control.read_bytes(), b"checkout-owned\n")
+            self.assertEqual(fixture.read_bytes(), b"new\n")
+
+    def test_task020_patch_application_ignores_ambient_line_endings(self) -> None:
+        patch = b"""diff --git a/fixture.cpp b/fixture.cpp
+new file mode 100644
+--- /dev/null
++++ b/fixture.cpp
+@@ -0,0 +1 @@
++frozen
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "checkout"
+            ambient = Path(directory) / "ambient"
+            checkout.mkdir()
+            ambient.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=checkout, check=True)
+            subprocess.run(["git", "init", "-q"], cwd=ambient, check=True)
+            (checkout / ".gitattributes").write_text(
+                "*.cpp text eol=crlf\n",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                ["git", "config", "core.autocrlf", "true"],
+                cwd=checkout,
+                check=True,
+            )
+            attributes = checkout / "local-attributes"
+            attributes.write_text("*.cpp text eol=crlf\n", encoding="utf-8")
+            subprocess.run(
+                [
+                    "git",
+                    "config",
+                    "core.attributesFile",
+                    str(attributes),
+                ],
+                cwd=checkout,
+                check=True,
+            )
+            (ambient / ".git" / "info").mkdir(parents=True, exist_ok=True)
+            (ambient / ".git" / "info" / "attributes").write_text(
+                "*.cpp text eol=crlf\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {"GIT_DIR": str(ambient / ".git")},
+            ):
+                _apply_patch(checkout, patch, "fixture patch does not apply")
+
+            self.assertEqual((checkout / "fixture.cpp").read_bytes(), b"frozen\n")
+
+    def test_task020_v2_is_closed_and_content_addressed(self) -> None:
+        cases: tuple[tuple[Callable[[dict[str, object]], None], str], ...] = (
+            (
+                lambda metadata: metadata.__setitem__("unknown", True),
+                "keys differ",
+            ),
+            (
+                lambda metadata: metadata.__setitem__(
+                    "schema", "portable_residency_red_fixture_result/v1"
+                ),
+                "schema is unsupported",
+            ),
+            (
+                lambda metadata: metadata.__setitem__(
+                    "fallback_state", "legacy_cutover_active"
+                ),
+                "fallback_state must be 'production_cutover_inactive'",
+            ),
+            (
+                lambda metadata: metadata.__setitem__("task_base_commit", "0" * 40),
+                "identity does not match the task",
+            ),
+            (
+                lambda metadata: metadata["patch"].__setitem__(
+                    "path", "plan/evidence/red-fixtures/TASK-020/other.patch"
+                ),
+                "patch identity does not match the record",
+            ),
+            (
+                lambda metadata: metadata["fixture_sha256"].__setitem__(
+                    TASK_020_FIXTURE_PATHS[0], "0" * 64
+                ),
+                "fixture_sha256 does not match patched bytes",
+            ),
+            (
+                lambda metadata: metadata["observed_result"]["stderr"].update(
+                    {
+                        "hex": "00" * len((TASK_020_FAILURE + "\n").encode()),
+                        "sha256": _sha256(
+                            b"\0" * len((TASK_020_FAILURE + "\n").encode())
+                        ),
+                    }
+                ),
+                "streams differ from the accepted TASK-020 RED",
+            ),
+            (
+                lambda metadata: metadata["observed_result"].__setitem__(
+                    "exit_code", True
+                ),
+                "exit_code must be 1",
+            ),
+            (
+                lambda metadata: metadata["observed_result"].__setitem__(
+                    "exit_code", 1.0
+                ),
+                "exit_code must be 1",
+            ),
+        )
+        for mutator, expected in cases:
+            with self.subTest(expected=expected):
+                self._assert_invalid(mutator, expected)
+
+    def test_task020_v2_command_requires_python_no_bytecode_mode(self) -> None:
+        command = [
+            "python3",
+            "test/residency/recovery/test_durable_journal_public_seam.py",
+        ]
+
+        _, metadata, _ = self._inputs()
+        metadata["command"] = command
+        with self.assertRaises(HandoffError) as raised:
+            self._validate_metadata(metadata, command=command)
+
+        self.assertIn(
+            "must use the exact accepted TASK-020 command",
+            str(raised.exception),
+        )
+
+    def test_task020_v2_rejects_rebound_record_identities(self) -> None:
+        _, metadata, patch = self._inputs()
+        cases = (
+            (
+                {"evidence_commit": "0" * 40},
+                "evidence_commit is not the frozen TASK-020 RED",
+            ),
+            (
+                {"bundle_sha256": "0" * 64},
+                "bundle_sha256 is not the frozen TASK-020 bundle",
+            ),
+            (
+                {"task_base": "0" * 40},
+                "task_base_commit is not the frozen TASK-020 base",
+            ),
+            (
+                {"patch_path": "plan/evidence/red-fixtures/TASK-020/other.patch"},
+                "patch is not the frozen TASK-020 patch",
+            ),
+            (
+                {"patch": patch + b"\n"},
+                "patch is not the frozen TASK-020 patch",
+            ),
+        )
+        for overrides, expected in cases:
+            with self.subTest(expected=expected):
+                with self.assertRaises(HandoffError) as raised:
+                    self._validate_metadata(metadata, **overrides)
+                self.assertIn(expected, str(raised.exception))
 
 
 if __name__ == "__main__":

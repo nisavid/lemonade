@@ -2382,6 +2382,66 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROTOTYPE_TASK018_TEST_SRC}")
     set_tests_properties(ResidencyPrototypeContractTask018 PROPERTIES TIMEOUT 45)
 endif()
 
+if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/residency/recovery/durable_journal_public_seam.cpp")
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    find_package(Threads REQUIRED)
+
+    if(WIN32)
+        set(_TASK020_PLATFORM_SOURCE
+            src/cpp/server/residency/platform/durable_file_adapter_windows.cpp
+        )
+    elseif(APPLE)
+        set(_TASK020_PLATFORM_SOURCE
+            src/cpp/server/residency/platform/durable_file_adapter_macos.cpp
+        )
+    else()
+        set(_TASK020_PLATFORM_SOURCE
+            src/cpp/server/residency/platform/durable_file_adapter_posix.cpp
+        )
+    endif()
+
+    add_executable(test_durable_residency_journal
+        test/residency/recovery/durable_journal_public_seam.cpp
+        test/residency/recovery/journal_persistence_test_support.cpp
+        src/cpp/server/residency/durable_journal.cpp
+        src/cpp/server/residency/durable_file_adapter_common.cpp
+        src/cpp/server/residency/journal.cpp
+        ${_TASK020_PLATFORM_SOURCE}
+    )
+    add_library(test_durable_residency_private_authority_gate OBJECT
+        test/residency/recovery/durable_journal_private_authority_gate.cpp
+    )
+    target_include_directories(test_durable_residency_private_authority_gate PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/residency
+    )
+    add_dependencies(test_durable_residency_journal
+        test_durable_residency_private_authority_gate
+    )
+    target_include_directories(test_durable_residency_journal PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/residency
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/residency/recovery
+    )
+    target_link_libraries(test_durable_residency_journal PRIVATE
+        lemonade-digest-crypto
+        nlohmann_json::nlohmann_json
+        Threads::Threads
+    )
+    target_compile_definitions(test_durable_residency_journal PRIVATE
+        LEMONADE_RESIDENCY_DURABLE_TESTING
+    )
+    add_cpp_ci_test(
+        ResidencyDurableJournal
+        CI ON
+        COMMAND ${Python3_EXECUTABLE} test/residency/recovery/test_durable_journal_public_seam.py --existing-executable $<TARGET_FILE:test_durable_residency_journal> --compiler ${CMAKE_CXX_COMPILER} --private-authority-gate $<TARGET_OBJECTS:test_durable_residency_private_authority_gate>
+        DEPENDS test_durable_residency_journal
+    )
+    set_tests_properties(ResidencyDurableJournal PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+endif()
+
 # ProcessManager zombie detection and non-mutating reap contract.
 if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(_PROCESS_MANAGER_TEST_SRC

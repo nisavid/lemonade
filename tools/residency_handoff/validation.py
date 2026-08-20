@@ -8,7 +8,9 @@ import re
 import subprocess
 import tarfile
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -16,10 +18,54 @@ from typing import Any
 from .contract import canonical_digest, fail, load_manifest, sha256_bytes
 
 SCHEMA = "portable_residency_implementation_handoff/v1"
+RED_FIXTURE_SCHEMA_V1 = "portable_residency_red_fixture_result/v1"
+RED_FIXTURE_SCHEMA_V2 = "portable_residency_red_fixture_result/v2"
 HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 GIT_OBJECT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 TASK_ID = re.compile(r"^TASK-[0-9]{3}$")
 ALLOWED_COMMANDS = {"cmake", "ctest", "python3"}
+TASK_020_COMMAND = (
+    "python3",
+    "-B",
+    "test/residency/recovery/test_durable_journal_public_seam.py",
+)
+TASK_020_FAILURE_SIGNATURE = (
+    "TASK-020 durable residency persistence contract is unavailable"
+)
+TASK_020_FALLBACK_STATE = "production_cutover_inactive"
+TASK_020_TASK_BASE_COMMIT = "0c93411bc9b0463eee0f56d38cd97fffb0bae633"
+TASK_020_EVIDENCE_COMMIT = "27d2291335e3b334ba7436e2a3cd686bf34c61f7"
+TASK_020_BUNDLE_SHA256 = (
+    "4e9ff6284e599bfb3869d929416b2f915524eab14506620abd1d7fe95f93a650"
+)
+TASK_020_PATCH_PATH = "plan/evidence/red-fixtures/TASK-020/test.patch"
+TASK_020_PATCH_SHA256 = (
+    "0e1dc4d01f848c19c41aade640b14f9ea656d00f358b8d82a58f8099fda12213"
+)
+TASK_020_FIXTURE_PATHS = (
+    "test/residency/recovery/durable_journal_private_authority_gate.cpp",
+    "test/residency/recovery/durable_journal_public_seam.cpp",
+    "test/residency/recovery/journal_persistence_test_support.cpp",
+    "test/residency/recovery/journal_persistence_test_support.h",
+    "test/residency/recovery/test_durable_journal_public_seam.py",
+)
+TASK_020_FIXTURE_SHA256 = {
+    TASK_020_FIXTURE_PATHS[0]: (
+        "9869521ed951ae3df9e9947d118665f65e3eda04edb854fd7711aa2160d31f63"
+    ),
+    TASK_020_FIXTURE_PATHS[1]: (
+        "5ecadcea7ac2c0ed17a4ae95474f0b46f6848acf780c1b418ddaa02ebf1af30e"
+    ),
+    TASK_020_FIXTURE_PATHS[2]: (
+        "27598da43517dbf829345a9d8cc2d1d61812a8669c21d25f3f4fd9217e827561"
+    ),
+    TASK_020_FIXTURE_PATHS[3]: (
+        "24f2a89d3b670708157d69c1fca5565fd72dc3ebaa69c11cd59f072f58334e01"
+    ),
+    TASK_020_FIXTURE_PATHS[4]: (
+        "8be11f9d6fa5fb7a22a2b50197a884855bad6d23739d3f44f2b23486730388a6"
+    ),
+}
 LATER_ROSTER_PATH = "docs/research/portable-residency-capability-inventory.json"
 EXPECTED_PHASE_TASKS = {
     0: ("TASK-093", "TASK-006", "TASK-007", "TASK-108", "TASK-109"),
@@ -123,10 +169,35 @@ REQUIRED_SEAMS = {
 }
 
 
+@dataclass(frozen=True)
+class RedFixtureObservation:
+    exit_code: int
+    stdout: bytes | None = None
+    stderr: bytes | None = None
+
+
 def _without_git_environment() -> dict[str, str]:
     return {
         key: value for key, value in os.environ.items() if not key.startswith("GIT_")
     }
+
+
+def _git_environment(global_config: Path) -> dict[str, str]:
+    return {
+        **_without_git_environment(),
+        "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": str(global_config),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+    }
+
+
+@contextmanager
+def _isolated_git_environment() -> Iterator[dict[str, str]]:
+    with tempfile.TemporaryDirectory(
+        prefix="residency-handoff-git-config-"
+    ) as directory:
+        yield _git_environment(Path(directory) / "global-config")
 
 
 class GitRepository:
@@ -135,23 +206,27 @@ class GitRepository:
 
     @classmethod
     def discover(cls, start: Path) -> GitRepository:
-        result = subprocess.run(
-            ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        with _isolated_git_environment() as environment:
+            result = subprocess.run(
+                ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
         if result.returncode:
             fail(f"cannot locate Git repository: {result.stderr.strip()}")
         return cls(Path(result.stdout.strip()))
 
     def run(self, *args: str, text: bool = True) -> str | bytes:
-        result = subprocess.run(
-            ["git", "-C", str(self.root), *args],
-            capture_output=True,
-            text=text,
-            check=False,
-        )
+        with _isolated_git_environment() as environment:
+            result = subprocess.run(
+                ["git", "-C", str(self.root), *args],
+                capture_output=True,
+                text=text,
+                check=False,
+                env=environment,
+            )
         if result.returncode:
             stderr = result.stderr if text else result.stderr.decode("utf-8", "replace")
             fail(f"git {' '.join(args)} failed: {stderr.strip()}")
@@ -171,19 +246,21 @@ class GitRepository:
         return line.split()[1:]
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(self.root),
-                "merge-base",
-                "--is-ancestor",
-                ancestor,
-                descendant,
-            ],
-            capture_output=True,
-            check=False,
-        )
+        with _isolated_git_environment() as environment:
+            result = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(self.root),
+                    "merge-base",
+                    "--is-ancestor",
+                    ancestor,
+                    descendant,
+                ],
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
         return result.returncode == 0
 
     def changed_paths(self, parent: str, commit: str) -> list[str]:
@@ -193,7 +270,161 @@ class GitRepository:
         return [line for line in output.splitlines() if line]
 
     def materialize(self, commit: str, destination: Path) -> None:
-        archive = bytes(self.run("archive", "--format=tar", commit, text=False))
+        resolved_commit = self.resolve(commit)
+        object_format = str(self.run("rev-parse", "--show-object-format")).strip()
+        if object_format not in {"sha1", "sha256"}:
+            fail(f"unsupported source repository object format {object_format!r}")
+        object_path = Path(str(self.run("rev-parse", "--git-path", "objects")).strip())
+        if not object_path.is_absolute():
+            object_path = self.root / object_path
+
+        with (
+            tempfile.TemporaryDirectory(
+                prefix="residency-handoff-archive-repository-"
+            ) as archive_directory,
+            tempfile.TemporaryDirectory(
+                prefix="residency-handoff-empty-git-template-"
+            ) as template_directory,
+            tempfile.TemporaryDirectory(
+                prefix="residency-handoff-git-config-"
+            ) as config_directory,
+        ):
+            archive_repository = Path(archive_directory)
+            environment = _git_environment(Path(config_directory) / "global-config")
+            initialized_archive = subprocess.run(
+                [
+                    "git",
+                    "init",
+                    "-q",
+                    "--bare",
+                    f"--object-format={object_format}",
+                    f"--template={template_directory}",
+                ],
+                cwd=archive_repository,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            if initialized_archive.returncode:
+                fail(
+                    "cannot initialize archive repository: "
+                    f"{initialized_archive.stderr.strip()}"
+                )
+            archive_alternates = archive_repository / "objects" / "info" / "alternates"
+            archive_alternates.write_text(
+                f"{object_path.resolve()}\n",
+                encoding="utf-8",
+            )
+            bound_index = subprocess.run(
+                [
+                    "git",
+                    f"--git-dir={archive_repository}",
+                    "read-tree",
+                    resolved_commit,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            if bound_index.returncode:
+                fail(
+                    "cannot bind archive attributes to source tree: "
+                    f"{bound_index.stderr.strip()}"
+                )
+            listed_paths = subprocess.run(
+                [
+                    "git",
+                    f"--git-dir={archive_repository}",
+                    "ls-tree",
+                    "-r",
+                    "-t",
+                    "-z",
+                    "--name-only",
+                    resolved_commit,
+                ],
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            if listed_paths.returncode:
+                fail(
+                    "cannot enumerate source tree for archive attributes: "
+                    f"{listed_paths.stderr.decode('utf-8', 'replace').strip()}"
+                )
+            checked_attributes = subprocess.run(
+                [
+                    "git",
+                    f"--git-dir={archive_repository}",
+                    "check-attr",
+                    "--cached",
+                    "-z",
+                    "export-subst",
+                    "export-ignore",
+                    "--stdin",
+                ],
+                input=listed_paths.stdout,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            if checked_attributes.returncode:
+                fail(
+                    "cannot inspect source tree archive attributes: "
+                    f"{checked_attributes.stderr.decode('utf-8', 'replace').strip()}"
+                )
+            attribute_fields = checked_attributes.stdout.split(b"\0")
+            if attribute_fields[-1:] != [b""]:
+                fail("malformed Git archive attribute output")
+            attribute_fields.pop()
+            if len(attribute_fields) % 3:
+                fail("malformed Git archive attribute output")
+            for index in range(0, len(attribute_fields), 3):
+                path, attribute, value = attribute_fields[index : index + 3]
+                if value not in {b"unspecified", b"unset"}:
+                    fail(
+                        f"committed Git attribute {attribute.decode('ascii')} "
+                        f"is set for archive path {path!r}"
+                    )
+            archived = subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "core.attributesFile=",
+                    f"--git-dir={archive_repository}",
+                    "archive",
+                    "--format=tar",
+                    resolved_commit,
+                ],
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            if archived.returncode:
+                fail(
+                    "cannot archive replay repository: "
+                    f"{archived.stderr.decode('utf-8', 'replace').strip()}"
+                )
+            archive = archived.stdout
+
+            initialized = subprocess.run(
+                [
+                    "git",
+                    "init",
+                    "-q",
+                    f"--object-format={object_format}",
+                    f"--template={template_directory}",
+                ],
+                cwd=destination,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+        if initialized.returncode:
+            fail(f"cannot initialize replay repository: {initialized.stderr.strip()}")
+
         with tarfile.open(fileobj=BytesIO(archive), mode="r:") as source:
             for member in source.getmembers():
                 path = PurePosixPath(member.name)
@@ -205,29 +436,11 @@ class GitRepository:
                 ):
                     fail(f"unsafe path in Git archive: {member.name!r}")
             source.extractall(destination, filter="data")
-
-        environment = _without_git_environment()
-        object_format = str(self.run("rev-parse", "--show-object-format")).strip()
-        if object_format not in {"sha1", "sha256"}:
-            fail(f"unsupported source repository object format {object_format!r}")
-        object_path = Path(str(self.run("rev-parse", "--git-path", "objects")).strip())
-        if not object_path.is_absolute():
-            object_path = self.root / object_path
-        initialized = subprocess.run(
-            ["git", "init", "-q", f"--object-format={object_format}"],
-            cwd=destination,
-            capture_output=True,
-            text=True,
-            check=False,
-            env=environment,
-        )
-        if initialized.returncode:
-            fail(f"cannot initialize replay repository: {initialized.stderr.strip()}")
         alternates = destination / ".git" / "objects" / "info" / "alternates"
         alternates.write_text(f"{object_path.resolve()}\n", encoding="utf-8")
         for arguments in (
-            ("update-ref", "--no-deref", "HEAD", commit),
-            ("read-tree", commit),
+            ("update-ref", "--no-deref", "HEAD", resolved_commit),
+            ("read-tree", resolved_commit),
         ):
             prepared = subprocess.run(
                 ["git", *arguments],
@@ -752,41 +965,31 @@ def _run_at_commit(
     commit: str,
     command: list[str],
     patch: bytes | None = None,
-) -> subprocess.CompletedProcess[str]:
+    *,
+    text: bool = True,
+) -> subprocess.CompletedProcess[Any]:
     with tempfile.TemporaryDirectory(prefix="residency-handoff-") as directory:
         checkout = Path(directory)
         repo.materialize(commit, checkout)
         if patch is not None:
-            patch_path = checkout / ".handoff-red.patch"
-            patch_path.write_bytes(patch)
-            applied = subprocess.run(
-                [
-                    "git",
-                    "apply",
-                    "--whitespace=nowarn",
-                    "--unidiff-zero",
-                    str(patch_path),
-                ],
-                cwd=checkout,
-                capture_output=True,
-                text=True,
-                check=False,
+            _apply_patch(
+                checkout,
+                patch,
+                "red fixture patch does not apply",
             )
-            patch_path.unlink()
-            if applied.returncode:
-                fail(f"red fixture patch does not apply: {applied.stderr.strip()}")
-        try:
-            return subprocess.run(
-                command,
-                cwd=checkout,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=120,
-                env={**_without_git_environment(), "PYTHONDONTWRITEBYTECODE": "1"},
-            )
-        except subprocess.TimeoutExpired:
-            fail(f"fixture command timed out: {command!r}")
+        with _isolated_git_environment() as environment:
+            try:
+                return subprocess.run(
+                    command,
+                    cwd=checkout,
+                    capture_output=True,
+                    text=text,
+                    check=False,
+                    timeout=120,
+                    env={**environment, "PYTHONDONTWRITEBYTECODE": "1"},
+                )
+            except subprocess.TimeoutExpired:
+                fail(f"fixture command timed out: {command!r}")
 
 
 def _json_object_bytes(source: bytes, label: str) -> dict[str, Any]:
@@ -804,20 +1007,22 @@ def _patch_paths(patch: bytes, label: str) -> list[str]:
     with tempfile.TemporaryDirectory(prefix="residency-handoff-numstat-") as directory:
         patch_path = Path(directory) / "fixture.patch"
         patch_path.write_bytes(patch)
-        result = subprocess.run(
-            [
-                "git",
-                "apply",
-                "--whitespace=nowarn",
-                "--unidiff-zero",
-                "--numstat",
-                str(patch_path),
-            ],
-            cwd=directory,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        with _isolated_git_environment() as environment:
+            result = subprocess.run(
+                [
+                    "git",
+                    "apply",
+                    "--whitespace=nowarn",
+                    "--unidiff-zero",
+                    "--numstat",
+                    str(patch_path),
+                ],
+                cwd=directory,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
     if result.returncode:
         fail(f"{label} cannot be inspected: {result.stderr.strip()}")
     paths: list[str] = []
@@ -831,19 +1036,278 @@ def _patch_paths(patch: bytes, label: str) -> list[str]:
     return paths
 
 
+def _apply_patch(checkout: Path, patch: bytes, failure: str) -> None:
+    with tempfile.TemporaryDirectory(
+        prefix="residency-handoff-patch-file-"
+    ) as directory:
+        patch_path = Path(directory) / "fixture.patch"
+        patch_path.write_bytes(patch)
+        applied = subprocess.run(
+            [
+                "git",
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "core.attributesFile=",
+                "apply",
+                "--no-index",
+                "--whitespace=nowarn",
+                "--unidiff-zero",
+                str(patch_path),
+            ],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            check=False,
+            env={
+                **_git_environment(Path(directory) / "global-config"),
+                "GIT_DIR": str(Path(directory) / "no-repository"),
+            },
+        )
+    if applied.returncode:
+        fail(f"{failure}: {applied.stderr.strip()}")
+
+
+def _fixture_bytes(checkout: Path, path: str, label: str) -> bytes:
+    try:
+        return (checkout / path).read_bytes()
+    except OSError as error:
+        fail(f"{label} cannot be read: {error}")
+
+
+def _stream_bytes(value: Any, label: str) -> bytes:
+    stream = _mapping(value, label)
+    _exact_keys(stream, {"byte_count", "hex", "sha256"}, label)
+    byte_count = stream["byte_count"]
+    if (
+        isinstance(byte_count, bool)
+        or not isinstance(byte_count, int)
+        or byte_count < 0
+    ):
+        fail(f"{label}.byte_count must be a nonnegative integer")
+    encoded = stream["hex"]
+    if (
+        not isinstance(encoded, str)
+        or re.fullmatch(r"(?:[0-9a-f]{2})*", encoded) is None
+    ):
+        fail(f"{label}.hex must be lowercase hexadecimal bytes")
+    decoded = bytes.fromhex(encoded)
+    if len(decoded) != byte_count:
+        fail(f"{label}.byte_count does not match its bytes")
+    if sha256_bytes(decoded) != _digest(stream["sha256"], f"{label}.sha256"):
+        fail(f"{label}.sha256 does not match its bytes")
+    return decoded
+
+
+def _patched_fixture_digests(
+    repo: GitRepository,
+    base: str,
+    patch: bytes,
+    test_paths: list[str],
+    label: str,
+) -> dict[str, str]:
+    with tempfile.TemporaryDirectory(
+        prefix="residency-handoff-v2-fixtures-"
+    ) as directory:
+        checkout = Path(directory)
+        repo.materialize(base, checkout)
+        _apply_patch(checkout, patch, f"{label} does not apply")
+        return {
+            path: sha256_bytes(
+                _fixture_bytes(checkout, path, f"{label} fixture {path}")
+            )
+            for path in test_paths
+        }
+
+
+def _red_fixture_metadata_v2(
+    repo: GitRepository,
+    metadata: dict[str, Any],
+    evidence_commit: str,
+    bundle_sha256: str,
+    task_id: str,
+    task_base: str,
+    command: list[str],
+    failure_signature: str,
+    patch_path: str,
+    patch: bytes,
+    test_paths: list[str],
+    label: str,
+) -> RedFixtureObservation:
+    metadata_label = f"{label} red fixture metadata"
+    _exact_keys(
+        metadata,
+        {
+            "command",
+            "environment",
+            "fallback_state",
+            "fixture_sha256",
+            "observed_result",
+            "patch",
+            "schema",
+            "task_base_commit",
+            "task_id",
+        },
+        metadata_label,
+    )
+    if metadata["schema"] != RED_FIXTURE_SCHEMA_V2:
+        fail(f"{metadata_label} schema is unsupported")
+    if task_id != "TASK-020":
+        fail(f"{metadata_label} v2 is reserved for TASK-020")
+    if evidence_commit != TASK_020_EVIDENCE_COMMIT:
+        fail(f"{label}.red_fixture.evidence_commit is not the frozen TASK-020 RED")
+    if bundle_sha256 != TASK_020_BUNDLE_SHA256:
+        fail(f"{label}.red_fixture.bundle_sha256 is not the frozen TASK-020 bundle")
+    if task_base != TASK_020_TASK_BASE_COMMIT:
+        fail(f"{label}.task_base_commit is not the frozen TASK-020 base")
+    if metadata["task_id"] != task_id or metadata["task_base_commit"] != task_base:
+        fail(f"{label} red fixture metadata identity does not match the task")
+    metadata_command = _command(metadata["command"], f"{label} metadata.command")
+    if metadata_command != command:
+        fail(f"{label} red fixture metadata command does not match the record")
+    if tuple(metadata_command) != TASK_020_COMMAND:
+        fail(
+            f"{label} red fixture metadata must use the exact accepted TASK-020 command"
+        )
+
+    environment = _mapping(metadata["environment"], f"{label} metadata.environment")
+    _exact_keys(
+        environment,
+        {"platform", "python_version", "toolchain"},
+        f"{label} metadata.environment",
+    )
+    _string(environment["platform"], f"{label} metadata.environment.platform")
+    _string(
+        environment["python_version"],
+        f"{label} metadata.environment.python_version",
+    )
+    toolchain = [
+        _string(item, f"{label} metadata.environment.toolchain[{index}]")
+        for index, item in enumerate(
+            _list(environment["toolchain"], f"{label} metadata.environment.toolchain")
+        )
+    ]
+    if not toolchain or len(toolchain) != len(set(toolchain)):
+        fail(f"{label} metadata.environment.toolchain must be non-empty and unique")
+
+    if metadata["fallback_state"] != TASK_020_FALLBACK_STATE:
+        fail(
+            f"{label} red fixture metadata fallback_state must be "
+            f"{TASK_020_FALLBACK_STATE!r}"
+        )
+    recorded_patch = _mapping(metadata["patch"], f"{label} metadata.patch")
+    _exact_keys(recorded_patch, {"path", "sha256"}, f"{label} metadata.patch")
+    if (
+        patch_path != TASK_020_PATCH_PATH
+        or sha256_bytes(patch) != TASK_020_PATCH_SHA256
+    ):
+        fail(f"{label}.red_fixture patch is not the frozen TASK-020 patch")
+    if _path(
+        recorded_patch["path"], f"{label} metadata.patch.path"
+    ) != patch_path or _digest(
+        recorded_patch["sha256"], f"{label} metadata.patch.sha256"
+    ) != sha256_bytes(
+        patch
+    ):
+        fail(f"{label} red fixture metadata patch identity does not match the record")
+
+    if tuple(test_paths) != TASK_020_FIXTURE_PATHS:
+        fail(f"{label}.red_fixture.test_paths must equal the TASK-020 fixture set")
+    fixture_sha256 = _mapping(
+        metadata["fixture_sha256"], f"{label} metadata.fixture_sha256"
+    )
+    _exact_keys(
+        fixture_sha256,
+        TASK_020_FIXTURE_PATHS,
+        f"{label} metadata.fixture_sha256",
+    )
+    actual_fixture_sha256 = _patched_fixture_digests(
+        repo,
+        task_base,
+        patch,
+        test_paths,
+        f"{label}.red_fixture.patch",
+    )
+    recorded_fixture_sha256 = {
+        path: _digest(
+            fixture_sha256[path],
+            f"{label} metadata.fixture_sha256[{path!r}]",
+        )
+        for path in test_paths
+    }
+    if (
+        recorded_fixture_sha256 != TASK_020_FIXTURE_SHA256
+        or actual_fixture_sha256 != TASK_020_FIXTURE_SHA256
+    ):
+        fail(
+            f"{label} red fixture metadata fixture_sha256 does not match patched bytes"
+        )
+
+    observed = _mapping(
+        metadata["observed_result"], f"{label} metadata.observed_result"
+    )
+    _exact_keys(
+        observed,
+        {"exit_code", "failure_signature", "stderr", "stdout"},
+        f"{label} metadata.observed_result",
+    )
+    exit_code = observed["exit_code"]
+    if isinstance(exit_code, bool) or not isinstance(exit_code, int) or exit_code != 1:
+        fail(f"{label} metadata.observed_result.exit_code must be 1")
+    if (
+        observed["failure_signature"] != failure_signature
+        or failure_signature != TASK_020_FAILURE_SIGNATURE
+    ):
+        fail(
+            f"{label} red fixture metadata failure signature does not match the record"
+        )
+    stdout = _stream_bytes(
+        observed["stdout"], f"{label} metadata.observed_result.stdout"
+    )
+    stderr = _stream_bytes(
+        observed["stderr"], f"{label} metadata.observed_result.stderr"
+    )
+    if stdout or stderr != f"{TASK_020_FAILURE_SIGNATURE}\n".encode():
+        fail(
+            f"{label} red fixture metadata streams differ from the accepted TASK-020 RED"
+        )
+    return RedFixtureObservation(exit_code=1, stdout=stdout, stderr=stderr)
+
+
 def _red_fixture_metadata(
     repo: GitRepository,
     evidence_commit: str,
+    bundle_sha256: str,
     metadata_path: str,
     task_id: str,
     task_base: str,
     command: list[str],
     failure_signature: str,
+    patch_path: str,
+    patch: bytes,
+    test_paths: list[str],
     label: str,
-) -> int:
+) -> RedFixtureObservation:
     metadata = _json_object_bytes(
         repo.blob(evidence_commit, metadata_path), f"{label} red fixture metadata"
     )
+    if task_id == "TASK-020" and metadata.get("schema") != RED_FIXTURE_SCHEMA_V2:
+        fail(f"{label} red fixture metadata must use the TASK-020 v2 schema")
+    if metadata.get("schema") == RED_FIXTURE_SCHEMA_V2:
+        return _red_fixture_metadata_v2(
+            repo,
+            metadata,
+            evidence_commit,
+            bundle_sha256,
+            task_id,
+            task_base,
+            command,
+            failure_signature,
+            patch_path,
+            patch,
+            test_paths,
+            label,
+        )
     _exact_keys(
         metadata,
         {
@@ -856,7 +1320,7 @@ def _red_fixture_metadata(
         },
         f"{label} red fixture metadata",
     )
-    if metadata["schema"] != "portable_residency_red_fixture_result/v1":
+    if metadata["schema"] != RED_FIXTURE_SCHEMA_V1:
         fail(f"{label} red fixture metadata schema is unsupported")
     if metadata["task_id"] != task_id or metadata["task_base_commit"] != task_base:
         fail(f"{label} red fixture metadata identity does not match the task")
@@ -896,7 +1360,7 @@ def _red_fixture_metadata(
         fail(
             f"{label} red fixture metadata failure signature does not match the record"
         )
-    return exit_code
+    return RedFixtureObservation(exit_code=exit_code)
 
 
 def _validate_task_evidence(
@@ -952,9 +1416,8 @@ def _validate_task_evidence(
     changed = repo.changed_paths(base, evidence)
     if not changed or any(not path.startswith(prefix) for path in changed):
         fail(f"{label}.red_fixture.evidence_commit changed paths outside {prefix}")
-    if _bundle_digest(repo, evidence, prefix) != _digest(
-        red["bundle_sha256"], f"{label}.red_fixture.bundle_sha256"
-    ):
+    bundle_sha256 = _digest(red["bundle_sha256"], f"{label}.red_fixture.bundle_sha256")
+    if _bundle_digest(repo, evidence, prefix) != bundle_sha256:
         fail(f"{label}.red_fixture.bundle_sha256 does not match the evidence bundle")
     patch_path = _path(red["patch_path"], f"{label}.red_fixture.patch_path")
     if not patch_path.startswith(prefix):
@@ -991,24 +1454,37 @@ def _validate_task_evidence(
         fail(f"{label}.red_fixture.metadata_path must be under {prefix}")
     if metadata_path not in changed:
         fail(f"{label}.red_fixture.metadata_path was not changed by evidence_commit")
-    observed_exit_code = _red_fixture_metadata(
+    observation = _red_fixture_metadata(
         repo,
         evidence,
+        bundle_sha256,
         metadata_path,
         task_id,
         base,
         red_command,
         failure_signature,
+        patch_path,
+        patch,
+        test_paths,
         label,
     )
-    red_result = _run_at_commit(repo, base, red_command, patch)
-    red_output = red_result.stdout + red_result.stderr
-    if (
-        red_result.returncode != observed_exit_code
-        or red_result.returncode == 0
-        or failure_signature not in red_output
-    ):
-        fail(f"{label}.red_fixture did not reproduce its frozen failure signature")
+    if observation.stdout is None or observation.stderr is None:
+        red_result = _run_at_commit(repo, base, red_command, patch)
+        red_output = red_result.stdout + red_result.stderr
+        if (
+            red_result.returncode != observation.exit_code
+            or red_result.returncode == 0
+            or failure_signature not in red_output
+        ):
+            fail(f"{label}.red_fixture did not reproduce its frozen failure signature")
+    else:
+        red_result = _run_at_commit(repo, base, red_command, patch, text=False)
+        if (
+            red_result.returncode != observation.exit_code
+            or red_result.stdout != observation.stdout
+            or red_result.stderr != observation.stderr
+        ):
+            fail(f"{label}.red_fixture did not reproduce its frozen binary streams")
 
     green = _mapping(task["green_checkpoint"], f"{label}.green_checkpoint")
     _exact_keys(
@@ -1026,28 +1502,17 @@ def _validate_task_evidence(
     with tempfile.TemporaryDirectory(prefix="residency-handoff-patch-") as directory:
         reconstructed = Path(directory)
         repo.materialize(base, reconstructed)
-        patch_file = reconstructed / ".handoff.patch"
-        patch_file.write_bytes(patch)
-        applied = subprocess.run(
-            [
-                "git",
-                "apply",
-                "--whitespace=nowarn",
-                "--unidiff-zero",
-                str(patch_file),
-            ],
-            cwd=reconstructed,
-            capture_output=True,
-            text=True,
-            check=False,
+        _apply_patch(
+            reconstructed,
+            patch,
+            f"{label}.red_fixture patch does not reconstruct",
         )
-        patch_file.unlink()
-        if applied.returncode:
-            fail(
-                f"{label}.red_fixture patch does not reconstruct: {applied.stderr.strip()}"
-            )
         for test_path in test_paths:
-            reconstructed_bytes = (reconstructed / test_path).read_bytes()
+            reconstructed_bytes = _fixture_bytes(
+                reconstructed,
+                test_path,
+                f"{label} reconstructed fixture {test_path}",
+            )
             if reconstructed_bytes != repo.blob(green_commit, test_path):
                 fail(
                     f"{label} test patch is not byte-identical at green checkpoint: {test_path}"
