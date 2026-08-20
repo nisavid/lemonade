@@ -140,6 +140,18 @@ jobs:
           ctest --test-dir build -C Release --output-on-failure -R "^mcp_client_config$"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Build durable residency journal test on Windows
+        shell: PowerShell
+        run: |
+          cmake --build build --config Release --target test_durable_residency_journal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run durable residency journal test on Windows
+        shell: PowerShell
+        run: |
+          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload Lemonade Server Installers
         id: upload-unsigned-msi
         uses: actions/upload-artifact@v7
@@ -974,6 +986,13 @@ jobs:
           echo "Archive contents:"
           tar tzf "$ARCHIVE"
           ls -lh "$ARCHIVE"
+
+      - name: Run durable residency journal test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build --preset default --target test_durable_residency_journal
+          ctest --test-dir build --output-on-failure --no-tests=error -R '^ResidencyDurableJournal$'
 
       - name: Upload embeddable archive
         uses: actions/upload-artifact@v4
