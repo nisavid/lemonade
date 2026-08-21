@@ -6,6 +6,10 @@
 
 namespace lemon {
 
+bool uses_gpu_memory_capacity(DeviceType effective_device) {
+    return (effective_device & DEVICE_GPU) != 0;
+}
+
 GpuMemoryAdmissionPlan plan_gpu_memory_admission(const GpuMemoryAdmissionInputs& inputs) {
     GpuMemoryAdmissionPlan plan;
 

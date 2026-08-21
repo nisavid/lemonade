@@ -25,6 +25,8 @@ public:
 
     ~SDServer() override;
 
+    DeviceType effective_device(const RecipeOptions& options) const override;
+
     void load(const std::string& model_name,
              const ModelInfo& model_info,
              const RecipeOptions& options,
@@ -77,6 +79,7 @@ namespace sdcpp {
 std::unique_ptr<WrappedServer> create(const BackendContext& ctx);
 const BackendSpec* spec();
 const BackendOps* ops();
+constexpr uint32_t capabilities() { return capability_mask_of<SDServer>(); }
 }  // namespace sdcpp
 }  // namespace backends
 }  // namespace lemon

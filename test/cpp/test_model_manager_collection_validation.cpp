@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 
@@ -216,23 +217,141 @@ static void test_backend_capability_over_chat_indicator(ModelManager& manager) {
           error_contains(manager.validate_collection_request("user.RouterKit", kokoro_clf),
                          "cannot serve as a classifier"));
 
-    // The inverse: /v1/classify is served only by onnxruntime. A `classification`
-    // label on llamacpp (which cannot classify) must NOT type it CLASSIFICATION,
-    // or run_classifier would call Router::classify() and fail. It stays LLM and
-    // is accepted as an LLM-as-classifier via the chat path.
-    manager.register_user_model(
-        "user.LlamaClf",
-        json{{"model_name", "user.LlamaClf"}, {"recipe", "llamacpp"},
-             {"checkpoint", "example/x:Q4_K_M"}, {"labels", {"classification"}}});
-    check("llamacpp + labels:[classification] stays LLM, not CLASSIFICATION",
-          manager.get_model_info("user.LlamaClf").type == lemon::ModelType::LLM);
+    // The inverse: /v1/classify is served only by onnxruntime, so a
+    // `classification` label on a chat backend names a mode it cannot serve.
+    // Registration refuses it rather than registering a model that would fail
+    // when run_classifier reached Router::classify().
+    bool rejected = false;
+    try {
+        manager.register_user_model(
+            "user.LlamaClf",
+            json{{"model_name", "user.LlamaClf"}, {"recipe", "llamacpp"},
+                 {"checkpoint", "example/x:Q4_K_M"}, {"labels", {"classification"}}});
+    } catch (const lemon::InvalidModelDefinitionError&) {
+        rejected = true;
+    }
+    check("llamacpp + labels:[classification] rejected at registration", rejected);
+    check("rejected registration persists nothing",
+          !manager.model_exists("user.LlamaClf"));
 
+    // Collection import refuses the same definition up front, so validation and
+    // registration cannot disagree about whether the import is legal.
     json llama_clf_label = router_with_classifier(
         "classifier",
         json{{"model_name", "xclf"}, {"recipe", "llamacpp"},
              {"checkpoint", "example/xclf:Q4_K_M"}, {"labels", {"classification"}}});
-    check("llamacpp + labels:[classification] accepted as classifier via LLM chat path",
-          !manager.validate_collection_request("user.RouterKit", llama_clf_label).has_value());
+    check("llamacpp + labels:[classification] rejected as an inline component",
+          error_contains(manager.validate_collection_request("user.RouterKit", llama_clf_label),
+                         "cannot serve"));
+
+    // llamacpp serves chat and embeddings, but llama-server is spawned for one
+    // of them, so a model claiming both would advertise /embeddings while loaded
+    // for chat. Both mode claims are servable here — it is having two that is
+    // refused.
+    bool two_modes_rejected = false;
+    try {
+        manager.register_user_model(
+            "user.LlamaBoth",
+            json{{"model_name", "user.LlamaBoth"}, {"recipe", "llamacpp"},
+                 {"checkpoint", "example/y:Q4_K_M"}, {"labels", {"chat", "embeddings"}}});
+    } catch (const lemon::InvalidModelDefinitionError&) {
+        two_modes_rejected = true;
+    }
+    check("llamacpp + labels:[chat, embeddings] rejected at registration",
+          two_modes_rejected);
+    check("rejected two-mode registration persists nothing",
+          !manager.model_exists("user.LlamaBoth"));
+
+    // The legacy capability flags are the same claim by another spelling, so the
+    // rule cannot be sidestepped by writing `embedding: true` beside `chat`.
+    bool flag_rejected = false;
+    try {
+        manager.register_user_model(
+            "user.LlamaFlag",
+            json{{"model_name", "user.LlamaFlag"}, {"recipe", "llamacpp"},
+                 {"checkpoint", "example/z:Q4_K_M"}, {"labels", {"chat"}},
+                 {"embedding", true}});
+    } catch (const lemon::InvalidModelDefinitionError&) {
+        flag_rejected = true;
+    }
+    check("llamacpp + labels:[chat] + embedding:true rejected at registration",
+          flag_rejected);
+
+    // An LLM used as a router classifier needs no label of its own: the plain
+    // chat model is a valid classifier.
+    json llama_clf_bare = router_with_classifier(
+        "classifier",
+        json{{"model_name", "xclf2"}, {"recipe", "llamacpp"},
+             {"checkpoint", "example/xclf2:Q4_K_M"}});
+    check("label-less llamacpp accepted as classifier via LLM chat path",
+          !manager.validate_collection_request("user.RouterKit", llama_clf_bare).has_value());
+}
+
+static void test_rejects_authored_zerank_deployment_conflict(ModelManager& manager) {
+    const std::string model_name = "user.ZeroRankAuthoredConflict";
+    bool rejected = false;
+    try {
+        manager.register_user_model(
+            model_name,
+            json{{"model_name", model_name}, {"recipe", "llamacpp"},
+                 {"checkpoint", "example/zerank-2-GGUF:Q4_K_M"},
+                 {"labels", {"chat"}}, {"reranking", true}});
+    } catch (const lemon::InvalidModelDefinitionError&) {
+        rejected = true;
+    }
+
+    check("authored ZeroRank chat + reranking modes are rejected", rejected);
+    const bool persisted = manager.model_exists(model_name);
+    check("rejected ZeroRank mode conflict persists nothing", !persisted);
+}
+
+static void write_stub_gguf(const fs::path& path) {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    const uint32_t version = 3;
+    const uint64_t empty_count = 0;
+    file.write("GGUF", 4);
+    file.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    file.write(reinterpret_cast<const char*>(&empty_count), sizeof(empty_count));
+    file.write(reinterpret_cast<const char*>(&empty_count), sizeof(empty_count));
+}
+
+static bool uses_zeroentropy_adapter(const lemon::RecipeOptions& options) {
+    const json adapter = options.get_option("llamacpp_reranking_adapter");
+    const json token = options.get_option("llamacpp_reranking_true_token_id");
+    const json scale = options.get_option("llamacpp_reranking_logit_scale");
+    return adapter.is_string() && adapter == "zeroentropy-logit-score" &&
+           token.is_number_integer() && token == 9454 &&
+           scale.is_number() && scale == 5.0;
+}
+
+static void test_extra_zerank_options_preserve_adapter_defaults(
+    ModelManager& manager, const fs::path& temp) {
+    const fs::path extra_dir = temp / "extra_models";
+    fs::create_directories(extra_dir);
+    write_stub_gguf(extra_dir / "zerank-2-local.gguf");
+    manager.set_extra_models_dir(extra_dir.string());
+
+    const std::string model_name = "extra.zerank-2-local";
+    lemon::ModelInfo info = manager.get_model_info(model_name);
+    check("extra ZeroRank discovery applies selected-logit adapter defaults",
+          uses_zeroentropy_adapter(info.recipe_options));
+
+    const lemon::RecipeOptions defaults = manager.get_model_default_options(info);
+    check("extra ZeroRank transient defaults preserve selected-logit adapter",
+          uses_zeroentropy_adapter(defaults));
+
+    const lemon::RecipeOptions preview = manager.preview_saved_model_options(
+        info, json{{"ctx_size", 4096}});
+    check("extra ZeroRank option preview preserves selected-logit adapter",
+          uses_zeroentropy_adapter(preview));
+
+    manager.update_saved_model_options(model_name, json{{"ctx_size", 4096}});
+    info = manager.get_model_info(model_name);
+    check("extra ZeroRank saved option update preserves selected-logit adapter",
+          uses_zeroentropy_adapter(info.recipe_options));
+
+    manager.set_saved_model_options(model_name, json::object());
+    manager.set_extra_models_dir("");
 }
 
 static void test_register_preserves_routing(ModelManager& manager) {
@@ -253,6 +372,8 @@ int main() {
     test_rejects_bad_routing(manager);
     test_inline_capability_matches_registration(manager);
     test_backend_capability_over_chat_indicator(manager);
+    test_rejects_authored_zerank_deployment_conflict(manager);
+    test_extra_zerank_options_preserve_adapter_defaults(manager, temp);
     test_register_preserves_routing(manager);
 
     fs::remove_all(temp);

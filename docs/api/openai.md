@@ -7,14 +7,18 @@ This spec defines Lemonade's implementation of the [OpenAI API](https://develope
 | `POST` | [`/v1/chat/completions`](#post-v1chatcompletions) | Chat Completions | messages -> completion |
 | `POST` | [`/v1/completions`](#post-v1completions) | Text Completions | prompt -> completion |
 | `POST` | [`/v1/embeddings`](#post-v1embeddings) | Embeddings | text -> vector representations |
+| `POST` | [`/v1/rerank`](./llamacpp.md#post-v1rerank) | Reranking (llama.cpp extension) | query + documents -> relevance scores |
+| `POST` | [`/v1/classify`](./lemonade.md#post-v1classify) | Text classification (Lemonade extension) | text -> label scores |
 | `POST` | [`/v1/responses`](#post-v1responses) | Responses API | prompt/messages -> event |
 | `POST` | [`/v1/audio/transcriptions`](#post-v1audiotranscriptions) | Audio Transcription | audio file -> text |
 | `POST` | [`/v1/audio/speech`](#post-v1audiospeech) | Text to speech | text -> audio |
+| `POST` | [`/v1/audio/generations`](./lemonade.md#post-v1audiogenerations) | Audio generation (Lemonade extension) | prompt -> audio |
 | `WS` | [`/realtime`](#ws-realtime) | Realtime Audio Transcription, OpenAI SDK compatible | streaming audio -> text |
 | `POST` | [`/v1/images/generations`](#post-v1imagesgenerations) | Image Generation | prompt -> image |
 | `POST` | [`/v1/images/edits`](#post-v1imagesedits) | Image Editing | image + prompt -> edited image |
 | `POST` | [`/v1/images/variations`](#post-v1imagesvariations) | Image Variations | image -> varied image |
 | `POST` | [`/v1/images/upscale`](#post-v1imagesupscale) | Image Upscaling | image + ESRGAN model -> upscaled image |
+| `POST` | [`/v1/3d/generations`](./lemonade.md#post-v13dgenerations) | 3D generation (Lemonade extension) | image -> textured mesh |
 | `GET` | [`/v1/models`](#get-v1models) | List models available locally | n/a |
 | `GET` | [`/v1/models/{model_id}`](#get-v1modelsmodel_id) | Retrieve a specific model by ID | n/a |
 
@@ -440,7 +444,7 @@ Audio Transcription API. You provide an audio file and receive a text transcript
 
 > **Note:** This endpoint uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp) as the backend. Whisper models are automatically downloaded when first used.
 >
-> **Limitations:** Only `wav` audio format and `json` response format are currently supported.
+> **Limitations:** Only `wav` audio input is currently supported. The `response_format` field supports `json`, `verbose_json`, `text`, `srt`, and `vtt`. On the FastFlowLM (FLM) backend, `srt` and `vtt` are rejected with a `400` because FLM returns no segment timestamps, and `verbose_json` returns the compact shape without a `segments` field.
 
 ### Parameters
 
@@ -449,7 +453,7 @@ Audio Transcription API. You provide an audio file and receive a text transcript
 | `file` | Yes | The audio file to transcribe. Supported formats: wav. | <sub>![Status](https://img.shields.io/badge/partial-yellow)</sub> |
 | `model` | Yes | The Whisper model to use for transcription (e.g., `Whisper-Tiny`, `Whisper-Base`, `Whisper-Small`). | <sub>![Status](https://img.shields.io/badge/available-green)</sub> |
 | `language` | No | The language of the audio (ISO 639-1 code, e.g., `en`, `es`, `fr`). If not specified, Whisper will auto-detect the language. | <sub>![Status](https://img.shields.io/badge/available-green)</sub> |
-| `response_format` | No | The format of the response. Currently only `json` is supported. | <sub>![Status](https://img.shields.io/badge/available-green)</sub> |
+| `response_format` | No | The response format. Supported values: `json`, `verbose_json`, `text`, `srt`, `vtt`. `srt` and `vtt` require a backend that reports segment timestamps (whisper.cpp). | <sub>![Status](https://img.shields.io/badge/available-green)</sub> |
 
 ### Example request
 
@@ -996,7 +1000,7 @@ curl http://localhost:13305/v1/models?show_all=true
       "downloaded": true,
       "suggested": true,
       "update_available": false,
-      "labels": ["reasoning"]
+      "labels": ["chat", "reasoning"]
     },
     {
       "id": "Gemma-3-4b-it-GGUF",
@@ -1008,7 +1012,7 @@ curl http://localhost:13305/v1/models?show_all=true
       "size": 3.61,
       "downloaded": true,
       "suggested": true,
-      "labels": ["hot", "vision"]
+      "labels": ["chat", "hot", "vision"]
     },
     {
       "id": "SD-Turbo",
@@ -1061,23 +1065,50 @@ curl http://localhost:13305/v1/models?show_all=true
 
 Labels describe what a model can do. A model may carry multiple labels.
 
-**Deployment labels** — determine which public `/v1` API route the model is routed to:
+**Deployment labels** — determine which public `/v1` API route the model is routed to.
+Every model names exactly one deployment mode, and a model is never given two
+labels that name different modes:
 
 | Label | Endpoint | Description |
 |-------|----------|-------------|
-| `transcription` | `/v1/audio/transcriptions` | Speech-to-text transcription model (e.g. Whisper). Mutually exclusive with LLM deployment. |
-| `embeddings` | `/v1/embeddings` | Produces text embedding vectors. |
+| `chat` | `/v1/chat/completions`, `/v1/completions`, `/v1/responses` | Text-generating LLM. This label is what makes a model an LLM — it is not inferred from `reasoning`/`vision`/`tool-calling`/`chat-transcription`, which are characteristics rather than deployment modes. |
+| `transcription` | `/v1/audio/transcriptions` | Speech-to-text transcription model (e.g. Whisper). An omni LLM that accepts audio in a chat turn is not one of these — it carries `chat` and the `chat-transcription` capability below. |
+| `embeddings` | `/v1/embeddings` | Produces text embedding vectors. Also accepted as `embedding`. |
 | `reranking` | `/v1/rerank` | Scores and reranks a list of passages given a query. Also reachable at the aliases `/v1/reranking` and `/v1/reranker`. |
-| `image` | `/v1/images/generations` | Text-to-image generation model. |
-| `edit` | `/v1/images/edits` | Image editing model. |
+| `image` | `/v1/images/generations`, `/v1/images/edits`, `/v1/images/variations` | Text-to-image generation model. |
 | `tts` | `/v1/audio/speech` | Text-to-speech synthesis model. |
+| `audio-generation` | `/v1/audio/generations` | Text-to-audio generation model (e.g. music, sound effects). |
+| `classification` | `/v1/classify` | Text classification model. Also accepted as `classifier`. |
+| `3d` | `/v1/3d/generations` | Text- or image-to-3D mesh generation model. |
 
-**Input-modality labels** — the model is deployed as an LLM but accepts additional input types in `/chat/completions`:
+When a model declares no deployment label at all, it inherits its recipe's
+default — `chat` for `llamacpp`, `flm`, `ryzenai-llm`, `vllm` and `cloud`,
+`transcription` for `whispercpp`, `image` for `sd-cpp`, `tts` for `kokoro`, and
+so on.
+
+Two label sets describe a model that cannot exist, and are refused rather than
+repaired:
+
+- **A mode the recipe's backend does not serve.** `/classify` is served only by
+  `onnxruntime`, so `labels: ["classification"]` on a `llamacpp` model is an
+  error — register it as the chat model it is.
+- **Two different modes.** `labels: ["chat", "embeddings"]` on a `llamacpp` model
+  is an error even though llama.cpp serves both: the subprocess is launched for
+  one mode, so the second would name an endpoint it was never configured to
+  answer. Register one model per mode. The legacy `embedding` and `reranking`
+  booleans count as mode claims here, exactly as the labels do.
+
+[`POST /v1/pull`](./lemonade.md#post-v1pull) answers `400` and registers nothing.
+An entry already stored in `user_models.json` — written before these rules — is
+skipped at startup with an error naming it, and the file is left untouched so it
+can be corrected by hand.
+
+**Input-modality labels** — the model accepts additional input types in `/chat/completions`:
 
 | Label | Description |
 |-------|-------------|
 | `vision` | Accepts image attachments in chat messages. |
-| `chat-transcription` | Accepts audio attachments in chat messages (e.g. Qwen2.5-Omni). |
+| `chat-transcription` | Accepts audio attachments in chat messages and transcribes them as part of its answer (e.g. Qwen2.5-Omni). Like `vision`, this is something a chat model can do, not a deployment mode of its own — a model carrying it also carries `chat`. It is distinct from `transcription`, which deploys a dedicated ASR model on `/audio/transcriptions`. |
 
 **Streaming labels** — capability flags for real-time features:
 
@@ -1091,6 +1122,13 @@ Labels describe what a model can do. A model may carry multiple labels.
 |-------|-------------|
 | `mtp` | Enables llama.cpp MTP draft decoding defaults (`--spec-type draft-mtp --spec-draft-n-max 3 --spec-draft-p-min 0.75`); users can override these with `llamacpp_args`. |
 
+**Image capability labels** — carried alongside `image`; they refine what the model is offered for without changing its deployment mode:
+
+| Label | Description |
+|-------|-------------|
+| `edit` | Tuned for editing an input image (`/images/edits`). Also selects the model for the `edit_image` role in an omni collection. |
+| `upscaling` | Image upscaling model (e.g. Real-ESRGAN, `/images/upscale`). Used as a component in image pipelines rather than offered on its own. |
+
 **Characteristic labels** — informational, do not affect routing:
 
 | Label | Description |
@@ -1099,7 +1137,6 @@ Labels describe what a model can do. A model may carry multiple labels.
 | `reasoning` | Uses extended chain-of-thought reasoning (e.g. DeepSeek, Qwen3). |
 | `tool-calling` | Supports function/tool calling in chat completions. |
 | `coding` | Tuned for code generation and software tasks. |
-| `upscaling` | Image upscaling model (e.g. Real-ESRGAN). Used as a component in image pipelines. |
 | `experimental` | Not yet validated for production use. |
 
 
@@ -1136,7 +1173,7 @@ Returns a single model object with the same fields as described in the [models l
   "max_context_window": 40960,
   "downloaded": true,
   "suggested": true,
-  "labels": ["reasoning"],
+  "labels": ["chat", "reasoning"],
   "recipe_options": {
     "ctx_size": 8192,
     "llamacpp_args": "--no-mmap",

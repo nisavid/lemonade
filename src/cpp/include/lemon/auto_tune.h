@@ -305,7 +305,8 @@ inline int64_t compute_auto_context_size(const ModelInfo& model_info,
 /// (i.e. ctx_size was already set to an explicit non-negative value).
 /// The caller should check the return value and update RecipeOptions accordingly.
 inline int64_t resolve_auto_ctx_size(const RecipeOptions& effective_options,
-                                      const ModelInfo& model_info) {
+                                     const ModelInfo& model_info,
+                                     double available_gb) {
     json ctx_json = effective_options.get_option("ctx_size");
     int64_t ctx_size = ctx_json.is_number() ? ctx_json.get<int64_t>() : -1;
 
@@ -314,7 +315,6 @@ inline int64_t resolve_auto_ctx_size(const RecipeOptions& effective_options,
     }
 
     bool is_embedding = (model_info.type == ModelType::EMBEDDING);
-    double available_gb = get_available_memory_gb(model_info.device);
 
     if (available_gb <= 0) {
         int64_t fallback = is_embedding ? EMBEDDING_CTX_SIZE : AUTO_CTX_FALLBACK;
@@ -327,6 +327,12 @@ inline int64_t resolve_auto_ctx_size(const RecipeOptions& effective_options,
     LOG(DEBUG, "AutoTune") << "resolve_auto_ctx_size: " << model_info.model_name
                            << " → ctx_size=" << result;
     return result;
+}
+
+inline int64_t resolve_auto_ctx_size(const RecipeOptions& effective_options,
+                                     const ModelInfo& model_info) {
+    return resolve_auto_ctx_size(
+        effective_options, model_info, get_available_memory_gb(model_info.device));
 }
 
 } // namespace lemon

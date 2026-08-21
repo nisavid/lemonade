@@ -823,34 +823,8 @@ std::string Router::canonical_model_name(const std::string& model_name) const {
     return resolve_model_name(model_name);
 }
 
-static bool starts_with(const std::string& value, const std::string& prefix) {
-    return value.rfind(prefix, 0) == 0;
-}
-
-bool Router::should_enforce_gpu_memory_capacity(const ModelInfo& model_info,
-                                                const RecipeOptions& options) const {
-    if (model_info.recipe == "llamacpp") {
-        std::string backend = options.get_option("llamacpp_backend");
-        return (backends::llamacpp::device_for_backend(backend) & DEVICE_GPU) != 0;
-    }
-    if (model_info.recipe == "sd-cpp") {
-        std::string backend = options.get_option("sd-cpp_backend");
-        return backend.empty() || backend == "vulkan" || starts_with(backend, "rocm");
-    }
-    if (model_info.recipe == "whispercpp") {
-        std::string backend = options.get_option("whispercpp_backend");
-        return backend.empty() || backend == "vulkan";
-    }
-    return (model_info.device & DEVICE_GPU) != 0;
-}
-
 bool Router::is_gpu_resident_server(const WrappedServer& server) const {
-    ModelInfo server_model_info;
-    RecipeOptions options = server.get_recipe_options();
-    server_model_info.recipe = options.get_recipe();
-    server_model_info.device = server.get_device_type();
-    return (server.get_device_type() & DEVICE_GPU) &&
-           should_enforce_gpu_memory_capacity(server_model_info, options);
+    return uses_gpu_memory_capacity(server.get_device_type());
 }
 
 double Router::sample_total_gpu_occupancy_gb() const {
@@ -860,6 +834,19 @@ double Router::sample_total_gpu_occupancy_gb() const {
     } catch (const std::exception& e) {
         LOG(WARNING, "Router") << "Failed to sample GPU memory occupancy: " << e.what() << std::endl;
         return -1.0;
+    }
+}
+
+double Router::sample_available_memory_gb(DeviceType device) const {
+    if (!available_memory_sampler_) {
+        return get_available_memory_gb(device);
+    }
+    try {
+        return available_memory_sampler_(device);
+    } catch (const std::exception& e) {
+        LOG(WARNING, "Router") << "Failed to sample available memory: "
+                                << e.what() << std::endl;
+        return 0.0;
     }
 }
 
@@ -954,9 +941,10 @@ double Router::estimate_gpu_memory_occupancy_gb(const ModelInfo& model_info,
 GpuMemoryAdmissionPlan Router::plan_gpu_memory_capacity(
     const ModelInfo& model_info,
     const RecipeOptions& options,
+    DeviceType effective_device,
     const WrappedServer* replacement_server) const {
     GpuMemoryAdmissionPlan no_op;
-    if (!should_enforce_gpu_memory_capacity(model_info, options)) return no_op;
+    if (!uses_gpu_memory_capacity(effective_device)) return no_op;
 
     const double total_capacity_gb = get_total_gpu_capacity_gb();
     if (total_capacity_gb <= 0.0) {
@@ -1009,19 +997,7 @@ void Router::load_model(const std::string& model_name,
     const std::string canonical_model_name = resolve_model_name(model_name);
     const ResidencyClass requested_residency_class =
         residency_class_for_load_purpose(load_purpose);
-    const std::string backend_option = model_info.recipe + "_backend";
-
-    RecipeOptions tentative = options.inherit(model_info.recipe_options.inherit(
-    RecipeOptions(model_info.recipe, config_->recipe_options(""))));
-    json backend_json = tentative.get_option(backend_option);
-    const std::string backend = backend_json.is_string() ? backend_json.get<std::string>() : "";
-
-    // Second pass: rebuild defaults using the resolved backend.
-    // Per-architecture defaults sit between global config and model-level recipe_options.
-    RecipeOptions default_opt = RecipeOptions(model_info.recipe, config_->recipe_options(backend));
-    RecipeOptions arch_opts(model_info.recipe,
-                            model_manager_->get_architecture_defaults(model_info.gguf.architecture));
-    RecipeOptions effective_options = options.inherit(model_info.recipe_options.inherit(arch_opts.inherit(default_opt)));
+    RecipeOptions effective_options = resolve_effective_options(model_info, options);
 
     // LOAD SERIALIZATION STRATEGY (from spec: point #2 in Additional Considerations)
     std::unique_lock<std::mutex> lock(load_mutex_);
@@ -1043,18 +1019,6 @@ void Router::load_model(const std::string& model_name,
 
     try {
         WrappedServer* reload_existing = nullptr;
-
-        prune_unavailable_servers_locked();
-
-        // Reclaim any idle routing helper a policy change already dropped from
-        // the needed set (e.g. one that was busy during the triggering
-        // reconcile). Cheap and non-blocking; runs before every load path.
-        prune_stale_routing_helpers_locked();
-
-        // If this load is itself for a routing helper the active policies no
-        // longer reference, abandon it now — before any destructive side effect
-        // (NPU/FLM eviction, capacity making room, or the nuclear retry below).
-        // Committing it would only be undone at load-completion anyway.
         WrappedServer* existing_pre =
             find_server_by_model_name(canonical_model_name);
         const json option_pinned = effective_options.get_option("pinned");
@@ -1073,8 +1037,59 @@ void Router::load_model(const std::string& model_name,
             return;
         }
 
-        // Check if model is already loaded. Watchdog-reset or otherwise dead
-        // entries are evicted first so auto-load performs a real lazy restart.
+        auto options_match = [&](const WrappedServer& existing) {
+            json existing_opts = existing.get_recipe_options().to_resolved_json();
+            json requested_opts = effective_options.to_resolved_json();
+            existing_opts.erase("pinned");
+            requested_opts.erase("pinned");
+            if (existing.ctx_size_is_auto() &&
+                requested_opts.value("ctx_size", json(nullptr)) == -1) {
+                existing_opts.erase("ctx_size");
+                requested_opts.erase("ctx_size");
+            }
+            return existing_opts == requested_opts;
+        };
+
+        if (existing_pre && existing_pre->is_backend_alive() &&
+            (!allow_reload_on_option_change || options_match(*existing_pre))) {
+            transition_server_residency_locked(
+                existing_pre, requested_residency_class);
+            LOG(DEBUG, "Router")
+                << "Model already loaded, updating access time and pinned status"
+                << std::endl;
+            existing_pre->set_pinned(final_pinned);
+            existing_pre->update_access_time();
+            is_loading_ = false;
+            load_cv_.notify_all();
+            return;
+        }
+
+        std::unique_ptr<WrappedServer> new_server = create_backend_server(model_info);
+        ModelType model_type = model_info.type;
+        DeviceType device_type = new_server->effective_device(effective_options);
+        std::optional<int64_t> bound_npu_auto_ctx;
+
+        if (device_type & DEVICE_NPU) {
+            ModelInfo preflight_info = model_info;
+            preflight_info.device = device_type;
+            const double available_memory_gb =
+                sample_available_memory_gb(device_type);
+            bound_npu_auto_ctx = resolve_auto_ctx_size(
+                effective_options, preflight_info, available_memory_gb);
+            if (*bound_npu_auto_ctx == AUTO_CTX_FALLBACK &&
+                model_info.size > 10.0 && available_memory_gb > 0) {
+                throw std::runtime_error(
+                    "Not enough memory to load " + canonical_model_name +
+                    " (" +
+                    std::to_string(static_cast<int>(model_info.size)) +
+                    " GB). The NPU driver needs additional working memory beyond" +
+                    " model weights. Free up memory or try a smaller model.");
+            }
+        }
+
+        prune_unavailable_servers_locked();
+        prune_stale_routing_helpers_locked();
+
         WrappedServer* existing = find_server_by_model_name(canonical_model_name);
         if (existing && !existing->is_backend_alive()) {
             LOG(WARNING, "Router") << "Existing backend for " << canonical_model_name
@@ -1085,21 +1100,13 @@ void Router::load_model(const std::string& model_name,
             existing = nullptr;
         }
         if (existing) {
-            json existing_opts = existing->get_recipe_options().to_json();
-            json requested_opts = effective_options.to_json();
-            existing_opts.erase("pinned");
-            requested_opts.erase("pinned");
-            if (allow_reload_on_option_change && existing_opts != requested_opts) {
-                LOG(INFO, "Router") << "Options changed, reloading model: " << canonical_model_name << std::endl;
+            if (allow_reload_on_option_change && !options_match(*existing)) {
+                LOG(INFO, "Router") << "Options changed, reloading model: "
+                                    << canonical_model_name << std::endl;
                 reload_existing = existing;
-                // Fall through to admission checks before unloading the existing instance.
             } else {
-                // Residency follows the current use of the live process. Promotion
-                // and demotion both reuse the process and obey destination-pool
-                // admission and pinning rules.
                 transition_server_residency_locked(
                     existing, requested_residency_class);
-                LOG(DEBUG, "Router") << "Model already loaded, updating access time and pinned status" << std::endl;
                 existing->set_pinned(final_pinned);
                 existing->update_access_time();
                 is_loading_ = false;
@@ -1107,14 +1114,6 @@ void Router::load_model(const std::string& model_name,
                 return;
             }
         }
-
-        // Construct the backend before admission so variant-dependent device and
-        // accelerator-sharing policy are resolved from the effective load options.
-        std::unique_ptr<WrappedServer> new_server = create_backend_server(model_info);
-
-        // Determine model type and effective device.
-        ModelType model_type = model_info.type;
-        DeviceType device_type = new_server->effective_device(effective_options);
 
         // NPU admission is a preflight-and-commit operation. Compute the complete
         // conflict set first, then reject any protected resident before changing
@@ -1153,10 +1152,9 @@ void Router::load_model(const std::string& model_name,
             }
         }
 
-        const bool requested_gpu = should_enforce_gpu_memory_capacity(
-            model_info, effective_options);
+        const bool requested_gpu = uses_gpu_memory_capacity(device_type);
         GpuMemoryAdmissionPlan gpu_plan = plan_gpu_memory_capacity(
-            model_info, effective_options, reload_existing);
+            model_info, effective_options, device_type, reload_existing);
         if (!gpu_plan.can_fit) {
             throw std::runtime_error(gpu_plan.rejection_reason);
         }
@@ -1242,9 +1240,16 @@ void Router::load_model(const std::string& model_name,
                 canonical_model_name);
         }
 
-        // Auto-tune: resolve ctx_size = -1 → computed from memory + arch metadata
-        // Done AFTER eviction so that freed VRAM/RAM is visible to the memory query.
-        int64_t auto_ctx = resolve_auto_ctx_size(effective_options, model_info);
+        // NPU auto-context is bound by the pre-mutation admission check. Other
+        // devices may sample again after eviction so released memory is visible.
+        ModelInfo auto_tune_info = model_info;
+        auto_tune_info.device = device_type;
+        const int64_t auto_ctx = bound_npu_auto_ctx
+            ? *bound_npu_auto_ctx
+            : resolve_auto_ctx_size(
+                  effective_options, auto_tune_info,
+                  sample_available_memory_gb(device_type));
+        const bool ctx_size_auto = auto_ctx != -2;
         if (auto_ctx > 0) {
             LOG(INFO, "Router") << "Auto-tune ctx_size resolved to " << auto_ctx << std::endl;
             effective_options.set_option("ctx_size", auto_ctx);
@@ -1254,6 +1259,7 @@ void Router::load_model(const std::string& model_name,
 
         // Set model metadata
         new_server->set_model_metadata(canonical_model_name, model_info.checkpoint(), model_type, device_type, effective_options);
+        new_server->set_ctx_size_auto(ctx_size_auto);
         new_server->set_residency_class(requested_residency_class);
         new_server->set_pinned(final_pinned);
         new_server->update_access_time();
@@ -1382,6 +1388,7 @@ void Router::load_model(const std::string& model_name,
             // Create new server for retry
             std::unique_ptr<WrappedServer> retry_server = create_backend_server(model_info);
             retry_server->set_model_metadata(canonical_model_name, model_info.checkpoint(), model_type, device_type, effective_options);
+            retry_server->set_ctx_size_auto(ctx_size_auto);
             retry_server->set_residency_class(requested_residency_class);
             retry_server->set_pinned(final_pinned);
             retry_server->update_access_time();
@@ -1656,6 +1663,26 @@ bool Router::is_model_loaded(const std::string& model_name) const {
     std::lock_guard<std::mutex> lock(load_mutex_);
     auto* server = find_server_by_model_name(resolve_model_name(model_name));
     return server != nullptr && server->is_backend_alive();
+}
+
+RecipeOptions Router::resolve_effective_options(const ModelInfo& model_info,
+                                                const RecipeOptions& request_options) const {
+    const std::string backend_option = model_info.recipe + "_backend";
+
+    RecipeOptions tentative = request_options.inherit(model_info.recipe_options.inherit(
+        RecipeOptions(model_info.recipe, config_->recipe_options(""))));
+    json backend_json = tentative.get_option(backend_option);
+    const std::string backend = backend_json.is_string() ? backend_json.get<std::string>() : "";
+
+    // Second pass: rebuild defaults using the resolved backend.
+    // Per-architecture defaults sit between global config and model-level recipe_options.
+    RecipeOptions default_opt = RecipeOptions(model_info.recipe, config_->recipe_options(backend));
+    RecipeOptions arch_opts(
+        model_info.recipe,
+        model_manager_
+            ? model_manager_->get_architecture_defaults(model_info.gguf.architecture)
+            : json::object());
+    return request_options.inherit(model_info.recipe_options.inherit(arch_opts.inherit(default_opt)));
 }
 
 RecipeOptions Router::get_model_recipe_options(const std::string& model_name) const {
@@ -2474,7 +2501,10 @@ void Router::model_3d_generations(const json& request, httplib::DataSink& sink) 
 
 json Router::get_stats() const {
     std::lock_guard<std::mutex> lock(telemetry_mutex_);
-    return aggregate_telemetry_.to_json();
+    json stats = aggregate_telemetry_.to_json();
+    stats["routing_decisions_total"] = routing_decisions_total_;
+    stats["routing_switches_total"] = routing_switches_total_;
+    return stats;
 }
 
 json Router::get_metrics_snapshot() const {
@@ -2485,7 +2515,10 @@ json Router::get_metrics_snapshot() const {
         {"requests", 0},
         {"input_tokens", 0},
         {"output_tokens", 0},
-        {"prompt_tokens", 0}
+        {"prompt_tokens", 0},
+        {"cache_tokens", 0},
+        {"routing_decisions", 0},
+        {"routing_switches", 0}
     };
 
     std::map<std::string, ModelTelemetryIdentity> loaded_identities;
@@ -2543,6 +2576,9 @@ json Router::get_metrics_snapshot() const {
         result["totals"]["input_tokens"] = aggregate_telemetry_.input_tokens_total;
         result["totals"]["output_tokens"] = aggregate_telemetry_.output_tokens_total;
         result["totals"]["prompt_tokens"] = aggregate_telemetry_.prompt_tokens_total;
+        result["totals"]["cache_tokens"] = aggregate_telemetry_.cache_tokens_total;
+        result["totals"]["routing_decisions"] = routing_decisions_total_;
+        result["totals"]["routing_switches"] = routing_switches_total_;
     }
 
     return result;
@@ -2563,61 +2599,75 @@ ModelTelemetryIdentity Router::get_telemetry_identity(WrappedServer* server) con
     };
 }
 
-void Router::record_telemetry_for_model(const ModelTelemetryIdentity& identity,
-                                        int input_tokens,
-                                        int output_tokens,
-                                        double time_to_first_token,
-                                        double tokens_per_second) {
+void Router::record_request_telemetry_for_model(const ModelTelemetryIdentity& identity,
+                                                const StreamingProxy::TelemetryData& telemetry) {
     if (identity.model_name.empty()) {
         return;
     }
 
+    // One request = one atomic update under a single lock hold, so concurrent
+    // requests can interleave whole updates but never mix fields of two
+    // requests (e.g. one request's cache reset landing on another's value).
+    const int prompt_tokens = telemetry.prompt_tokens >= 0
+        ? telemetry.prompt_tokens
+        : (telemetry.input_tokens > 0 ? telemetry.input_tokens : -1);
+
     std::lock_guard<std::mutex> lock(telemetry_mutex_);
     ModelTelemetryRecord& record = telemetry_by_model_[identity.key()];
     record.identity = identity;
-    Telemetry& model_telemetry = record.telemetry;
-    model_telemetry.input_tokens = input_tokens;
-    model_telemetry.output_tokens = output_tokens;
-    model_telemetry.time_to_first_token = time_to_first_token;
-    model_telemetry.tokens_per_second = tokens_per_second;
-    model_telemetry.request_count_total++;
 
-    aggregate_telemetry_.input_tokens = input_tokens;
-    aggregate_telemetry_.output_tokens = output_tokens;
-    aggregate_telemetry_.time_to_first_token = time_to_first_token;
-    aggregate_telemetry_.tokens_per_second = tokens_per_second;
-    aggregate_telemetry_.request_count_total++;
-
-    if (input_tokens > 0) {
-        model_telemetry.input_tokens_total += static_cast<uint64_t>(input_tokens);
-        aggregate_telemetry_.input_tokens_total += static_cast<uint64_t>(input_tokens);
-    }
-    if (output_tokens > 0) {
-        model_telemetry.output_tokens_total += static_cast<uint64_t>(output_tokens);
-        aggregate_telemetry_.output_tokens_total += static_cast<uint64_t>(output_tokens);
+    for (Telemetry* t : {&record.telemetry, &aggregate_telemetry_}) {
+        t->input_tokens = telemetry.input_tokens;
+        t->output_tokens = telemetry.output_tokens;
+        t->time_to_first_token = telemetry.time_to_first_token;
+        t->tokens_per_second = telemetry.tokens_per_second;
+        t->cache_tokens = telemetry.cache_tokens >= 0 ? telemetry.cache_tokens : -1;
+        t->request_count_total++;
+        if (prompt_tokens >= 0) {
+            t->prompt_tokens = prompt_tokens;
+        }
+        if (telemetry.input_tokens > 0) {
+            t->input_tokens_total += static_cast<uint64_t>(telemetry.input_tokens);
+        }
+        if (telemetry.output_tokens > 0) {
+            t->output_tokens_total += static_cast<uint64_t>(telemetry.output_tokens);
+        }
+        if (prompt_tokens > 0) {
+            t->prompt_tokens_total += static_cast<uint64_t>(prompt_tokens);
+        }
+        if (telemetry.cache_tokens > 0) {
+            t->cache_tokens_total += static_cast<uint64_t>(telemetry.cache_tokens);
+        }
     }
 }
 
-void Router::record_prompt_tokens_for_model(const ModelTelemetryIdentity& identity, int prompt_tokens) {
-    if (identity.model_name.empty()) {
+void Router::note_route_decision(uint64_t conversation_fingerprint, const std::string& route_to) {
+    static constexpr size_t kRouteFingerprintCapacity = 1024;
+
+    std::lock_guard<std::mutex> lock(telemetry_mutex_);
+    routing_decisions_total_++;
+
+    auto it = route_last_target_.find(conversation_fingerprint);
+    if (it != route_last_target_.end()) {
+        if (it->second.first != route_to) {
+            routing_switches_total_++;
+            it->second.first = route_to;
+        }
+        route_fingerprint_lru_.splice(route_fingerprint_lru_.begin(),
+                                      route_fingerprint_lru_, it->second.second);
         return;
     }
 
-    std::lock_guard<std::mutex> lock(telemetry_mutex_);
-    ModelTelemetryRecord& record = telemetry_by_model_[identity.key()];
-    record.identity = identity;
-    Telemetry& model_telemetry = record.telemetry;
-    model_telemetry.prompt_tokens = prompt_tokens;
-    aggregate_telemetry_.prompt_tokens = prompt_tokens;
-    if (prompt_tokens > 0) {
-        model_telemetry.prompt_tokens_total += static_cast<uint64_t>(prompt_tokens);
-        aggregate_telemetry_.prompt_tokens_total += static_cast<uint64_t>(prompt_tokens);
+    route_fingerprint_lru_.push_front(conversation_fingerprint);
+    route_last_target_[conversation_fingerprint] = {route_to, route_fingerprint_lru_.begin()};
+    if (route_last_target_.size() > kRouteFingerprintCapacity) {
+        route_last_target_.erase(route_fingerprint_lru_.back());
+        route_fingerprint_lru_.pop_back();
     }
 }
 
-void Router::update_telemetry(const std::string& model_name,
-                              int input_tokens, int output_tokens,
-                              double time_to_first_token, double tokens_per_second) {
+void Router::update_request_telemetry(const std::string& model_name,
+                                      const StreamingProxy::TelemetryData& telemetry) {
     ModelTelemetryIdentity identity;
     {
         std::lock_guard<std::mutex> lock(load_mutex_);
@@ -2626,20 +2676,7 @@ void Router::update_telemetry(const std::string& model_name,
             : find_server_by_model_name(resolve_model_name(model_name));
         identity = get_telemetry_identity(server);
     }
-    record_telemetry_for_model(identity, input_tokens, output_tokens,
-                               time_to_first_token, tokens_per_second);
-}
-
-void Router::update_prompt_tokens(const std::string& model_name, int prompt_tokens) {
-    ModelTelemetryIdentity identity;
-    {
-        std::lock_guard<std::mutex> lock(load_mutex_);
-        WrappedServer* server = model_name.empty()
-            ? get_most_recent_server()
-            : find_server_by_model_name(resolve_model_name(model_name));
-        identity = get_telemetry_identity(server);
-    }
-    record_prompt_tokens_for_model(identity, prompt_tokens);
+    record_request_telemetry_for_model(identity, telemetry);
 }
 
 void Router::chat_completion_stream(const std::string& request_body, httplib::DataSink& sink) {
@@ -2731,28 +2768,23 @@ void Router::chat_completion_stream(const std::string& request_body, httplib::Da
             }
 
             server->forward_streaming_request("/v1/chat/completions", request_body, telemetry_sink, true, 0,
-                [this, identity, span, accumulated_text, accumulated_reasoning, server](int input_tokens,
-                                 int output_tokens,
-                                 double time_to_first_token,
-                                 double tokens_per_second,
-                                 const std::string& error_message) {
-                    if (!error_message.empty()) {
+                [this, identity, span, accumulated_text, accumulated_reasoning, server](
+                    const StreamingProxy::TelemetryData& telemetry) {
+                    if (!telemetry.error_message.empty()) {
                         if (span) {
-                            span->end_with_error(error_message);
+                            span->end_with_error(telemetry.error_message);
                         }
                         return;
                     }
-                    record_telemetry_for_model(identity, input_tokens, output_tokens,
-                                               time_to_first_token, tokens_per_second);
-                    record_prompt_tokens_for_model(identity, input_tokens);
+                    record_request_telemetry_for_model(identity, telemetry);
 
                     if (span) {
                         nlohmann::json usage_payload = {
-                            {"prompt_tokens", input_tokens},
-                            {"completion_tokens", output_tokens}
+                            {"prompt_tokens", telemetry.input_tokens},
+                            {"completion_tokens", telemetry.output_tokens}
                         };
-                        span->set_attribute("llm.performance.time_to_first_token", time_to_first_token);
-                        span->set_attribute("llm.performance.tokens_per_second", tokens_per_second);
+                        span->set_attribute("llm.performance.time_to_first_token", telemetry.time_to_first_token);
+                        span->set_attribute("llm.performance.tokens_per_second", telemetry.tokens_per_second);
                         std::string final_output = *accumulated_text;
                         if (!accumulated_reasoning->empty()) {
                             final_output = "<think>\n" + *accumulated_reasoning + "\n</think>\n" + final_output;
@@ -2855,28 +2887,23 @@ void Router::completion_stream(const std::string& request_body, httplib::DataSin
             }
 
             server->forward_streaming_request("/v1/completions", request_body, telemetry_sink, true, 0,
-                [this, identity, span, accumulated_text, server](int input_tokens,
-                                 int output_tokens,
-                                 double time_to_first_token,
-                                 double tokens_per_second,
-                                 const std::string& error_message) {
-                    if (!error_message.empty()) {
+                [this, identity, span, accumulated_text, server](
+                    const StreamingProxy::TelemetryData& telemetry) {
+                    if (!telemetry.error_message.empty()) {
                         if (span) {
-                            span->end_with_error(error_message);
+                            span->end_with_error(telemetry.error_message);
                         }
                         return;
                     }
-                    record_telemetry_for_model(identity, input_tokens, output_tokens,
-                                               time_to_first_token, tokens_per_second);
-                    record_prompt_tokens_for_model(identity, input_tokens);
+                    record_request_telemetry_for_model(identity, telemetry);
 
                     if (span) {
                         nlohmann::json usage_payload = {
-                            {"prompt_tokens", input_tokens},
-                            {"completion_tokens", output_tokens}
+                            {"prompt_tokens", telemetry.input_tokens},
+                            {"completion_tokens", telemetry.output_tokens}
                         };
-                        span->set_attribute("llm.performance.time_to_first_token", time_to_first_token);
-                        span->set_attribute("llm.performance.tokens_per_second", tokens_per_second);
+                        span->set_attribute("llm.performance.time_to_first_token", telemetry.time_to_first_token);
+                        span->set_attribute("llm.performance.tokens_per_second", telemetry.tokens_per_second);
 
                         std::string url;
                         std::function<std::map<std::string, nlohmann::json>(const std::string&)> parser;
@@ -2970,28 +2997,23 @@ void Router::responses_stream(const std::string& request_body, httplib::DataSink
             }
 
             server->forward_streaming_request("/v1/responses", request_body, telemetry_sink, true, 0,
-                [this, identity, span, accumulated_text, server](int input_tokens,
-                                 int output_tokens,
-                                 double time_to_first_token,
-                                 double tokens_per_second,
-                                 const std::string& error_message) {
-                    if (!error_message.empty()) {
+                [this, identity, span, accumulated_text, server](
+                    const StreamingProxy::TelemetryData& telemetry) {
+                    if (!telemetry.error_message.empty()) {
                         if (span) {
-                            span->end_with_error(error_message);
+                            span->end_with_error(telemetry.error_message);
                         }
                         return;
                     }
-                    record_telemetry_for_model(identity, input_tokens, output_tokens,
-                                               time_to_first_token, tokens_per_second);
-                    record_prompt_tokens_for_model(identity, input_tokens);
+                    record_request_telemetry_for_model(identity, telemetry);
 
                     if (span) {
                         nlohmann::json usage_payload = {
-                            {"prompt_tokens", input_tokens},
-                            {"completion_tokens", output_tokens}
+                            {"prompt_tokens", telemetry.input_tokens},
+                            {"completion_tokens", telemetry.output_tokens}
                         };
-                        span->set_attribute("llm.performance.time_to_first_token", time_to_first_token);
-                        span->set_attribute("llm.performance.tokens_per_second", tokens_per_second);
+                        span->set_attribute("llm.performance.time_to_first_token", telemetry.time_to_first_token);
+                        span->set_attribute("llm.performance.tokens_per_second", telemetry.tokens_per_second);
 
                         std::string url;
                         std::function<std::map<std::string, nlohmann::json>(const std::string&)> parser;

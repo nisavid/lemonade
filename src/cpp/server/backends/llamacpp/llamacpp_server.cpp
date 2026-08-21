@@ -401,8 +401,6 @@ void LlamaCppServer::load(const std::string& model_name,
     } else if (uses_mtp) {
         LOG(INFO, "LlamaCpp") << "Model uses MTP, adding draft decoding defaults" << std::endl;
         push_overridable_arg(args, llamacpp_args, "--spec-type", "draft-mtp");
-        push_overridable_arg(args, llamacpp_args, "--spec-draft-n-max", "3");
-        push_overridable_arg(args, llamacpp_args, "--spec-draft-p-min", "0.75");
     }
 
     // Disable llamacpp webui by default
@@ -456,9 +454,10 @@ void LlamaCppServer::load(const std::string& model_name,
         if (llamacpp_backend == "rocm-stable") {
             std::string rocm_arch = SystemInfo::get_rocm_arch();
             if (!rocm_arch.empty()) {
-                std::string therock_lib = BackendUtils::get_therock_lib_path(rocm_arch);
-                if (!therock_lib.empty()) {
-                    lib_path = therock_lib + ":" + lib_path;
+                std::string therock_dirs = BackendUtils::join_runtime_dirs(
+                    BackendUtils::get_therock_lib_paths(rocm_arch));
+                if (!therock_dirs.empty()) {
+                    lib_path = therock_dirs + ":" + lib_path;
                 }
             }
         }
@@ -495,9 +494,12 @@ void LlamaCppServer::load(const std::string& model_name,
         if (llamacpp_backend == "rocm-stable") {
             std::string rocm_arch = SystemInfo::get_rocm_arch();
             if (!rocm_arch.empty()) {
-                std::string therock_bin = BackendUtils::get_therock_lib_path(rocm_arch);
-                if (!therock_bin.empty()) {
-                    new_path = path_to_utf8(fs::absolute(path_from_utf8(therock_bin)));
+                // Prepend ALL TheRock runtime dirs (not just _rocm_sdk_core/bin) so
+                // HIP + BLAS DLLs resolve; _rocm_sdk_core/bin alone → STATUS_DLL_NOT_FOUND.
+                std::string therock_dirs = BackendUtils::join_runtime_dirs(
+                    BackendUtils::get_therock_lib_paths(rocm_arch));
+                if (!therock_dirs.empty()) {
+                    new_path = therock_dirs;
                 }
             }
         }
@@ -508,6 +510,17 @@ void LlamaCppServer::load(const std::string& model_name,
                 new_path += ";" + std::string(existing_path);
             }
             env_vars.push_back({"PATH", new_path});
+        }
+
+        // Windows DLL search order checks System32 BEFORE PATH, so a stale
+        // System32 amdhip64_7.dll shadows the TheRock runtime on PATH. Copying
+        // to the exe directory overrides both.
+        if (llamacpp_backend == "rocm-stable") {
+            std::string rocm_arch = SystemInfo::get_rocm_arch();
+            if (!rocm_arch.empty()) {
+                BackendUtils::stage_therock_hip_runtime(
+                    rocm_arch, fs::path(executable).parent_path());
+            }
         }
 
         std::string arch = lemon::SystemInfo::get_rocm_arch();

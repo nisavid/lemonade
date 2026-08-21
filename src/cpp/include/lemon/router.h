@@ -5,11 +5,13 @@
 #include <memory>
 #include <deque>
 #include <functional>
+#include <list>
 #include <map>
 #include <mutex>
 #include <set>
 #include <condition_variable>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 #include <optional>
 #include <nlohmann/json.hpp>
@@ -153,6 +155,13 @@ public:
         LoadPurpose load_purpose = LoadPurpose::UserInference,
         std::atomic<bool>* cancel_flag = nullptr);
 
+    // Collapse the option precedence chain — request > model > per-architecture
+    // > global config > built-in defaults — into the set a load would use.
+    // ctx_size may still be the -1 auto sentinel; the concrete value is only
+    // resolved inside load_model, once eviction has freed memory.
+    RecipeOptions resolve_effective_options(const ModelInfo& model_info,
+                                            const RecipeOptions& request_options) const;
+
     // Apply request intent to an already-live process without reloading it.
     // Returns false when the requested model is not currently live.
     bool ensure_loaded_model_residency(
@@ -243,11 +252,14 @@ public:
     // Get loaded backend metadata and per-model telemetry for metrics rendering.
     json get_metrics_snapshot() const;
 
-    void update_telemetry(const std::string& model_name,
-                         int input_tokens, int output_tokens,
-                         double time_to_first_token, double tokens_per_second);
+    // Record one completed request's telemetry as a single atomic update.
+    void update_request_telemetry(const std::string& model_name,
+                                  const StreamingProxy::TelemetryData& telemetry);
 
-    void update_prompt_tokens(const std::string& model_name, int prompt_tokens);
+    // Route-stability accounting for collection.router dispatch. The
+    // fingerprint is a metrics key only (hash of the conversation's stable
+    // prefix) — it never influences routing and stores no message content.
+    void note_route_decision(uint64_t conversation_fingerprint, const std::string& route_to);
 
     bool begin_exclusive(std::atomic<bool>* cancel = nullptr);
     void end_exclusive();
@@ -275,10 +287,18 @@ private:
     BackendManager* backend_manager_;  // Non-owning pointer to BackendManager
     CloudProviderRegistry* cloud_registry_ = nullptr;  // Non-owning
     std::function<double()> gpu_memory_sampler_;
+    std::function<double(DeviceType)> available_memory_sampler_;
 
     mutable std::mutex telemetry_mutex_;
     Telemetry aggregate_telemetry_;
     std::map<std::string, ModelTelemetryRecord> telemetry_by_model_;
+
+    uint64_t routing_decisions_total_ = 0;
+    uint64_t routing_switches_total_ = 0;
+    std::list<uint64_t> route_fingerprint_lru_;
+    std::unordered_map<uint64_t,
+                       std::pair<std::string, std::list<uint64_t>::iterator>>
+        route_last_target_;
 
     // Concurrency control for load operations
     mutable std::mutex load_mutex_;              // Protects loading state and loaded_servers_
@@ -385,21 +405,17 @@ private:
                                             const RecipeOptions& options) const;
     double get_total_gpu_capacity_gb() const;
     double sample_total_gpu_occupancy_gb() const;
+    double sample_available_memory_gb(DeviceType device) const;
     double get_lemonade_gpu_occupancy_gb() const;
     bool is_gpu_resident_server(const WrappedServer& server) const;
-    bool should_enforce_gpu_memory_capacity(const ModelInfo& model_info,
-                                            const RecipeOptions& options) const;
     GpuMemoryAdmissionPlan plan_gpu_memory_capacity(
         const ModelInfo& model_info,
         const RecipeOptions& options,
+        DeviceType effective_device,
         const WrappedServer* replacement_server = nullptr) const;
     ModelTelemetryIdentity get_telemetry_identity(WrappedServer* server) const;
-    void record_telemetry_for_model(const ModelTelemetryIdentity& identity,
-                                    int input_tokens,
-                                    int output_tokens,
-                                    double time_to_first_token,
-                                    double tokens_per_second);
-    void record_prompt_tokens_for_model(const ModelTelemetryIdentity& identity, int prompt_tokens);
+    void record_request_telemetry_for_model(const ModelTelemetryIdentity& identity,
+                                            const StreamingProxy::TelemetryData& telemetry);
 
     template<typename Func>
     auto execute_inference(const json& request, Func&& inference_func) -> decltype(inference_func(nullptr));

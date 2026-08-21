@@ -1,6 +1,7 @@
+#include "lemon/backends/sdcpp/sdcpp.h"
+#include "lemon/backends/whispercpp/whispercpp.h"
 #include "lemon/gpu_memory_planner.h"
 
-#include <cassert>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -9,6 +10,14 @@ using lemon::GpuMemoryAdmissionInputs;
 using lemon::GpuMemoryResident;
 using lemon::gpu_memory_capacity_from_pools_gb;
 using lemon::plan_gpu_memory_admission;
+using lemon::uses_gpu_memory_capacity;
+
+static int failures = 0;
+
+static void expect_true(const char* name, bool ok) {
+    std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
+    if (!ok) ++failures;
+}
 
 static void expect_evictions(const char* name,
                              const std::vector<std::string>& actual,
@@ -22,7 +31,7 @@ static void expect_evictions(const char* name,
         for (const auto& value : expected) std::printf(" %s", value.c_str());
         std::printf("\n");
     }
-    assert(ok);
+    if (!ok) ++failures;
 }
 
 static void expect_capacity(const char* name, double actual, double expected) {
@@ -31,10 +40,34 @@ static void expect_capacity(const char* name, double actual, double expected) {
     if (!ok) {
         std::printf("  got: %.3f GB\n want: %.3f GB\n", actual, expected);
     }
-    assert(ok);
+    if (!ok) ++failures;
 }
 
 int main() {
+    {
+        const auto cpu_device =
+            lemon::backends::whispercpp::device_for_backend("");
+        const auto rocm_device =
+            lemon::backends::whispercpp::device_for_backend("rocm");
+        expect_true("default Whisper CPU load does not consume GPU capacity",
+                    !uses_gpu_memory_capacity(cpu_device));
+        expect_true("ROCm Whisper load consumes GPU capacity",
+                    uses_gpu_memory_capacity(rocm_device));
+
+        expect_true(
+            "unselected SD backend has a CPU fallback",
+            !uses_gpu_memory_capacity(
+                lemon::backends::sdcpp::device_for_backend("")));
+        expect_true(
+            "CPU SD load does not consume GPU capacity",
+            !uses_gpu_memory_capacity(
+                lemon::backends::sdcpp::device_for_backend("cpu")));
+        expect_true(
+            "ROCm SD load consumes GPU capacity",
+            uses_gpu_memory_capacity(
+                lemon::backends::sdcpp::device_for_backend("rocm")));
+    }
+
     {
         GpuMemoryAdmissionInputs inputs;
         inputs.configured_capacity_gb = 12.0;
@@ -49,11 +82,12 @@ int main() {
         };
 
         auto plan = plan_gpu_memory_admission(inputs);
-        assert(plan.can_fit);
+        expect_true("candidate fits after planned evictions", plan.can_fit);
         expect_evictions("evicts largest residents first until candidate fits",
                          plan.models_to_evict,
                          {"large", "medium"});
-        assert(plan.effective_capacity_gb == 12.0);
+        expect_capacity("configured capacity bounds effective capacity",
+                        plan.effective_capacity_gb, 12.0);
     }
 
     {
@@ -68,11 +102,13 @@ int main() {
         };
 
         auto plan = plan_gpu_memory_admission(inputs);
-        assert(!plan.can_fit);
+        expect_true("candidate is rejected when evictions cannot make room",
+                    !plan.can_fit);
         expect_evictions("does not evict when candidate cannot fit after dry run",
                          plan.models_to_evict,
                          {});
-        assert(plan.effective_capacity_gb == 6.0);
+        expect_capacity("available memory bounds effective capacity",
+                        plan.effective_capacity_gb, 6.0);
     }
 
     {
@@ -84,8 +120,9 @@ int main() {
         inputs.candidate_occupancy_gb = 4.0;
 
         auto plan = plan_gpu_memory_admission(inputs);
-        assert(plan.can_fit);
-        assert(plan.effective_capacity_gb == 22.0);
+        expect_true("auto-capacity candidate fits", plan.can_fit);
+        expect_capacity("auto capacity uses available memory",
+                        plan.effective_capacity_gb, 22.0);
         expect_evictions("auto capacity uses current memory available to Lemonade",
                          plan.models_to_evict,
                          {});
@@ -110,5 +147,5 @@ int main() {
     }
 
     std::printf("\nAll GPU memory planner cases passed\n");
-    return 0;
+    return failures == 0 ? 0 : 1;
 }
