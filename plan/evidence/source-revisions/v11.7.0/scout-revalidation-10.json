@@ -1,0 +1,14 @@
+{
+  "input_path": "src/cpp/server/gpu_memory_planner.cpp",
+  "predecessor_sha256": "7ba8ff406cb7060cfc7178b2ef1f79c1d01a320f98a163cf4633df4ccf84c48b",
+  "result": "accepted",
+  "reviewed_fork_sha256": "738ed1f7e52e76693089ae6bffcf1d375b60975d9622cd8092c8f5d2f188bed1",
+  "reviewed_maintained_fork_commit": "87267c852378a064b948571ff088e1f8ecb4cb70",
+  "revision_id": "v11.7.0-forward-1",
+  "schema": "portable_residency_source_revalidation/v1",
+  "selected_upstream_sha256": null,
+  "source_revision_record_digest": "082d86f8a6304a4d204c563b44058608e8d4678c0531ca5bd3c324718d2f5af5",
+  "validated_claims": [
+    "fork_plan_gpu_memory_admission"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "input_path": "src/cpp/include/lemon/runtime_config.h",
+  "predecessor_sha256": "2e71cc4f7b58cea71b07b7d1d268774b4755578c83626f89b056106d3a09584e",
+  "result": "accepted",
+  "reviewed_fork_sha256": "4da4ffc81d84092e151eec6f79a3ee4e27dd544d7c58d99c31da534ddc5e6b35",
+  "reviewed_maintained_fork_commit": "87267c852378a064b948571ff088e1f8ecb4cb70",
+  "revision_id": "v11.7.0-forward-1",
+  "schema": "portable_residency_source_revalidation/v1",
+  "selected_upstream_sha256": "e072d381bd69a17e957946df073c1946c41251a4c018ce9e411f78c66e02c2f8",
+  "source_revision_record_digest": "082d86f8a6304a4d204c563b44058608e8d4678c0531ca5bd3c324718d2f5af5",
+  "validated_claims": [
+    "configuration_and_legacy_keys"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "input_path": "src/cpp/server/server.cpp",
+  "predecessor_sha256": "3e541f333c44c71017d4375f9af14529287c653b1b042286ae4597c2638e0ca4",
+  "result": "accepted",
+  "reviewed_fork_sha256": "c0e275c8c46060b89135563a0b6e62e223955a7320e48461773d2f7db7e0bc7c",
+  "reviewed_maintained_fork_commit": "87267c852378a064b948571ff088e1f8ecb4cb70",
+  "revision_id": "v11.7.0-forward-1",
+  "schema": "portable_residency_source_revalidation/v1",
+  "selected_upstream_sha256": "932a2907595e577239ff3fe5fe9aa76b0b4e2bc9b27826ca33de969d70ae7fcc",
+  "source_revision_record_digest": "082d86f8a6304a4d204c563b44058608e8d4678c0531ca5bd3c324718d2f5af5",
+  "validated_claims": [
+    "artifact_pull_import_delete_cleanup",
+    "public_api_route_mappings"
+  ]
+}

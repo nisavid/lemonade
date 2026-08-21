@@ -1,0 +1,14 @@
+{
+  "input_path": "src/cpp/server/eviction_engine.cpp",
+  "predecessor_sha256": "b3893b209476c562d2cde4559b2430202b3e5bce09deecfb322a40b7ead41de5",
+  "result": "accepted",
+  "reviewed_fork_sha256": "d056727b5df78891f8b4f4af7ce69cda667d8bd1924f065f285e7879e78fa8c8",
+  "reviewed_maintained_fork_commit": "87267c852378a064b948571ff088e1f8ecb4cb70",
+  "revision_id": "v11.7.0-forward-1",
+  "schema": "portable_residency_source_revalidation/v1",
+  "selected_upstream_sha256": "d056727b5df78891f8b4f4af7ce69cda667d8bd1924f065f285e7879e78fa8c8",
+  "source_revision_record_digest": "082d86f8a6304a4d204c563b44058608e8d4678c0531ca5bd3c324718d2f5af5",
+  "validated_claims": [
+    "stable_eviction_engine"
+  ]
+}

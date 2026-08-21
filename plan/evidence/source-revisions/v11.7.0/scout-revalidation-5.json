@@ -1,0 +1,15 @@
+{
+  "input_path": "src/cpp/include/lemon/wrapped_server.h",
+  "predecessor_sha256": "86ea156341e5bdab7cfeb8163f1f8eff767ae9e67ce95cd9094d18e18b5bce63",
+  "result": "accepted",
+  "reviewed_fork_sha256": "d7a0e815a1dc4c3e984076641ef428313afbd5bd463aad846d1624495746db7e",
+  "reviewed_maintained_fork_commit": "87267c852378a064b948571ff088e1f8ecb4cb70",
+  "revision_id": "v11.7.0-forward-1",
+  "schema": "portable_residency_source_revalidation/v1",
+  "selected_upstream_sha256": "a3eab5a324bfcbf82a2d162a3db3ce56d153f3e42c813d2224e1a57b38a8f8e9",
+  "source_revision_record_digest": "082d86f8a6304a4d204c563b44058608e8d4678c0531ca5bd3c324718d2f5af5",
+  "validated_claims": [
+    "backend_process_lifecycle_hooks",
+    "routing_helper_pending_stale"
+  ]
+}

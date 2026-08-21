@@ -1,0 +1,14 @@
+{
+  "input_path": "test/cpp/test_routing_helper_reconcile.cpp",
+  "predecessor_sha256": "d4505318247133e0511e42af4d662d7900f072a1334760db0c00d1329ba2c5d8",
+  "result": "accepted",
+  "reviewed_fork_sha256": "559e4a3993eafbc2abe9d805a7d1746ddee1054050690f4d3cd13301b3a5cd5e",
+  "reviewed_maintained_fork_commit": "87267c852378a064b948571ff088e1f8ecb4cb70",
+  "revision_id": "v11.7.0-forward-1",
+  "schema": "portable_residency_source_revalidation/v1",
+  "selected_upstream_sha256": "d4505318247133e0511e42af4d662d7900f072a1334760db0c00d1329ba2c5d8",
+  "source_revision_record_digest": "082d86f8a6304a4d204c563b44058608e8d4678c0531ca5bd3c324718d2f5af5",
+  "validated_claims": [
+    "existing_residency_tests"
+  ]
+}
