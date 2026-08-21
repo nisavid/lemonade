@@ -704,6 +704,14 @@ sys.exit(0)
 
     def test_045_config_set_broadcast(self):
         """Verify that CLI config set can modify broadcast setting, and client CLI works with --discovery / --no-discovery."""
+        response = requests.get(
+            f"http://localhost:{PORT}/api/v1/params",
+            headers=_auth_headers(),
+            timeout=10,
+        )
+        self.assertEqual(response.status_code, 200)
+        prior_broadcast = response.json().get("broadcast", True)
+
         try:
             # 1. Set broadcast to false using the CLI config set
             result = self.assertCommandSucceeds(
@@ -762,8 +770,15 @@ sys.exit(0)
                 ]
             )
         finally:
-            # Restore default
-            run_cli_command(["--port", str(PORT), "config", "set", "broadcast=true"])
+            run_cli_command(
+                [
+                    "--port",
+                    str(PORT),
+                    "config",
+                    "set",
+                    f"broadcast={str(prior_broadcast).lower()}",
+                ]
+            )
 
     # =============================================================================
     # Pull Tests

@@ -21,9 +21,9 @@ int main() {
     int failures = 0;
     auto check = [&failures](bool condition, const char* name) {
         if (condition) {
-            std::printf("[PASS] %s\\n", name);
+            std::printf("[PASS] %s\n", name);
         } else {
-            std::printf("[FAIL] %s\\n", name);
+            std::printf("[FAIL] %s\n", name);
             ++failures;
         }
     };
@@ -50,7 +50,7 @@ int main() {
 
     const int port = backend.bind_to_any_port("127.0.0.1");
     if (port <= 0) {
-        std::printf("[FAIL] failed to bind mock backend\\n");
+        std::printf("[FAIL] failed to bind mock backend\n");
         return 1;
     }
 
@@ -121,7 +121,7 @@ int main() {
         "no payload is written after a pre-first-byte disconnect");
 
     std::printf(
-        "StreamingProxy pre-first-byte cancellation completed in %lld ms\\n",
+        "StreamingProxy pre-first-byte cancellation completed in %lld ms\n",
         static_cast<long long>(elapsed.count()));
 
     return failures == 0 ? 0 : 1;

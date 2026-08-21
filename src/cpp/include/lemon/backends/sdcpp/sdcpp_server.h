@@ -56,6 +56,8 @@ public:
         bool debug = false);
 
 private:
+    std::string selected_backend(const RecipeOptions& options) const;
+
     // image_defaults from the currently loaded model's server_models.json entry.
     // Applied when a request doesn't specify size / steps / cfg_scale / etc.
     // Needed because sd-server's own defaults are fixed at process startup and

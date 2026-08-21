@@ -1046,6 +1046,29 @@ namespace lemon::backends {
         return (base / (arch + "-" + version)).string();
     }
 
+    void BackendUtils::remove_therock_runtime(const std::string& arch,
+                                              const std::string& version) {
+        const std::vector<fs::path> trees = {
+            get_therock_install_dir(arch, version),
+            get_therock_wheel_dir(arch, version),
+        };
+        std::string failures;
+        for (const auto& tree : trees) {
+            std::error_code ec;
+            fs::remove_all(tree, ec);
+            if (!ec) {
+                continue;
+            }
+            if (!failures.empty()) {
+                failures += "; ";
+            }
+            failures += utils::path_to_utf8(tree) + ": " + ec.message();
+        }
+        if (!failures.empty()) {
+            throw std::runtime_error("Failed to remove existing ROCm runtime: " + failures);
+        }
+    }
+
     namespace {
         // backend_versions.json is a build resource. Parse once so the
         // thermrock install path can look up the URL mapping. Thread-safe:
@@ -1057,6 +1080,34 @@ namespace lemon::backends {
             return config;
         }
     }  // namespace
+
+    std::optional<std::string> BackendUtils::therock_archive_variant(
+            const std::string& arch) {
+        const json& config = backend_versions_config();
+        if (!config.contains("therock") || !config["therock"].is_object()) {
+            return std::nullopt;
+        }
+        const json& therock = config["therock"];
+        if (!therock.contains("architectures") ||
+            !therock["architectures"].is_array() ||
+            !therock.contains("url_mapping") ||
+            !therock["url_mapping"].is_object()) {
+            return std::nullopt;
+        }
+
+        const bool supported = std::any_of(
+            therock["architectures"].begin(),
+            therock["architectures"].end(),
+            [&arch](const json& value) {
+                return value.is_string() && value.get<std::string>() == arch;
+            });
+        if (!supported || !therock["url_mapping"].contains(arch) ||
+            !therock["url_mapping"][arch].is_string()) {
+            return std::nullopt;
+        }
+        const std::string variant = therock["url_mapping"][arch].get<std::string>();
+        return variant.empty() ? std::nullopt : std::optional<std::string>(variant);
+    }
 
     namespace {
         // Locate a Python interpreter that can create virtual environments.
@@ -1164,18 +1215,21 @@ namespace lemon::backends {
         }
 
         void cleanup_stale_version_dirs(const fs::path& base,
-                                        const std::string& keep) {
+                                        const std::string& keep_version) {
             std::error_code ec;
             if (!fs::exists(base, ec)) {
                 return;
             }
+            const std::string keep_suffix = "-" + keep_version;
             for (fs::directory_iterator it(base, ec), end; it != end && !ec; it.increment(ec)) {
                 if (!it->is_directory(ec)) {
                     continue;
                 }
-                if (it->path().filename().string() != keep) {
+                const std::string name = it->path().filename().string();
+                if (name.size() < keep_suffix.size() ||
+                    name.compare(name.size() - keep_suffix.size(), keep_suffix.size(), keep_suffix) != 0) {
                     LOG(DEBUG, "BackendUtils")
-                        << "Cleaning up old ROCm install: " << it->path().filename().string() << std::endl;
+                        << "Cleaning up old ROCm install: " << name << std::endl;
                     fs::remove_all(it->path(), ec);
                 }
             }
@@ -1191,27 +1245,11 @@ namespace lemon::backends {
         }
 
         std::string version = config["therock"]["version"].get<std::string>();
-#ifdef __linux__
-        fs::path therock_base = fs::path(utils::get_downloaded_bin_dir()) / "therock";
-
-        if (!fs::exists(therock_base)) {
-            return;
-        }
-
+#if defined(__linux__) || defined(_WIN32)
         try {
-            for (const auto& entry : fs::directory_iterator(therock_base)) {
-                if (entry.is_directory()) {
-                    std::string dir_name = entry.path().filename().string();
-                    size_t dash_pos = dir_name.rfind('-');
-                    if (dash_pos != std::string::npos) {
-                        std::string dir_version = dir_name.substr(dash_pos + 1);
-                        if (dir_version != version) {
-                            LOG(DEBUG, "BackendUtils") << "Cleaning up old TheRock version: " << dir_name << std::endl;
-                            fs::remove_all(entry.path());
-                        }
-                    }
-                }
-            }
+            const fs::path bin_dir = utils::get_downloaded_bin_dir();
+            cleanup_stale_version_dirs(bin_dir / "therock", version);
+            cleanup_stale_version_dirs(bin_dir / "therock-wheels", version);
         } catch (const std::exception& e) {
             LOG(WARNING, "BackendUtils")
                 << "Failed to cleanup old TheRock versions: " << e.what() << std::endl;
@@ -1228,8 +1266,6 @@ namespace lemon::backends {
         //   auto    - pip wheels, TheRock tarball fallback (default)
         //   wheel   - pip wheels only (no tarball)
         //   tarball - TheRock tarball only (no Python/pip)
-        // method.txt records "wheel" or "tarball" at install time; when methods
-        // disagree (e.g. user switched knobs), backend_manager triggers reinstall.
         std::string method = "auto";
         if (auto* cfg = RuntimeConfig::global()) {
             method = cfg->rocm_install_method();
@@ -1239,8 +1275,6 @@ namespace lemon::backends {
 
         if (method != "tarball") {
             if (install_therock_wheels(arch, version, progress_cb)) {
-                // Drop the other tree so its method.txt can't re-trigger the
-                // mismatch reinstall on every load.
                 if (method == "wheel") {
                     std::error_code ec;
                     fs::remove_all(get_therock_install_dir(arch, version), ec);
@@ -1261,8 +1295,6 @@ namespace lemon::backends {
             }
         }
         install_therock(arch, version, progress_cb);
-        // Drop the other tree so its method.txt can't re-trigger the mismatch
-        // reinstall on every load.
         if (method == "tarball") {
             std::error_code ec;
             fs::remove_all(get_therock_wheel_dir(arch, version), ec);
@@ -1587,7 +1619,7 @@ namespace lemon::backends {
         // Drop other wheel versions for this base dir to bound disk usage.
         cleanup_stale_version_dirs(
             fs::path(utils::get_downloaded_bin_dir()) / "therock-wheels",
-            fs::path(wheel_dir).filename().string());
+            version);
 
         if (progress_cb) {
             DownloadProgress p;
@@ -1609,6 +1641,12 @@ namespace lemon::backends {
 #if !defined(__linux__) && !defined(_WIN32)
         throw std::runtime_error("TheRock is only supported on Linux and Windows");
 #else
+        const auto url_variant = therock_archive_variant(arch);
+        if (!url_variant) {
+            throw std::runtime_error(
+                "backend_versions.json does not map TheRock architecture '" + arch + "'");
+        }
+
         std::string install_dir = get_therock_install_dir(arch, version);
         std::string version_file = (fs::path(install_dir) / "version.txt").string();
 
@@ -1628,20 +1666,12 @@ namespace lemon::backends {
 
         fs::create_directories(install_dir);
 
-        const json& config = backend_versions_config();
-
-        std::string url_variant = arch;
-        if (config.contains("therock") && config["therock"].contains("url_mapping") &&
-            config["therock"]["url_mapping"].contains(arch)) {
-            url_variant = config["therock"]["url_mapping"][arch].get<std::string>();
-        }
-
 #ifdef _WIN32
         std::string platform = "windows";
 #else
         std::string platform = "linux";
 #endif
-        std::string filename = "therock-dist-" + platform + "-" + url_variant + "-" + version + ".tar.gz";
+        std::string filename = "therock-dist-" + platform + "-" + *url_variant + "-" + version + ".tar.gz";
         std::string url = "https://repo.amd.com/rocm/tarball-multi-arch/" + filename;
 
         fs::path cache_dir = get_backend_download_cache_dir();
@@ -1781,7 +1811,8 @@ namespace lemon::backends {
             fs::path paths_file =
                 fs::path(get_therock_wheel_dir(rocm_arch, version)) / "runtime_paths.txt";
             std::error_code ec;
-            if (fs::exists(paths_file, ec)) {
+            if (fs::exists(paths_file, ec) &&
+                therock_wheel_runtime_alive(rocm_arch, version)) {
                 std::ifstream pf(paths_file);
                 std::string line;
                 std::vector<std::string> lib_paths;
@@ -1824,6 +1855,9 @@ namespace lemon::backends {
                         << " ROCm wheel runtime path(s); first: " << lib_paths.front() << std::endl;
                     return lib_paths;
                 }
+            }
+            if (install_method == "wheel") {
+                return {};
             }
         }
 
@@ -1875,6 +1909,7 @@ namespace lemon::backends {
 
         std::ifstream pf(paths_file);
         std::string line;
+        bool saw_runtime_dir = false;
         while (std::getline(pf, line)) {
             if (!line.empty() && line.back() == '\r') {
                 line.pop_back();
@@ -1882,12 +1917,38 @@ namespace lemon::backends {
             if (line.empty()) {
                 continue;
             }
+            saw_runtime_dir = true;
             std::error_code dir_ec;
-            if (fs::is_directory(utils::path_from_utf8(line), dir_ec)) {
-                return true;
+            if (!fs::is_directory(utils::path_from_utf8(line), dir_ec)) {
+                return false;
             }
         }
-        return false;
+        return saw_runtime_dir;
+    }
+
+    bool BackendUtils::therock_runtime_installed(const std::string& arch,
+                                                 const std::string& version,
+                                                 const std::string& install_method) {
+        auto version_matches = [&version](const fs::path& directory) {
+            std::ifstream file(directory / "version.txt");
+            std::string installed_version;
+            return file.is_open() && std::getline(file, installed_version) &&
+                   installed_version == version;
+        };
+
+        const bool tarball_installed =
+            version_matches(get_therock_install_dir(arch, version));
+        const bool wheel_installed =
+            version_matches(get_therock_wheel_dir(arch, version)) &&
+            therock_wheel_runtime_alive(arch, version);
+
+        if (install_method == "wheel") {
+            return wheel_installed;
+        }
+        if (install_method == "tarball") {
+            return tarball_installed;
+        }
+        return install_method == "auto" && (wheel_installed || tarball_installed);
     }
 
     std::string BackendUtils::join_runtime_dirs(const std::vector<std::string>& dirs) {
@@ -1923,6 +1984,19 @@ namespace lemon::backends {
         }
         return out;
 #endif
+    }
+
+    std::optional<fs::path> BackendUtils::find_runtime_file(
+            const std::vector<std::string>& dirs,
+            const std::string& filename) {
+        for (const auto& dir : dirs) {
+            const fs::path candidate = utils::path_from_utf8(dir) / filename;
+            std::error_code ec;
+            if (fs::is_regular_file(candidate, ec)) {
+                return candidate;
+            }
+        }
+        return std::nullopt;
     }
 
 #ifdef _WIN32
@@ -1971,8 +2045,8 @@ namespace lemon::backends {
             return false;
         }
 
-        const fs::path therock_dll = utils::path_from_utf8(therock_dirs.front()) / "amdhip64_7.dll";
-        if (!fs::exists(therock_dll)) {
+        const auto therock_dll = find_runtime_file(therock_dirs, "amdhip64_7.dll");
+        if (!therock_dll) {
             return false;
         }
 
@@ -1984,7 +2058,7 @@ namespace lemon::backends {
         }
         const fs::path system_dll = fs::path(sysdir) / "amdhip64_7.dll";
 
-        const uint64_t therock_ver = read_dll_version(therock_dll);
+        const uint64_t therock_ver = read_dll_version(*therock_dll);
 
         // A previously staged copy may be locked by a running backend process
         // (Windows blocks overwriting a loaded DLL), so leave it untouched when
@@ -2012,7 +2086,7 @@ namespace lemon::backends {
                         << utils::path_to_utf8(target_dll) << std::endl;
                     return false;
                 }
-                fs::copy_file(therock_dll, target_dll, fs::copy_options::overwrite_existing, ec);
+                fs::copy_file(*therock_dll, target_dll, fs::copy_options::overwrite_existing, ec);
                 if (!ec) {
                     LOG(INFO, "BackendUtils")
                         << "TheRock's amdhip64_7.dll is newer than System32's; staged it at "
@@ -2027,7 +2101,7 @@ namespace lemon::backends {
                 << "Failed to stage System32 amdhip64_7.dll: " << ec.message() << std::endl;
         }
 
-        fs::copy_file(therock_dll, target_dll, fs::copy_options::overwrite_existing, ec);
+        fs::copy_file(*therock_dll, target_dll, fs::copy_options::overwrite_existing, ec);
         if (!ec) {
             LOG(INFO, "BackendUtils")
                 << "Copied amdhip64_7.dll from TheRock to " << utils::path_to_utf8(target_dll)

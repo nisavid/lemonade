@@ -186,13 +186,17 @@ SDServer::~SDServer() {
     unload();
 }
 
-DeviceType SDServer::effective_device(const RecipeOptions& options) const {
+std::string SDServer::selected_backend(const RecipeOptions& options) const {
     std::string backend = options.get_option("sd-cpp_backend");
     if (backend.empty()) {
         auto supported = SystemInfo::get_supported_backends("sd-cpp");
         backend = supported.backends.empty() ? "cpu" : supported.backends[0];
     }
-    return sdcpp::device_for_backend(resolve_sdcpp_backend(backend));
+    return backend;
+}
+
+DeviceType SDServer::effective_device(const RecipeOptions& options) const {
+    return sdcpp::device_for_backend(resolve_sdcpp_backend(selected_backend(options)));
 }
 
 void SDServer::load(const std::string& model_name,
@@ -204,11 +208,7 @@ void SDServer::load(const std::string& model_name,
 
     image_defaults_ = model_info.image_defaults;
 
-    std::string backend = options.get_option("sd-cpp_backend");
-    if (backend.empty()) {
-        auto supported = SystemInfo::get_supported_backends("sd-cpp");
-        backend = supported.backends.empty() ? "cpu" : supported.backends[0];
-    }
+    std::string backend = selected_backend(options);
     std::string resolved_backend = resolve_sdcpp_backend(backend);
     std::string sdcpp_args = options.get_option("sdcpp_args");
 

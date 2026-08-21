@@ -115,8 +115,7 @@ private:
                                              bool local_import);
     void validate_and_canonicalize_collection_registration(
         const std::string& model_name,
-        nlohmann::json& request_json,
-        bool allow_embedded_models);
+        nlohmann::json& request_json);
     std::string register_model_definition_internal(
         const std::string& model_name,
         nlohmann::json& request_json,

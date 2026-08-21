@@ -258,6 +258,7 @@ struct EnvMapping {
     const char* env_name;
     const char* top_key;
     const char* nested_key; // nullptr for top-level keys
+    bool invert_boolean = false;
 };
 
 static const EnvMapping env_mappings[] = {
@@ -268,7 +269,7 @@ static const EnvMapping env_mappings[] = {
     {"LEMONADE_GLOBAL_TIMEOUT",          "global_timeout",           nullptr},
     {"LEMONADE_MAX_LOADED_MODELS",       "max_loaded_models",        nullptr},
     {"LEMONADE_MAX_GPU_MEMORY_OCCUPANCY_GB", "max_gpu_memory_occupancy_gb", nullptr},
-    {"LEMONADE_NO_BROADCAST",            "no_broadcast",             nullptr},
+    {"LEMONADE_NO_BROADCAST",            "broadcast",                nullptr, true},
     {"LEMONADE_EXTRA_MODELS_DIR",        "extra_models_dir",         nullptr},
     {"LEMONADE_CTX_SIZE",                "ctx_size",                 nullptr},
     {"LEMONADE_OFFLINE",                 "offline",                  nullptr},
@@ -349,6 +350,9 @@ json ConfigFile::migrate_from_env(const json& defaults) {
         }
 
         json parsed = parse_env_value(val, default_val);
+        if (m.invert_boolean) {
+            parsed = !parsed.get<bool>();
+        }
 
         if (m.nested_key == nullptr) {
             overlay[m.top_key] = parsed;

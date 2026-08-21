@@ -3001,17 +3001,10 @@ void Server::normalize_model_registration_source(nlohmann::json& request_json,
 
 void Server::validate_and_canonicalize_collection_registration(
         const std::string& model_name,
-        nlohmann::json& request_json,
-        bool allow_embedded_models) {
+        nlohmann::json& request_json) {
     const std::string recipe = request_json.value("recipe", std::string());
     if (!is_model_collection_recipe(recipe)) {
         return;
-    }
-
-    if (request_json.contains("models") && !allow_embedded_models) {
-        throw std::invalid_argument(
-            "`models` embeds additional model definitions and is not accepted by "
-            "the single-model registration endpoint; register components first");
     }
 
     if (request_json.contains("components")) {
@@ -3080,7 +3073,7 @@ std::string Server::register_model_definition_internal(
         require_definition || !recipe.empty() || request_json.contains("checkpoint") ||
         request_json.contains("checkpoints") || request_json.contains("components") ||
         request_json.contains("models");
-    validate_model_registration_name(model_name, has_definition);
+    validate_model_registration_name(model_name, has_definition || local_import);
 
     if (request_json.contains("models") && !allow_embedded_models) {
         throw std::invalid_argument(
@@ -3089,8 +3082,7 @@ std::string Server::register_model_definition_internal(
     }
 
     normalize_model_registration_source(request_json, local_import);
-    validate_and_canonicalize_collection_registration(
-        model_name, request_json, allow_embedded_models);
+    validate_and_canonicalize_collection_registration(model_name, request_json);
 
 
     if (!has_definition && !local_import) {

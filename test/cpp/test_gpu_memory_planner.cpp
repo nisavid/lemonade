@@ -146,6 +146,10 @@ int main() {
                         0.0);
     }
 
-    std::printf("\nAll GPU memory planner cases passed\n");
+    if (failures == 0) {
+        std::printf("\nAll GPU memory planner cases passed\n");
+    } else {
+        std::printf("\n%d GPU memory planner case(s) FAILED\n", failures);
+    }
     return failures == 0 ? 0 : 1;
 }

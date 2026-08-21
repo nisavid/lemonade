@@ -501,6 +501,9 @@ void LlamaCppServer::load(const std::string& model_name,
                 if (!therock_dirs.empty()) {
                     new_path = therock_dirs;
                 }
+                BackendUtils::stage_therock_hip_runtime(
+                    rocm_arch,
+                    fs::absolute(fs::path(executable)).parent_path());
             }
         }
 
@@ -510,17 +513,6 @@ void LlamaCppServer::load(const std::string& model_name,
                 new_path += ";" + std::string(existing_path);
             }
             env_vars.push_back({"PATH", new_path});
-        }
-
-        // Windows DLL search order checks System32 BEFORE PATH, so a stale
-        // System32 amdhip64_7.dll shadows the TheRock runtime on PATH. Copying
-        // to the exe directory overrides both.
-        if (llamacpp_backend == "rocm-stable") {
-            std::string rocm_arch = SystemInfo::get_rocm_arch();
-            if (!rocm_arch.empty()) {
-                BackendUtils::stage_therock_hip_runtime(
-                    rocm_arch, fs::path(executable).parent_path());
-            }
         }
 
         std::string arch = lemon::SystemInfo::get_rocm_arch();

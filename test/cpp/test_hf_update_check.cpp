@@ -9,6 +9,12 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 namespace rf = lemon::registry_files;
 
@@ -25,9 +31,19 @@ static void make_file(const fs::path& path, const std::string& content = "x") {
     std::ofstream(path, std::ios::out | std::ios::trunc) << content;
 }
 
+static unsigned long current_process_id() {
+#ifdef _WIN32
+    return static_cast<unsigned long>(_getpid());
+#else
+    return static_cast<unsigned long>(getpid());
+#endif
+}
+
 static fs::path make_temp_test_dir() {
     const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    return fs::temp_directory_path() / ("lemonade_hf_update_check_test_" + std::to_string(tick));
+    return fs::temp_directory_path() /
+           ("lemonade_hf_update_check_test_" + std::to_string(current_process_id()) + "_" +
+            std::to_string(tick));
 }
 
 static bool has(const std::vector<std::string>& files, const std::string& name) {

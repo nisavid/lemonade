@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -217,7 +218,39 @@ int main() {
     }
     fs::remove_all(temp_defaults_dir);
 
-    // 10. Test that malformed legacy values in config.json are rejected
+    // 10. Test legacy broadcast environment migration on a fresh config
+    fs::path temp_env_dir = fs::temp_directory_path() / ("lemonade_test_env_broadcast_" + std::to_string(std::time(nullptr)));
+    try {
+#ifdef _WIN32
+        _putenv_s("LEMONADE_NO_BROADCAST", "1");
+#else
+        setenv("LEMONADE_NO_BROADCAST", "1", 1);
+#endif
+        json disabled = ConfigFile::load((temp_env_dir / "disabled").string());
+        check(disabled["broadcast"].is_boolean() && disabled["broadcast"] == false,
+              "LEMONADE_NO_BROADCAST=1 migrates to broadcast=false");
+        check(!disabled.contains("no_broadcast"),
+              "LEMONADE_NO_BROADCAST does not persist a legacy key");
+
+#ifdef _WIN32
+        _putenv_s("LEMONADE_NO_BROADCAST", "0");
+#else
+        setenv("LEMONADE_NO_BROADCAST", "0", 1);
+#endif
+        json enabled = ConfigFile::load((temp_env_dir / "enabled").string());
+        check(enabled["broadcast"].is_boolean() && enabled["broadcast"] == true,
+              "LEMONADE_NO_BROADCAST=0 migrates to broadcast=true");
+    } catch (const std::exception& e) {
+        check(false, (std::string("LEMONADE_NO_BROADCAST migration failed: ") + e.what()).c_str());
+    }
+#ifdef _WIN32
+    _putenv_s("LEMONADE_NO_BROADCAST", "");
+#else
+    unsetenv("LEMONADE_NO_BROADCAST");
+#endif
+    fs::remove_all(temp_env_dir);
+
+    // 11. Test that malformed legacy values in config.json are rejected
     fs::path malformed_dir = fs::temp_directory_path() / ("lemonade_test_malformed_" + std::to_string(std::time(nullptr)));
     fs::create_directories(malformed_dir);
 

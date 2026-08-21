@@ -268,61 +268,10 @@ bool is_therock_installed_for_current_arch(const json& backend_versions) {
         return false;
     }
 
-    {
-        auto* cfg = RuntimeConfig::global();
-        std::string requested = cfg ? cfg->rocm_install_method() : "auto";
-        if (requested != "auto") {
-            const fs::path wheel_method =
-                fs::path(backends::BackendUtils::get_therock_wheel_dir(rocm_arch, version)) / "method.txt";
-            {
-                std::ifstream mf(wheel_method);
-                if (mf.is_open()) {
-                    std::string stored;
-                    std::getline(mf, stored);
-                    if (stored == "wheel" && requested == "tarball") {
-                        LOG(INFO, "BackendManager")
-                            << "Installed ROCm runtime method (wheel) differs from "
-                            << "requested method (" << requested << "); reinstall required" << std::endl;
-                        return false;
-                    }
-                }
-            }
-            const fs::path tarball_method =
-                fs::path(backends::BackendUtils::get_therock_install_dir(rocm_arch, version)) / "method.txt";
-            {
-                std::ifstream mf(tarball_method);
-                if (mf.is_open()) {
-                    std::string stored;
-                    std::getline(mf, stored);
-                    if (stored == "tarball" && requested == "wheel") {
-                        LOG(INFO, "BackendManager")
-                            << "Installed ROCm runtime method (tarball) differs from "
-                            << "requested method (" << requested << "); reinstall required" << std::endl;
-                        return false;
-                    }
-                }
-            }
-        }
-    }
-
-    const fs::path tarball_version_file =
-        fs::path(backends::BackendUtils::get_therock_install_dir(rocm_arch, version)) / "version.txt";
-    if (read_version_file(tarball_version_file) == version) {
-        return true;
-    }
-
-    // The pip-wheel install records its own version marker in a separate tree.
-    // Also require its recorded runtime dirs to still exist, so a deleted venv or
-    // moved cache reinstalls instead of leaving a dead LD_LIBRARY_PATH behind.
-    // Use the wheel-specific liveness check, not get_therock_lib_path(): the
-    // latter falls back to the tarball layout and would report the venv alive
-    // when only a tarball is present.
-    const fs::path wheel_version_file =
-        fs::path(backends::BackendUtils::get_therock_wheel_dir(rocm_arch, version)) / "version.txt";
-    if (read_version_file(wheel_version_file) != version) {
-        return false;
-    }
-    return backends::BackendUtils::therock_wheel_runtime_alive(rocm_arch, version);
+    auto* cfg = RuntimeConfig::global();
+    const std::string requested = cfg ? cfg->rocm_install_method() : "auto";
+    return backends::BackendUtils::therock_runtime_installed(
+        rocm_arch, version, requested);
 }
 
 void install_therock_if_needed(const std::string& os, const json& backend_versions,
@@ -631,9 +580,6 @@ void BackendManager::install_backend(const std::string& recipe, const std::strin
     const bool rocm_runtime_update_required =
         therock_applicable && backend_update_required(recipe, backend);
 
-    // is_therock_installed_for_current_arch internally verifies method.txt
-    // when rocm_install_method is explicitly set, so callers don't need to
-    // check method mismatch separately.
     const bool needs_therock_download =
         therock_applicable &&
         (rocm_runtime_update_required ||
@@ -656,15 +602,7 @@ void BackendManager::install_backend(const std::string& recipe, const std::strin
                     }
 
                     const std::string version = backend_versions_["therock"]["version"].get<std::string>();
-                    const std::string install_dir =
-                        backends::BackendUtils::get_therock_install_dir(rocm_arch, version);
-
-                    std::error_code ec;
-                    fs::remove_all(install_dir, ec);
-                    if (ec) {
-                        throw std::runtime_error("Failed to remove existing TheRock runtime '" +
-                                                 install_dir + "': " + ec.message());
-                    }
+                    backends::BackendUtils::remove_therock_runtime(rocm_arch, version);
                 }
 
                 install_therock_if_needed(os, backend_versions_, runtime_progress_cb);

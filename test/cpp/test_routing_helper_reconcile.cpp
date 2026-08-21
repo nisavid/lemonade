@@ -65,8 +65,6 @@ public:
         state_cv_.notify_all();
     }
 
-    bool was_unloaded() const { return unload_count_->load() > 0; }
-
 private:
     std::atomic<bool> alive_{true};
     std::shared_ptr<std::atomic<int>> unload_count_;
@@ -142,11 +140,6 @@ struct RoutingHelperTestHook {
     static void set_available_memory(Router& r, double available_gb) {
         r.available_memory_sampler_ =
             [available_gb](DeviceType) { return available_gb; };
-    }
-
-    static json resident_state(Router& r) {
-        std::lock_guard<std::mutex> lock(r.load_mutex_);
-        return resident_state_locked(r);
     }
 
     static json admission_state(Router& r) {
@@ -543,8 +536,10 @@ static void test_npu_memory_rejection_preserves_residency(Router& router) {
     }
 
     const json after = RoutingHelperTestHook::admission_state(router);
-    check("low-memory NPU rejection leaves residency and eviction unchanged",
-          rejected && unload_count->load() == 0 && after == before);
+    check("low-memory NPU load is rejected for insufficient memory", rejected);
+    check("low-memory NPU rejection evicts nothing", unload_count->load() == 0);
+    check("low-memory NPU rejection leaves residency and admission state unchanged",
+          after == before);
 }
 
 // Reviewer's ask #4: router shutdown while a deferred reclaim is pending. The

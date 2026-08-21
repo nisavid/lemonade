@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -143,6 +144,12 @@ namespace lemon::backends {
         /** Get TheRock installation directory for a specific architecture and version */
         static std::string get_therock_install_dir(const std::string& arch, const std::string& version);
 
+        static std::optional<std::string> therock_archive_variant(
+            const std::string& arch);
+
+        static void remove_therock_runtime(const std::string& arch,
+                                           const std::string& version);
+
         /** See backend_utils.cpp:install_rocm_runtime() for install method details */
         static void install_rocm_runtime(const std::string& arch, const std::string& version,
                                          DownloadProgressCallback progress_cb = nullptr);
@@ -156,6 +163,10 @@ namespace lemon::backends {
         /** True when the pip-wheel runtime for arch/version is still usable. See impl for liveness check vs tarball fallback. */
         static bool therock_wheel_runtime_alive(const std::string& arch,
                                                 const std::string& version);
+
+        static bool therock_runtime_installed(const std::string& arch,
+                                              const std::string& version,
+                                              const std::string& install_method);
 
         /** True for a concrete gfx target (e.g. gfx1151, gfx90a) that maps to a
          *  rocm-sdk-device wheel; false for family placeholders like gfx110X,
@@ -191,6 +202,10 @@ namespace lemon::backends {
          *  LLVM paths must already be included in dirs (see
          *  get_therock_lib_paths). Returns "" for empty input. */
         static std::string join_runtime_dirs(const std::vector<std::string>& dirs);
+
+        static std::optional<fs::path> find_runtime_file(
+            const std::vector<std::string>& dirs,
+            const std::string& filename);
 
         /** Stage TheRock's amdhip64_7.dll next to a ROCm backend exe, unless
          *  System32 already ships a newer runtime. No-op off Windows. */

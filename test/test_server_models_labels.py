@@ -60,7 +60,13 @@ def load_recipe_modes():
 def check_label_table_is_current():
     """The C++ classifier must not grow a deployment label this script misses."""
     source = MODEL_TYPES_H.read_text(encoding="utf-8")
-    body = source.split("inline bool find_deployment_mode")[1].split("\n}")[0]
+    marker = "inline bool find_deployment_mode"
+    if marker not in source:
+        return [
+            f"{MODEL_TYPES_H.name} no longer declares '{marker}'; "
+            "update this script to track the renamed classifier."
+        ]
+    body = source.split(marker, 1)[1].split("\n}")[0]
     declared = set(re.findall(r"label == \"([^\"]+)\"", body))
     unknown = declared - set(DEPLOYMENT_LABELS)
     if unknown:
@@ -99,11 +105,22 @@ def check_models(models, recipe_modes):
         supported = recipe_modes.get(recipe)
         if supported is None:
             continue
-        unservable = [label for label in declared if label not in supported]
+        unknown_supported = sorted(
+            {label for label in supported if label not in DEPLOYMENT_LABELS}
+        )
+        if unknown_supported:
+            errors.append(
+                f"{name}: recipe '{recipe}' declares unknown deployment modes "
+                f"{unknown_supported}."
+            )
+            continue
+
+        supported_modes = {DEPLOYMENT_LABELS[label] for label in supported}
+        unservable = sorted(modes - supported_modes)
         if unservable:
             errors.append(
-                f"{name}: recipe '{recipe}' cannot serve {sorted(unservable)}; "
-                f"it supports {supported}."
+                f"{name}: recipe '{recipe}' cannot serve deployment modes "
+                f"{unservable}; it supports {sorted(supported_modes)}."
             )
     return errors
 

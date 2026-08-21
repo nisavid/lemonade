@@ -3363,6 +3363,22 @@ class EndpointTests(ServerTestBase):
         finally:
             self._delete_registered_model(model_name)
 
+    def test_021b_local_import_requires_user_namespace(self):
+        """Local imports reject names that cannot form a user-model cache key."""
+        for model_name in ["tiny", f"plain-import-{uuid.uuid4().hex[:8]}"]:
+            response = requests.post(
+                f"{self.base_url}/pull",
+                json={"model_name": model_name, "local_import": True},
+                timeout=TIMEOUT_DEFAULT,
+            )
+            self.assertEqual(
+                response.status_code,
+                400,
+                f"Expected 400 for local import name {model_name!r}, got "
+                f"{response.status_code}: {response.text}",
+            )
+            self.assertIn("user.", response.json().get("error", ""))
+
     def test_021c_naming_spec_pull_rejects_reserved_prefixes(self):
         """Naming spec: /pull rejects canonical source prefixes in registrations."""
         for reserved in [

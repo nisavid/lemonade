@@ -378,7 +378,7 @@ public:
     // fence continues blocking fresh work. Destruction abandons that intent.
     [[nodiscard]] ExclusiveRequest request_exclusive(
         std::atomic<bool>* cancel = nullptr);
-    ExclusiveAcquireResult try_begin_exclusive(
+    [[nodiscard]] ExclusiveAcquireResult try_begin_exclusive(
         ExclusiveRequest& request,
         std::atomic<bool>* cancel = nullptr);
     void end_exclusive();

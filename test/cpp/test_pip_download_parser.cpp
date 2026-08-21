@@ -61,6 +61,14 @@ int main() {
         check(bytes == static_cast<std::size_t>(12.5 * 1024.0), "parses kB size");
     }
 
+    {
+        const bool matched =
+            BackendUtils::parse_pip_download_line("Downloading raw-1.0.whl (512)", name, bytes);
+        check(matched, "matches a download line with a unitless size");
+        check(name == "raw-1.0.whl", "extracts the unitless download basename");
+        check(bytes == 512, "parses a unitless byte count");
+    }
+
     // Download line with no size in parens: valid line, zero bytes (no crash).
     {
         const bool matched =

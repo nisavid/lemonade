@@ -333,8 +333,6 @@ public:
 
     json update_saved_model_options(const std::string& model_name, const json& changes);
 
-    // The model-level options update_saved_model_options(changes) would leave
-    // the model with, computed without persisting anything.
     RecipeOptions preview_saved_model_options(const ModelInfo& info, const json& changes);
 
     void start_directory_watcher();

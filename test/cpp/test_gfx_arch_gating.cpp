@@ -40,6 +40,7 @@ int main() {
     expect("gfx110X", false);
     expect("gfx103X", false);
     expect("gfx120X", false);
+    expect("gfx110x", false);
 
     // Malformed / non-gfx.
     expect("gfx", false);

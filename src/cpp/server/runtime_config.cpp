@@ -12,6 +12,10 @@
 #include <unordered_set>
 #include <utility>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace lemon {
@@ -53,33 +57,53 @@ static bool has_backend_selection(const std::string& config_section) {
     return false;
 }
 
+static bool safe_is_directory(const fs::path& path) {
+#ifdef _WIN32
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#else
+    std::error_code ec;
+    return fs::is_directory(path, ec);
+#endif
+}
+
+static void validate_rocm_install_method(const std::string& method) {
+    if (method != "auto" && method != "wheel" && method != "tarball") {
+        throw std::invalid_argument(
+            "'rocm_install_method' must be 'auto', 'wheel', or 'tarball'");
+    }
+}
+
 static void validate_extra_models_dir_access(const std::string& raw_dir) {
     if (raw_dir.empty()) {
         return;
     }
 
     const fs::path dir = utils::path_from_utf8(raw_dir);
-    std::error_code status_ec;
-    const fs::file_status status = fs::status(dir, status_ec);
+    if (!safe_is_directory(dir)) {
+        std::error_code status_ec;
+        const fs::file_status status = fs::status(dir, status_ec);
 
-    // Keep the existing runtime semantics for paths that do not exist yet:
-    // DirectoryWatcher may observe the directory if it is created shortly after
-    // configuration. Permission and I/O failures, however, must not be accepted
-    // as a successful config update.
-    if (status_ec) {
-        if (status_ec == std::errc::no_such_file_or_directory) {
+        // Keep the existing runtime semantics for paths that do not exist yet:
+        // DirectoryWatcher may observe the directory if it is created shortly after
+        // configuration. Permission and I/O failures, however, must not be accepted
+        // as a successful config update.
+        if (status_ec) {
+            if (status_ec == std::errc::no_such_file_or_directory) {
+                return;
+            }
+            throw std::invalid_argument(
+                "'extra_models_dir' is not accessible by the Lemonade server: " +
+                raw_dir + " (" + status_ec.message() + ")");
+        }
+        if (!fs::exists(status)) {
             return;
         }
-        throw std::invalid_argument(
-            "'extra_models_dir' is not accessible by the Lemonade server: " +
-            raw_dir + " (" + status_ec.message() + ")");
-    }
-    if (!fs::exists(status)) {
-        return;
-    }
-    if (!fs::is_directory(status)) {
-        throw std::invalid_argument(
-            "'extra_models_dir' must reference a directory: " + raw_dir);
+        if (!fs::is_directory(status)) {
+            throw std::invalid_argument(
+                "'extra_models_dir' must reference a directory: " + raw_dir);
+        }
     }
 
     // status() can succeed when the process can traverse the path but cannot
@@ -446,7 +470,10 @@ std::string RuntimeConfig::rocm_channel_for_recipe(const std::string& recipe) co
 }
 
 std::string RuntimeConfig::rocm_install_method() const {
-    return get_string_opt("LEMONADE_ROCM_INSTALL_METHOD", {"rocm_install_method"}, "auto");
+    std::string method =
+        get_string_opt("LEMONADE_ROCM_INSTALL_METHOD", {"rocm_install_method"}, "auto");
+    validate_rocm_install_method(method);
+    return method;
 }
 
 bool RuntimeConfig::telemetry_enabled() const {
@@ -768,11 +795,7 @@ void RuntimeConfig::validate(const std::string& key, const json& value) const {
         if (!value.is_string()) {
             throw std::invalid_argument("'rocm_install_method' must be a string");
         }
-        std::string method = value.get<std::string>();
-        if (method != "auto" && method != "wheel" && method != "tarball") {
-            throw std::invalid_argument(
-                "'rocm_install_method' must be 'auto', 'wheel', or 'tarball'");
-        }
+        validate_rocm_install_method(value.get<std::string>());
     } else if (key == "telemetry") {
         if (!value.is_object()) {
             throw std::invalid_argument("'telemetry' must be an object");
@@ -1010,16 +1033,6 @@ void RuntimeConfig::apply_changes(const json& changes, json& applied_diff) {
                         applied_diff["telemetry"][t_key] = t_val;
                     }
                 }
-            }
-        } else if (key == "no_broadcast") {
-            bool bcast = !value.get<bool>();
-            bool prev_effective_bcast = (broadcast_override_.has_value())
-                ? *broadcast_override_
-                : (config_.contains("broadcast") && config_["broadcast"].is_boolean() ? config_["broadcast"].get<bool>() : true);
-            config_["broadcast"] = bcast;
-            broadcast_override_ = std::nullopt;
-            if (prev_effective_bcast != bcast) {
-                applied_diff["broadcast"] = bcast;
             }
         } else if (key == "broadcast") {
             bool bcast = value.get<bool>();

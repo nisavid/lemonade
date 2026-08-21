@@ -210,7 +210,7 @@ class WhisperTests(ServerTestBase):
         """Test audio transcription response_format handling."""
         self.assertIsNotNone(self._test_audio_path, "Test audio file not downloaded")
 
-        model = _get_whisper_model()
+        model = self._load_whisper_model_or_fail()
         # FLM ignores response_format and always answers with compact
         # {model, text} JSON, so it cannot produce timestamped subtitles.
         # Those formats are rejected up front and covered by
@@ -313,6 +313,7 @@ class WhisperTests(ServerTestBase):
                 )
                 result = response.json()
                 self.assertIn("error", result)
+                self.assertEqual(result["error"]["type"], "invalid_request_error")
                 self.assertIn(response_format, result["error"]["message"])
                 print(f"[OK] FLM correctly rejected response_format={response_format}")
 

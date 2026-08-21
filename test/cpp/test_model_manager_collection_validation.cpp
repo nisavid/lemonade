@@ -354,6 +354,29 @@ static void test_extra_zerank_options_preserve_adapter_defaults(
     manager.set_extra_models_dir("");
 }
 
+#ifdef _WIN32
+static void test_extra_directory_reparse_point(ModelManager& manager,
+                                               const fs::path& temp) {
+    const fs::path target = temp / "extra_reparse_target";
+    const fs::path link = temp / "extra_reparse_link";
+    fs::create_directories(target);
+    write_stub_gguf(target / "reparse-model.gguf");
+
+    std::error_code ec;
+    fs::create_directory_symlink(target, link, ec);
+    if (ec) {
+        std::printf("[SKIP] extra model directory reparse point: %s\n",
+                    ec.message().c_str());
+        return;
+    }
+
+    manager.set_extra_models_dir(link.string());
+    const bool discovered = manager.model_exists("extra.reparse-model");
+    check("extra model discovery accepts a directory reparse point", discovered);
+    manager.set_extra_models_dir("");
+}
+#endif
+
 static void test_register_preserves_routing(ModelManager& manager) {
     json doc = valid_router_collection();
     manager.register_user_model("user.RouterKit", doc);
@@ -374,6 +397,9 @@ int main() {
     test_backend_capability_over_chat_indicator(manager);
     test_rejects_authored_zerank_deployment_conflict(manager);
     test_extra_zerank_options_preserve_adapter_defaults(manager, temp);
+#ifdef _WIN32
+    test_extra_directory_reparse_point(manager, temp);
+#endif
     test_register_preserves_routing(manager);
 
     fs::remove_all(temp);

@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <exception>
 #include <future>
 #include <iostream>
 #include <memory>
@@ -16,6 +17,7 @@ struct BlockingBackendState {
         : release(release_promise.get_future().share()) {}
 
     std::promise<void> load_entered;
+    std::atomic<bool> load_entered_signaled{false};
     std::promise<void> release_promise;
     std::shared_future<void> release;
     std::atomic<int> unload_count{0};
@@ -34,7 +36,9 @@ public:
         const ModelInfo&,
         const RecipeOptions&,
         bool) override {
-        state_->load_entered.set_value();
+        if (!state_->load_entered_signaled.exchange(true)) {
+            state_->load_entered.set_value();
+        }
         state_->release.wait();
     }
 
@@ -229,7 +233,7 @@ int main() {
                 std::move(preparation), info,
                 lemon::RecipeOptions(
                     info.recipe, nlohmann::json::object()));
-        } catch (const std::runtime_error& error) {
+        } catch (const std::exception& error) {
             stale_load_rejected =
                 std::string(error.what()).find("cancelled or superseded") !=
                 std::string::npos;
@@ -270,7 +274,7 @@ int main() {
                         std::move(preparation), info,
                         lemon::RecipeOptions(
                             info.recipe, nlohmann::json::object()));
-                } catch (const std::runtime_error& error) {
+                } catch (const std::exception& error) {
                     return std::string(error.what()).find(
                                "cancelled or superseded") !=
                            std::string::npos;
@@ -407,7 +411,7 @@ int main() {
                 std::move(unload_all_preparation), info,
                 lemon::RecipeOptions(
                     info.recipe, nlohmann::json::object()));
-        } catch (const std::runtime_error& error) {
+        } catch (const std::exception& error) {
             unload_all_stale_load_rejected =
                 std::string(error.what()).find("cancelled or superseded") !=
                 std::string::npos;
@@ -430,7 +434,7 @@ int main() {
                     std::move(preparation), info,
                     lemon::RecipeOptions(
                         info.recipe, nlohmann::json::object()));
-            } catch (const std::runtime_error&) {
+            } catch (const std::exception&) {
             }
         });
         exclusive_loader_entered.get_future().wait();
@@ -577,7 +581,7 @@ int main() {
         try {
             auto guard = router.begin_model_runtime_mutation(
                 "throwing-mutation.model");
-        } catch (const std::runtime_error& error) {
+        } catch (const std::exception& error) {
             mutation_unload_failed =
                 std::string(error.what()) == "stub unload failure";
         }
@@ -594,7 +598,7 @@ int main() {
         bool discard_unload_failed = false;
         try {
             router.unload_model("throwing-discard.model");
-        } catch (const std::runtime_error& error) {
+        } catch (const std::exception& error) {
             discard_unload_failed =
                 std::string(error.what()) == "stub unload failure";
         }

@@ -9,6 +9,12 @@
 #include <string>
 #include <system_error>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 using lemon::RuntimeConfig;
 using lemon::json;
@@ -16,12 +22,21 @@ using lemon::utils::path_to_utf8;
 
 namespace {
 
+unsigned long current_process_id() {
+#ifdef _WIN32
+    return static_cast<unsigned long>(_getpid());
+#else
+    return static_cast<unsigned long>(getpid());
+#endif
+}
+
 class TempDirectory {
 public:
     TempDirectory() {
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
         path_ = fs::temp_directory_path() /
-                ("lemonade-runtime-config-dir-validation-" + std::to_string(stamp));
+                ("lemonade-runtime-config-dir-validation-" +
+                 std::to_string(current_process_id()) + "-" + std::to_string(stamp));
         fs::create_directories(path_);
     }
 
@@ -90,6 +105,19 @@ int main() {
     if (!rejects_directory_value(regular_file, "existing regular file is rejected")) {
         ++failures;
     }
+
+#ifdef _WIN32
+    const fs::path reparse_dir = temp.path() / "directory-link";
+    std::error_code symlink_ec;
+    fs::create_directory_symlink(readable_dir, reparse_dir, symlink_ec);
+    if (symlink_ec) {
+        std::printf("[SKIP] directory reparse point validation: %s\n",
+                    symlink_ec.message().c_str());
+    } else if (!accepts_directory_value(
+                   reparse_dir, "existing directory reparse point is accepted")) {
+        ++failures;
+    }
+#endif
 
     return failures == 0 ? 0 : 1;
 }

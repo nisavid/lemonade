@@ -9,9 +9,9 @@
 
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include <lemon/backends/backend_utils.h>
 
@@ -102,7 +102,8 @@ int main() {
     // Test 3: missing file yields 0.
     {
         const fs::path missing = fs::temp_directory_path() / "lemonade_does_not_exist.dll";
-        fs::remove(missing);
+        std::error_code ec;
+        fs::remove(missing, ec);
         const uint64_t v = BackendUtils::read_dll_version(missing);
         check(v == 0, "read_dll_version returns 0 for a missing file");
     }

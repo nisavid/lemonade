@@ -1283,22 +1283,24 @@ std::map<std::string, ModelInfo> ModelManager::discover_extra_models() const {
     }
 
     const fs::path search_path = path_from_utf8(extra_models_dir_);
-    std::error_code status_ec;
-    const fs::file_status status = fs::status(search_path, status_ec);
-    if (status_ec) {
-        if (status_ec == std::errc::no_such_file_or_directory) {
+    if (!safe_is_directory(search_path)) {
+        std::error_code status_ec;
+        const fs::file_status status = fs::status(search_path, status_ec);
+        if (status_ec) {
+            if (status_ec == std::errc::no_such_file_or_directory) {
+                return discovered;
+            }
+            LOG(ERROR, "ModelManager") << "Cannot inspect extra models directory "
+                                       << extra_models_dir_ << ": "
+                                       << status_ec.message() << std::endl;
             return discovered;
         }
-        LOG(ERROR, "ModelManager") << "Cannot inspect extra models directory "
-                                   << extra_models_dir_ << ": "
-                                   << status_ec.message() << std::endl;
-        return discovered;
-    }
-    if (!fs::is_directory(status)) {
-        // A missing path is allowed because the directory watcher may observe it
-        // later. A non-directory cannot contribute models, but must not affect
-        // the registered model cache either.
-        return discovered;
+        if (!fs::is_directory(status)) {
+            // A missing path is allowed because the directory watcher may observe it
+            // later. A non-directory cannot contribute models, but must not affect
+            // the registered model cache either.
+            return discovered;
+        }
     }
 
     LOG(INFO, "ModelManager") << "Scanning for GGUF models in: " << extra_models_dir_ << std::endl;
