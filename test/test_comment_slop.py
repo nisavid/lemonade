@@ -283,7 +283,12 @@ class GitDiffInvocationTests(unittest.TestCase):
     def test_range_diff_ignores_repository_diff_customization(self):
         with mock.patch.object(
             sys, "argv", ["check_comment_slop.py", "--from-ref", "base"]
-        ), mock.patch.object(slop, "run", return_value="") as run:
+        ), mock.patch.dict(
+            os.environ,
+            {"PRE_COMMIT_FROM_REF": "", "PRE_COMMIT_TO_REF": ""},
+        ), mock.patch.object(
+            slop, "run", return_value=""
+        ) as run:
             self.assertEqual(slop.main(), 0)
 
         run.assert_called_once_with(

@@ -1,7 +1,7 @@
 #include <lemon/runtime_config.h>
 
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <optional>
 #include <stdexcept>
 #include <string>

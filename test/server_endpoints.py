@@ -3379,6 +3379,25 @@ class EndpointTests(ServerTestBase):
             )
             self.assertIn("user.", response.json().get("error", ""))
 
+    def test_021b1_local_import_rejects_path_separators(self):
+        """Local imports reject names that can escape their cache directory."""
+        for name_field, model_name in [
+            ("model_name", "user.Escape/Model"),
+            ("model", r"user.Escape\Model"),
+        ]:
+            response = requests.post(
+                f"{self.base_url}/pull",
+                json={name_field: model_name, "local_import": True},
+                timeout=TIMEOUT_DEFAULT,
+            )
+            self.assertEqual(
+                response.status_code,
+                400,
+                f"Expected 400 for local import name {model_name!r}, got "
+                f"{response.status_code}: {response.text}",
+            )
+            self.assertIn("path separator", response.json().get("error", ""))
+
     def test_021c_naming_spec_pull_rejects_reserved_prefixes(self):
         """Naming spec: /pull rejects canonical source prefixes in registrations."""
         for reserved in [

@@ -142,6 +142,7 @@ class BackendBenchPathTest(unittest.TestCase):
         ) as install:
             self.assertEqual(VALIDATOR.main(), 0)
 
+        install.assert_called_once()
         self.assertEqual(install.call_args.args[2], expected)
 
         with mock.patch.dict(os.environ, {cache_env: ""}):

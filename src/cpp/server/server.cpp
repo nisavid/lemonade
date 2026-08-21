@@ -3074,6 +3074,11 @@ std::string Server::register_model_definition_internal(
         request_json.contains("checkpoints") || request_json.contains("components") ||
         request_json.contains("models");
     validate_model_registration_name(model_name, has_definition || local_import);
+    if (local_import && model_name.find_first_of("/\\") != std::string::npos) {
+        throw std::invalid_argument(
+            "Local import model names must not contain a path separator. Received: " +
+            model_name);
+    }
 
     if (request_json.contains("models") && !allow_embedded_models) {
         throw std::invalid_argument(
@@ -3083,7 +3088,6 @@ std::string Server::register_model_definition_internal(
 
     normalize_model_registration_source(request_json, local_import);
     validate_and_canonicalize_collection_registration(model_name, request_json);
-
 
     if (!has_definition && !local_import) {
         return model_name;
@@ -3095,7 +3099,6 @@ std::string Server::register_model_definition_internal(
     if (local_import) {
         std::string hf_cache = model_manager_->get_hf_cache_dir();
         std::string model_name_clean = model_name.substr(5);
-        std::replace(model_name_clean.begin(), model_name_clean.end(), '/', '-');
         std::string dest_path = hf_cache + "/models--" + model_name_clean;
 
         LOG(INFO, "Server") << "Local import mode - resolving files in: "

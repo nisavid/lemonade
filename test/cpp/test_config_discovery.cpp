@@ -7,6 +7,12 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <nlohmann/json.hpp>
 #include <lemon/cli_parser.h>
 #include <lemon/config_file.h>
@@ -19,6 +25,23 @@ using json = nlohmann::json;
 using lemon::ConfigFile;
 using lemon::RuntimeConfig;
 using test_helpers::check;
+
+namespace {
+
+unsigned long current_process_id() {
+#ifdef _WIN32
+    return static_cast<unsigned long>(_getpid());
+#else
+    return static_cast<unsigned long>(getpid());
+#endif
+}
+
+std::string unique_temp_name(const std::string& prefix) {
+    return prefix + std::to_string(current_process_id()) + "_" +
+           std::to_string(std::time(nullptr));
+}
+
+}
 
 int main() {
     std::puts("=== RUNNING RUNTIME CONFIG DISCOVERY TESTS ===");
@@ -157,7 +180,8 @@ int main() {
     check(!config_legacy_false.snapshot().contains("no_broadcast"), "legacy no_broadcast removed from snapshot");
 
     // 8. Test real ConfigFile::load() and save() migration on disk
-    fs::path temp_test_dir = fs::temp_directory_path() / ("lemonade_test_discovery_" + std::to_string(std::time(nullptr)));
+    fs::path temp_test_dir =
+        fs::temp_directory_path() / unique_temp_name("lemonade_test_discovery_");
     fs::create_directories(temp_test_dir);
 
     try {
@@ -183,7 +207,8 @@ int main() {
     fs::remove_all(temp_test_dir);
 
     // 9. Test deployment defaults (LEMONADE_DEFAULTS_PATH) with legacy no_broadcast: true
-    fs::path temp_defaults_dir = fs::temp_directory_path() / ("lemonade_test_defaults_" + std::to_string(std::time(nullptr)));
+    fs::path temp_defaults_dir =
+        fs::temp_directory_path() / unique_temp_name("lemonade_test_defaults_");
     fs::create_directories(temp_defaults_dir);
 
     try {
@@ -219,7 +244,8 @@ int main() {
     fs::remove_all(temp_defaults_dir);
 
     // 10. Test legacy broadcast environment migration on a fresh config
-    fs::path temp_env_dir = fs::temp_directory_path() / ("lemonade_test_env_broadcast_" + std::to_string(std::time(nullptr)));
+    fs::path temp_env_dir =
+        fs::temp_directory_path() / unique_temp_name("lemonade_test_env_broadcast_");
     try {
 #ifdef _WIN32
         _putenv_s("LEMONADE_NO_BROADCAST", "1");
@@ -251,7 +277,8 @@ int main() {
     fs::remove_all(temp_env_dir);
 
     // 11. Test that malformed legacy values in config.json are rejected
-    fs::path malformed_dir = fs::temp_directory_path() / ("lemonade_test_malformed_" + std::to_string(std::time(nullptr)));
+    fs::path malformed_dir =
+        fs::temp_directory_path() / unique_temp_name("lemonade_test_malformed_");
     fs::create_directories(malformed_dir);
 
     try {
