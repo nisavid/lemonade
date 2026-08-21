@@ -33,7 +33,7 @@ This repository is `nisavid/lemonade`, a fork of upstream Lemonade (`lemonade-sd
 | Backend | Class | Capabilities | Device | Purpose |
 |---------|-------|-------------|--------|---------|
 | llama.cpp | `LlamaCppServer` | Completion, Embeddings, Reranking | GPU | LLM inference — CPU/GPU (Vulkan, ROCm, Metal) |
-| FastFlowLM | `FastFlowLMServer` | Completion, Embeddings, Reranking, Audio | NPU | NPU inference (multi-modal: LLM, ASR, embeddings, reranking) |
+| FastFlowLM | `FastFlowLMServer` | Completion, Embeddings, Audio | NPU | NPU inference (multi-modal: LLM, ASR, embeddings) |
 | RyzenAI | `RyzenAIServer` | Completion | NPU | Hybrid NPU inference |
 | vLLM | `VLLMServer` | Completion | GPU | LLM inference — ROCm on AMD iGPU/dGPU (Linux). **Experimental**, validated only on gfx1151 (Strix Halo). |
 | whisper.cpp | `WhisperServer` | Audio | CPU | Audio transcription |
@@ -65,7 +65,7 @@ All core endpoints are registered under **4 path prefixes**:
 
 **Ollama-compatible endpoints** (under `/api/` without version prefix): `chat`, `generate`, `tags`, `show`, `delete`, `pull`, `embed`, `embeddings`, `ps`, `version`
 
-**Anthropic-compatible endpoint:** `POST /api/messages` — supports message completion, tool use, and SSE streaming.
+**Anthropic-compatible endpoint:** `POST /v1/messages` — supports message completion, tool use, and SSE streaming.
 
 **MCP gateway endpoint:** `POST /mcp` — Model Context Protocol (Streamable HTTP transport, spec `2025-06-18`). Single JSON-RPC 2.0 endpoint exposing 5 tools (`lemonade_list_models`, `lemonade_chat`, `lemonade_transcribe_audio`, `lemonade_generate_image`, `lemonade_omni`). GET returns 405.
 
@@ -189,7 +189,7 @@ Pass `DEPENDS` only when the CI build needs targets beyond the `COMMAND` executa
 
 **Never write comments that explain WHAT the code does** — well-named identifiers already do that. Don't reference the current task, fix, or callers ("used by X", "added for the Y flow", "handles the case from issue #123") — those belong in the PR description and rot as the codebase evolves.
 
-**PR descriptions should be concise.** 1-3 sentences for the summary. No essays. The diff shows what changed; the description explains why and any non-obvious context. Bullet points over paragraphs.
+**PR descriptions should be concise.** 1-3 sentences for the summary. No essays. The diff shows what changed; the description explains why and any non-obvious context. Bullet points over paragraphs. When creating a PR, use `.github/pull_request_template.md` and fill every section — Summary (with `Fixes #` link), Scope, Testing (confirm build + describe what was tested), Documentation (select one), Breaking Changes (select one), and AI-assisted contribution.
 
 ### C++
 - C++17, `lemon::` namespace

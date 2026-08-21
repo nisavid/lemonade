@@ -1,0 +1,14 @@
+{
+  "input_path": "src/cpp/include/lemon/router.h",
+  "predecessor_sha256": "811f6adbea8497c2ecb55258ca9d469940cdc9ec806e51b589a19ff8c802493f",
+  "result": "accepted",
+  "reviewed_fork_sha256": "c36841cbfb97e17fb5ba4d53ace7ab39edc1c86a4d011abaa4e767e77dcffe6e",
+  "reviewed_maintained_fork_commit": "87267c852378a064b948571ff088e1f8ecb4cb70",
+  "revision_id": "v11.7.0-forward-1",
+  "schema": "portable_residency_source_revalidation/v1",
+  "selected_upstream_sha256": "6d2fe317b4faa9e9f7e2e273ddf85a05a2dc6d503369a2adcb7d10fa2d7730d9",
+  "source_revision_record_digest": "082d86f8a6304a4d204c563b44058608e8d4678c0531ca5bd3c324718d2f5af5",
+  "validated_claims": [
+    "routing_helper_reclaim_executor"
+  ]
+}

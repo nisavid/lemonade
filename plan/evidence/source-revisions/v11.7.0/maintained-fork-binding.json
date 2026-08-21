@@ -1,0 +1,155 @@
+{
+  "fallback_state": {
+    "authority": "legacy_runtime",
+    "status": "active"
+  },
+  "record_digest": "1da75980403f60733b927005346cf5b55c60af9373065d1765303b68e98e6d66",
+  "reviewed_maintained_fork": {
+    "commit": "87267c852378a064b948571ff088e1f8ecb4cb70",
+    "review_url": "https://github.com/nisavid/lemonade/pull/101",
+    "reviewed_commit": "87267c852378a064b948571ff088e1f8ecb4cb70",
+    "tree": "b04f4cc9ad9b535bb317c7425b0898c5aefbf36d"
+  },
+  "revision_id": "v11.7.0-forward-1",
+  "runtime_authority": "none",
+  "schema": "portable_residency_maintained_fork_binding/v1",
+  "scout_input_dispositions": [
+    {
+      "disposition": "carried_forward",
+      "evidence": null,
+      "fork_sha256": "5aac0b54db5a377bb7e4e0a9adb871b9179943a16c5e76e4586e0b3af93d8a32",
+      "path": "src/cpp/include/lemon/backends/install_staging.h"
+    },
+    {
+      "disposition": "revalidated",
+      "evidence": {
+        "checkpoint_commit": "f3150720cda4a5e53855e82b70ef6d8e233a1cfb",
+        "checkpoint_tree": "5a2ce6ad23182dadf56d43522845dfcb6dd42b8d",
+        "path": "plan/evidence/source-revisions/v11.7.0/scout-revalidation-1.json",
+        "sha256": "82f76ce24e6308d0f6abfc81c9d0258af128cede3469df89871447db27a864b9"
+      },
+      "fork_sha256": "c36841cbfb97e17fb5ba4d53ace7ab39edc1c86a4d011abaa4e767e77dcffe6e",
+      "path": "src/cpp/include/lemon/router.h"
+    },
+    {
+      "disposition": "carried_forward",
+      "evidence": null,
+      "fork_sha256": "108747ce268939151bb9db0a9cd57bfa706d5f5f51e9965156e10f7b5131033c",
+      "path": "src/cpp/include/lemon/backends/backend_ops.h"
+    },
+    {
+      "disposition": "revalidated",
+      "evidence": {
+        "checkpoint_commit": "f3150720cda4a5e53855e82b70ef6d8e233a1cfb",
+        "checkpoint_tree": "5a2ce6ad23182dadf56d43522845dfcb6dd42b8d",
+        "path": "plan/evidence/source-revisions/v11.7.0/scout-revalidation-3.json",
+        "sha256": "c96043ffa6964be6f0b8b1958a9c8a7aaaa53d496266e4155def2e2aabb28fe8"
+      },
+      "fork_sha256": "4da4ffc81d84092e151eec6f79a3ee4e27dd544d7c58d99c31da534ddc5e6b35",
+      "path": "src/cpp/include/lemon/runtime_config.h"
+    },
+    {
+      "disposition": "carried_forward",
+      "evidence": null,
+      "fork_sha256": "735346e564f435a5d427f2aaaf3586bb0344bb7f8635197cc6797646f429298e",
+      "path": "src/cpp/include/lemon/utils/process_manager.h"
+    },
+    {
+      "disposition": "revalidated",
+      "evidence": {
+        "checkpoint_commit": "f3150720cda4a5e53855e82b70ef6d8e233a1cfb",
+        "checkpoint_tree": "5a2ce6ad23182dadf56d43522845dfcb6dd42b8d",
+        "path": "plan/evidence/source-revisions/v11.7.0/scout-revalidation-5.json",
+        "sha256": "c49ad11b746b7567b46e724d996fbff53a43f407477619e08c6ab9d2bc3e12ef"
+      },
+      "fork_sha256": "d7a0e815a1dc4c3e984076641ef428313afbd5bd463aad846d1624495746db7e",
+      "path": "src/cpp/include/lemon/wrapped_server.h"
+    },
+    {
+      "disposition": "carried_forward",
+      "evidence": null,
+      "fork_sha256": "ce0bc134dfb621659cab995d0e5bcfd1fa0700427fa3605bed8ae2337d44d426",
+      "path": "src/cpp/server/backends/backend_registry.cpp"
+    },
+    {
+      "disposition": "revalidated",
+      "evidence": {
+        "checkpoint_commit": "f3150720cda4a5e53855e82b70ef6d8e233a1cfb",
+        "checkpoint_tree": "5a2ce6ad23182dadf56d43522845dfcb6dd42b8d",
+        "path": "plan/evidence/source-revisions/v11.7.0/scout-revalidation-7.json",
+        "sha256": "fdbffb007178b9e6cd4fbfe03ea88a5a92145b46bf1463c94eae0407b5f66042"
+      },
+      "fork_sha256": "aa8672e3dc00f99397dd206b79a3f6c1b34a709d4045c3429eadfa246c665fd1",
+      "path": "src/cpp/server/backends/backend_utils.cpp"
+    },
+    {
+      "disposition": "revalidated",
+      "evidence": {
+        "checkpoint_commit": "f3150720cda4a5e53855e82b70ef6d8e233a1cfb",
+        "checkpoint_tree": "5a2ce6ad23182dadf56d43522845dfcb6dd42b8d",
+        "path": "plan/evidence/source-revisions/v11.7.0/scout-revalidation-8.json",
+        "sha256": "f0e2ef9fe3fa1b9d4566b32803300b2888180d6b28d270f088a1a6a42cbc96cd"
+      },
+      "fork_sha256": "d056727b5df78891f8b4f4af7ce69cda667d8bd1924f065f285e7879e78fa8c8",
+      "path": "src/cpp/server/eviction_engine.cpp"
+    },
+    {
+      "disposition": "carried_forward",
+      "evidence": null,
+      "fork_sha256": "747a6083e8ee4b8c3133da387bf474b84d24e97cd1222a6bd597c283d961115d",
+      "path": "src/cpp/server/global_vram_monitor.cpp"
+    },
+    {
+      "disposition": "revalidated",
+      "evidence": {
+        "checkpoint_commit": "f3150720cda4a5e53855e82b70ef6d8e233a1cfb",
+        "checkpoint_tree": "5a2ce6ad23182dadf56d43522845dfcb6dd42b8d",
+        "path": "plan/evidence/source-revisions/v11.7.0/scout-revalidation-10.json",
+        "sha256": "01b321d90653345b9192f49399da86d126fc400c9eba65ad00eaf698ca3362a5"
+      },
+      "fork_sha256": "738ed1f7e52e76693089ae6bffcf1d375b60975d9622cd8092c8f5d2f188bed1",
+      "path": "src/cpp/server/gpu_memory_planner.cpp"
+    },
+    {
+      "disposition": "revalidated",
+      "evidence": {
+        "checkpoint_commit": "f3150720cda4a5e53855e82b70ef6d8e233a1cfb",
+        "checkpoint_tree": "5a2ce6ad23182dadf56d43522845dfcb6dd42b8d",
+        "path": "plan/evidence/source-revisions/v11.7.0/scout-revalidation-11.json",
+        "sha256": "1f94f46c0174ea2be8b7cc5e96bf0e81806ad487f9c3bead6d0c7bd7cc68a49e"
+      },
+      "fork_sha256": "837d049e6866c86ec8936b5ad894a0b45851196abb94c80fb3bd97311d007bcb",
+      "path": "src/cpp/server/router.cpp"
+    },
+    {
+      "disposition": "revalidated",
+      "evidence": {
+        "checkpoint_commit": "f3150720cda4a5e53855e82b70ef6d8e233a1cfb",
+        "checkpoint_tree": "5a2ce6ad23182dadf56d43522845dfcb6dd42b8d",
+        "path": "plan/evidence/source-revisions/v11.7.0/scout-revalidation-12.json",
+        "sha256": "682b7db5a55996d5fbcce9ac965f1aa9f255ddb51a3471745dad2e1104e819ea"
+      },
+      "fork_sha256": "c0e275c8c46060b89135563a0b6e62e223955a7320e48461773d2f7db7e0bc7c",
+      "path": "src/cpp/server/server.cpp"
+    },
+    {
+      "disposition": "revalidated",
+      "evidence": {
+        "checkpoint_commit": "f3150720cda4a5e53855e82b70ef6d8e233a1cfb",
+        "checkpoint_tree": "5a2ce6ad23182dadf56d43522845dfcb6dd42b8d",
+        "path": "plan/evidence/source-revisions/v11.7.0/scout-revalidation-13.json",
+        "sha256": "60dbdc4bf79d43b1a4e1498e509ca953a75ec5efe85784210029a53979bf83dd"
+      },
+      "fork_sha256": "559e4a3993eafbc2abe9d805a7d1746ddee1054050690f4d3cd13301b3a5cd5e",
+      "path": "test/cpp/test_routing_helper_reconcile.cpp"
+    }
+  ],
+  "source_revision": {
+    "checkpoint_commit": "2c5bcc14723a7d63948e13e5136df6f71e0f60ce",
+    "checkpoint_tree": "2cde570b81823b67a127d104bc55fb0fd13f0a79",
+    "path": "plan/evidence/source-revisions/v11.7.0/source-revision.json",
+    "record_digest": "082d86f8a6304a4d204c563b44058608e8d4678c0531ca5bd3c324718d2f5af5",
+    "sha256": "e8a1c60b14d143280ab1b3db335e5331122c52c39f1c023c7d735314a6bca12c"
+  },
+  "status": "source_ready"
+}

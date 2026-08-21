@@ -239,9 +239,10 @@ std::string OllamaApi::normalize_model_name(const std::string& name) {
 // ============================================================================
 void OllamaApi::auto_load_model(const std::string& model, const json& request_options) {
     std::string name = normalize_model_name(model);
+    auto preparation = router_->prepare_model_load(
+        name, LoadPurpose::UserInference);
 
-    if (router_->ensure_loaded_model_residency(
-            name, LoadPurpose::UserInference)) {
+    if (preparation.already_loaded()) {
         if (request_options.contains("ctx_size")) {
             auto loaded_ctx = router_->get_model_recipe_options(name).get_option("ctx_size");
             LOG(DEBUG, "OllamaApi")
@@ -255,6 +256,7 @@ void OllamaApi::auto_load_model(const std::string& model, const json& request_op
     LOG(INFO, "OllamaApi") << "Auto-loading model: " << name << std::endl;
 
     if (!model_manager_->model_exists(name)) {
+        router_->abandon_prepared_model_load(std::move(preparation));
         throw std::runtime_error("model '" + name + "' not found");
     }
 
@@ -268,7 +270,9 @@ void OllamaApi::auto_load_model(const std::string& model, const json& request_op
         info = model_manager_->get_model_info(name);
     }
 
-    router_->load_model(name, info, RecipeOptions(info.recipe, request_options), true);
+    router_->load_prepared_model(
+        std::move(preparation), info,
+        RecipeOptions(info.recipe, request_options));
     LOG(INFO, "OllamaApi") << "Model loaded: " << name << std::endl;
 }
 
@@ -306,10 +310,6 @@ static json build_ollama_details(const std::string& model_name,
     };
 }
 
-static bool has_label(const ModelInfo& info, const std::string& label) {
-    return std::find(info.labels.begin(), info.labels.end(), label) != info.labels.end();
-}
-
 static json build_ollama_capabilities(const ModelInfo& info) {
     json capabilities = json::array();
     ModelType model_type = get_model_type_from_labels(info.labels);
@@ -320,15 +320,15 @@ static json build_ollama_capabilities(const ModelInfo& info) {
         capabilities.push_back("embedding");
     }
 
-    if (has_label(info, "tool-calling") || has_label(info, "tools")) {
+    if (has_label(info.labels, "tool-calling") || has_label(info.labels, "tools")) {
         capabilities.push_back("tools");
     }
 
-    if (has_label(info, "vision")) {
+    if (has_label(info.labels, "vision")) {
         capabilities.push_back("vision");
     }
 
-    if (has_label(info, "reasoning")) {
+    if (has_label(info.labels, "reasoning")) {
         capabilities.push_back("thinking");
     }
 
@@ -1183,11 +1183,8 @@ void OllamaApi::handle_delete(const httplib::Request& req, httplib::Response& re
             return;
         }
 
-        // Unload if loaded
-        if (router_->is_model_loaded(name)) {
-            router_->unload_model(name);
-        }
-
+        auto runtime_mutation =
+            router_->begin_model_runtime_mutation(name);
         model_manager_->delete_model(name);
 
         // Ollama returns 200 with no body on success

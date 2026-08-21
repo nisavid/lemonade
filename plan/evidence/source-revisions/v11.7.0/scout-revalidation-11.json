@@ -1,0 +1,18 @@
+{
+  "input_path": "src/cpp/server/router.cpp",
+  "predecessor_sha256": "82e002c17ecb575dccf838c5a6e1755016dab3a16918acab1ab4c6252e309cca",
+  "result": "accepted",
+  "reviewed_fork_sha256": "837d049e6866c86ec8936b5ad894a0b45851196abb94c80fb3bd97311d007bcb",
+  "reviewed_maintained_fork_commit": "87267c852378a064b948571ff088e1f8ecb4cb70",
+  "revision_id": "v11.7.0-forward-1",
+  "schema": "portable_residency_source_revalidation/v1",
+  "selected_upstream_sha256": "75210cd284d5f218140f4b70d99869f7c0d110df3a924744e582c266b11e00e5",
+  "source_revision_record_digest": "082d86f8a6304a4d204c563b44058608e8d4678c0531ca5bd3c324718d2f5af5",
+  "validated_claims": [
+    "router_eviction_and_retry",
+    "routing_helper_idle_reclaim",
+    "routing_helper_prune",
+    "routing_helper_reclaim_notifier",
+    "routing_helper_reclaim_or_defer"
+  ]
+}

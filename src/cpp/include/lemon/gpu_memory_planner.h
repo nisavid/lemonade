@@ -1,5 +1,7 @@
 #pragma once
 
+#include "lemon/model_types.h"
+
 #include <string>
 #include <vector>
 
@@ -29,6 +31,8 @@ struct GpuMemoryAdmissionPlan {
 };
 
 GpuMemoryAdmissionPlan plan_gpu_memory_admission(const GpuMemoryAdmissionInputs& inputs);
+
+bool uses_gpu_memory_capacity(DeviceType effective_device);
 
 double gpu_memory_capacity_from_pools_gb(double vram_gb,
                                          double virtual_mem_gb,

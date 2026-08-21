@@ -6,6 +6,14 @@ namespace lemon {
 namespace backends {
 namespace sdcpp {
 
+inline DeviceType device_for_backend(const std::string& backend) {
+    if (backend == "vulkan" || backend == "metal" || backend == "cuda" ||
+        backend == "rocm" || backend.rfind("rocm-", 0) == 0) {
+        return DEVICE_GPU;
+    }
+    return DEVICE_CPU;
+}
+
 // The sdcpp backend descriptor (plain data). Header-only `inline const` so it
 // links into both the lemonade CLI and lemond without a separate source file.
 inline const BackendDescriptor descriptor = {
@@ -44,9 +52,9 @@ inline const BackendDescriptor descriptor = {
          {{"amd_gpu", {"gfx1150", "gfx1151", "gfx1152", "gfx103X", "gfx110X", "gfx120X"}}}, "Supported AMD ROCm iGPU/dGPU families*"},
         {"cpu", {"windows", "linux"}, {{"cpu", {"x86_64"}}}, "x86_64 CPU"},
     },
-    /*default_labels*/  {"image"},
+    /*supported_modes*/ {"image"},
     /*required_checkpoints*/ {"main"},  // flux text_encoder+vae validated together in load()
-    /*modality*/        "Image generation",
+    /*default_capabilities*/ {},
     /*experimental*/    false,
     /*web_display_name*/ "stable-diffusion.cpp",
     /*rocm_channels*/   {"stable"},

@@ -1,0 +1,14 @@
+{
+  "input_path": "src/cpp/server/backends/backend_utils.cpp",
+  "predecessor_sha256": "35f195085ff50d495771082a9ee5ce4deb8b2b7ba0dbbb906f89d5e4cf80e3f3",
+  "result": "accepted",
+  "reviewed_fork_sha256": "aa8672e3dc00f99397dd206b79a3f6c1b34a709d4045c3429eadfa246c665fd1",
+  "reviewed_maintained_fork_commit": "87267c852378a064b948571ff088e1f8ecb4cb70",
+  "revision_id": "v11.7.0-forward-1",
+  "schema": "portable_residency_source_revalidation/v1",
+  "selected_upstream_sha256": "4c749aea2d180f8884b596fa71b67db67a107c2da8faa69ec159dbad7fea30b7",
+  "source_revision_record_digest": "082d86f8a6304a4d204c563b44058608e8d4678c0531ca5bd3c324718d2f5af5",
+  "validated_claims": [
+    "artifact_install_commit_callsite"
+  ]
+}

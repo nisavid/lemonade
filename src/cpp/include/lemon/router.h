@@ -5,11 +5,13 @@
 #include <memory>
 #include <deque>
 #include <functional>
+#include <list>
 #include <map>
 #include <mutex>
 #include <set>
 #include <condition_variable>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 #include <optional>
 #include <nlohmann/json.hpp>
@@ -127,6 +129,7 @@ public:
     // Test-only access to routing-helper reconciliation internals (inject stub
     // servers, seed the needed set, drive prune). Defined in the test binary.
     friend struct RoutingHelperTestHook;
+    friend struct RouterModelLifecycleTestHook;
     Router(RuntimeConfig* config,
 
            ModelManager* model_manager,
@@ -135,35 +138,148 @@ public:
 
     ~Router();
 
+    enum class ExistingModelPolicy {
+        ReuseExisting,
+        UpdatePinAndResidency,
+        ReconcileOptions,
+    };
+
+    enum class RecoveryResidencyPolicy {
+        ApplyRequested,
+        PreserveWatchdog,
+    };
+
+    enum class ExclusiveAcquireResult {
+        Acquired,
+        Retry,
+        Cancelled,
+        InvalidOrder,
+    };
+
+    class ExclusiveRequest {
+    public:
+        ExclusiveRequest(ExclusiveRequest&& other) noexcept;
+        ExclusiveRequest(const ExclusiveRequest&) = delete;
+        ExclusiveRequest& operator=(const ExclusiveRequest&) = delete;
+        ExclusiveRequest& operator=(ExclusiveRequest&&) = delete;
+        ~ExclusiveRequest();
+
+        bool pending() const noexcept { return router_ != nullptr; }
+        ExclusiveAcquireResult result() const noexcept { return result_; }
+
+    private:
+        friend class Router;
+
+        ExclusiveRequest(
+            Router* router,
+            uint64_t generation,
+            ExclusiveAcquireResult result)
+            : router_(router), generation_(generation), result_(result) {}
+
+        Router* router_ = nullptr;
+        uint64_t generation_ = 0;
+        ExclusiveAcquireResult result_ = ExclusiveAcquireResult::Retry;
+    };
+
+    class PreparedModelLoad {
+    public:
+        bool already_loaded() const noexcept { return already_loaded_; }
+        PreparedModelLoad(PreparedModelLoad&& other) noexcept;
+        PreparedModelLoad(const PreparedModelLoad&) = delete;
+        PreparedModelLoad& operator=(const PreparedModelLoad&) = delete;
+        PreparedModelLoad& operator=(PreparedModelLoad&&) = delete;
+        ~PreparedModelLoad();
+
+    private:
+        friend class Router;
+
+        PreparedModelLoad(Router* router,
+                          bool already_loaded,
+                          std::string canonical_model_name,
+                          uint64_t generation,
+                          LoadPurpose load_purpose,
+                          ExistingModelPolicy existing_model_policy,
+                          std::optional<RecipeOptions> watchdog_options)
+            : router_(router),
+              already_loaded_(already_loaded),
+              canonical_model_name_(std::move(canonical_model_name)),
+              generation_(generation),
+              load_purpose_(load_purpose),
+              existing_model_policy_(existing_model_policy),
+              watchdog_options_(std::move(watchdog_options)) {}
+
+        Router* router_ = nullptr;
+        bool already_loaded_ = false;
+        std::string canonical_model_name_;
+        uint64_t generation_ = 0;
+        LoadPurpose load_purpose_ = LoadPurpose::UserInference;
+        ExistingModelPolicy existing_model_policy_ =
+            ExistingModelPolicy::ReuseExisting;
+        std::optional<RecipeOptions> watchdog_options_;
+    };
+
+    class ModelRuntimeMutation {
+    public:
+        ModelRuntimeMutation(ModelRuntimeMutation&& other) noexcept;
+        ModelRuntimeMutation(const ModelRuntimeMutation&) = delete;
+        ModelRuntimeMutation& operator=(const ModelRuntimeMutation&) = delete;
+        ModelRuntimeMutation& operator=(ModelRuntimeMutation&&) = delete;
+        ~ModelRuntimeMutation();
+
+    private:
+        friend class Router;
+
+        ModelRuntimeMutation(
+            Router* router,
+            std::string canonical_model_name,
+            uint64_t generation)
+            : router_(router),
+              canonical_model_name_(std::move(canonical_model_name)),
+              generation_(generation) {}
+
+        Router* router_ = nullptr;
+        std::string canonical_model_name_;
+        uint64_t generation_ = 0;
+    };
+
     // Wires the cloud provider registry so the Router can construct
     // CloudServer instances with a credential source. Pointer (not
     // ownership) — Server owns the registry.
     void set_cloud_registry(CloudProviderRegistry* registry);
 
-    // allow_reload_on_option_change: intended for explicit /load callers only.
-    // Auto-load callers (inference-triggered) should leave this false so they
-    // don't overturn options set by a prior explicit /load.
-    void load_model(
-        const std::string& model_name,
+    void load_prepared_model(
+        PreparedModelLoad preparation,
         const ModelInfo& model_info,
         RecipeOptions options,
         bool do_not_upgrade = true,
-        bool allow_reload_on_option_change = false,
         std::optional<bool> pinned = std::nullopt,
-        LoadPurpose load_purpose = LoadPurpose::UserInference,
         std::atomic<bool>* cancel_flag = nullptr);
 
-    // Apply request intent to an already-live process without reloading it.
-    // Returns false when the requested model is not currently live.
-    bool ensure_loaded_model_residency(
+    // Collapse the option precedence chain — request > model > per-architecture
+    // > global config > built-in defaults — into the set a load would use.
+    // ctx_size may still be the -1 auto sentinel; the concrete value is only
+    // resolved inside load_prepared_model, once eviction has freed memory.
+    RecipeOptions resolve_effective_options(const ModelInfo& model_info,
+                                            const RecipeOptions& request_options) const;
+
+    // Keep the preparation alive across registry lookup and artifact download.
+    // A same-model mutation waits for that lease, and load_prepared_model
+    // consumes it before the backend can publish.
+    [[nodiscard]] PreparedModelLoad prepare_model_load(
         const std::string& model_name,
-        LoadPurpose load_purpose);
+        LoadPurpose load_purpose,
+        ExistingModelPolicy existing_model_policy =
+            ExistingModelPolicy::ReuseExisting,
+        RecoveryResidencyPolicy recovery_residency_policy =
+            RecoveryResidencyPolicy::ApplyRequested);
+
+    void abandon_prepared_model_load(PreparedModelLoad preparation);
 
     // Record the authoritative set of routing-helper models the active policies
     // need resident (the union across all active policies, as policy-authored
     // names — resolved internally), then reclaim any live helper no longer in
     // it. The set is published immediately so a helper still mid-load validates
-    // against it at load-completion (see load_model), making reconciliation
+    // against it at load-completion (see load_prepared_model), making reconciliation
     // durable rather than a one-time snapshot; only the eviction pass is deferred
     // to a safe point. Pinned and busy helpers are left resident; a busy helper
     // is marked pending-stale and reclaimed the moment its last request releases
@@ -174,6 +290,10 @@ public:
                                    uint64_t generation);
 
     void unload_model(const std::string& model_name = "");  // Empty = unload all
+    // Hold this guard across the corresponding registry or artifact mutation.
+    // Its tombstone prevents a same-model load from preparing or publishing.
+    [[nodiscard]] ModelRuntimeMutation begin_model_runtime_mutation(
+        const std::string& model_name);
 
     std::string get_loaded_model() const;
     std::string get_loaded_recipe() const;
@@ -199,6 +319,8 @@ public:
     bool is_model_loaded() const;
 
     bool is_model_loaded(const std::string& model_name) const;
+
+    bool is_model_tracked(const std::string& model_name) const;
 
     RecipeOptions get_model_recipe_options(const std::string& model_name) const;
 
@@ -243,13 +365,22 @@ public:
     // Get loaded backend metadata and per-model telemetry for metrics rendering.
     json get_metrics_snapshot() const;
 
-    void update_telemetry(const std::string& model_name,
-                         int input_tokens, int output_tokens,
-                         double time_to_first_token, double tokens_per_second);
+    // Record one completed request's telemetry as a single atomic update.
+    void update_request_telemetry(const std::string& model_name,
+                                  const StreamingProxy::TelemetryData& telemetry);
 
-    void update_prompt_tokens(const std::string& model_name, int prompt_tokens);
+    // Route-stability accounting for collection.router dispatch. The
+    // fingerprint is a metrics key only (hash of the conversation's stable
+    // prefix) — it never influences routing and stores no message content.
+    void note_route_decision(uint64_t conversation_fingerprint, const std::string& route_to);
 
-    bool begin_exclusive(std::atomic<bool>* cancel = nullptr);
+    // Retain the same request while Retry is returned so its writer-intent
+    // fence continues blocking fresh work. Destruction abandons that intent.
+    [[nodiscard]] ExclusiveRequest request_exclusive(
+        std::atomic<bool>* cancel = nullptr);
+    [[nodiscard]] ExclusiveAcquireResult try_begin_exclusive(
+        ExclusiveRequest& request,
+        std::atomic<bool>* cancel = nullptr);
     void end_exclusive();
 
     std::map<std::string, bool> snapshot_loaded_models() const;
@@ -266,8 +397,28 @@ public:
     void simulate_vram_pressure(double pct);
 
 private:
+    enum class PendingReloadPhase {
+        Pending,
+        Cancelled,
+    };
+
+    struct PendingReloadState {
+        uint64_t generation;
+        PendingReloadPhase phase;
+        std::string checkpoint;
+        std::string recipe;
+        std::optional<RecipeOptions> watchdog_options;
+        std::optional<bool> pinned;
+        ResidencyClass residency_class;
+    };
+
     // Multi-model support: Manage multiple WrappedServers
     std::vector<std::unique_ptr<WrappedServer>> loaded_servers_;
+    std::map<std::string, PendingReloadState> pending_reload_states_;
+    std::map<std::string, size_t> prepared_load_counts_;
+    uint64_t next_load_generation_ = 0;
+    std::function<std::unique_ptr<WrappedServer>(const ModelInfo&)>
+        backend_server_factory_;
 
     // Configuration (non-owning pointer; same lifetime as Server)
     RuntimeConfig* config_;
@@ -275,14 +426,24 @@ private:
     BackendManager* backend_manager_;  // Non-owning pointer to BackendManager
     CloudProviderRegistry* cloud_registry_ = nullptr;  // Non-owning
     std::function<double()> gpu_memory_sampler_;
+    std::function<double(DeviceType)> available_memory_sampler_;
 
     mutable std::mutex telemetry_mutex_;
     Telemetry aggregate_telemetry_;
     std::map<std::string, ModelTelemetryRecord> telemetry_by_model_;
 
+    uint64_t routing_decisions_total_ = 0;
+    uint64_t routing_switches_total_ = 0;
+    std::list<uint64_t> route_fingerprint_lru_;
+    std::unordered_map<uint64_t,
+                       std::pair<std::string, std::list<uint64_t>::iterator>>
+        route_last_target_;
+
     // Concurrency control for load operations
     mutable std::mutex load_mutex_;              // Protects loading state and loaded_servers_
     bool is_loading_ = false;                    // True when a load operation is in progress
+    std::string active_load_model_name_;
+    bool all_model_mutation_active_ = false;
     std::condition_variable load_cv_;            // Signals when load completes
 
     // Canonicalized routing-helper models the active policies need resident.
@@ -298,8 +459,14 @@ private:
 
     bool exclusive_active_ = false;
     std::thread::id exclusive_owner_;
-    std::condition_variable exclusive_cv_;
+    bool exclusive_pending_ = false;
+    uint64_t next_exclusive_generation_ = 0;
+    uint64_t exclusive_pending_generation_ = 0;
+    uint64_t exclusive_admission_generation_ = 0;
     void wait_for_slot_clearance(std::unique_lock<std::mutex>& lock);
+    std::string resolve_model_name_after_mutation_gate_locked(
+        std::unique_lock<std::mutex>& lock,
+        const std::string& model_name);
 
     std::unique_ptr<GlobalVramMonitor> vram_monitor_;
     std::unique_ptr<EvictionEngine> eviction_engine_;
@@ -326,9 +493,38 @@ private:
     void transition_server_residency_locked(
         WrappedServer* server,
         ResidencyClass requested_residency_class);
-    bool ensure_loaded_model_residency_canonical(
+    PreparedModelLoad prepare_model_load_internal(
+        const std::string& model_name,
+        LoadPurpose load_purpose,
+        ExistingModelPolicy existing_model_policy,
+        RecoveryResidencyPolicy recovery_residency_policy);
+    void load_model_impl(
+        PreparedModelLoad& preparation,
+        const ModelInfo& model_info,
+        RecipeOptions options,
+        bool do_not_upgrade,
+        std::optional<bool> pinned,
+        std::atomic<bool>* cancel_flag);
+    uint64_t cancel_pending_reload_locked(
+        const std::string& canonical_model_name);
+    bool reload_generation_matches_locked(
         const std::string& canonical_model_name,
-        LoadPurpose load_purpose);
+        uint64_t generation,
+        const ModelInfo& model_info,
+        ExistingModelPolicy existing_model_policy) const;
+    void complete_reload_generation_locked(
+        const std::string& canonical_model_name,
+        std::optional<uint64_t> generation);
+    void release_prepared_model_load(
+        const std::string& canonical_model_name,
+        uint64_t generation) noexcept;
+    void cancel_exclusive_request(uint64_t generation) noexcept;
+    void complete_model_runtime_mutation(
+        const std::string& canonical_model_name,
+        uint64_t generation) noexcept;
+    bool discard_model_runtime_state_locked(
+        std::unique_lock<std::mutex>& lock,
+        const std::string& canonical_model_name);
     bool has_npu_server() const;
     WrappedServer* find_npu_server() const;
     WrappedServer* find_npu_server_by_recipe(const std::string& recipe) const;
@@ -385,21 +581,17 @@ private:
                                             const RecipeOptions& options) const;
     double get_total_gpu_capacity_gb() const;
     double sample_total_gpu_occupancy_gb() const;
+    double sample_available_memory_gb(DeviceType device) const;
     double get_lemonade_gpu_occupancy_gb() const;
     bool is_gpu_resident_server(const WrappedServer& server) const;
-    bool should_enforce_gpu_memory_capacity(const ModelInfo& model_info,
-                                            const RecipeOptions& options) const;
     GpuMemoryAdmissionPlan plan_gpu_memory_capacity(
         const ModelInfo& model_info,
         const RecipeOptions& options,
+        DeviceType effective_device,
         const WrappedServer* replacement_server = nullptr) const;
     ModelTelemetryIdentity get_telemetry_identity(WrappedServer* server) const;
-    void record_telemetry_for_model(const ModelTelemetryIdentity& identity,
-                                    int input_tokens,
-                                    int output_tokens,
-                                    double time_to_first_token,
-                                    double tokens_per_second);
-    void record_prompt_tokens_for_model(const ModelTelemetryIdentity& identity, int prompt_tokens);
+    void record_request_telemetry_for_model(const ModelTelemetryIdentity& identity,
+                                            const StreamingProxy::TelemetryData& telemetry);
 
     template<typename Func>
     auto execute_inference(const json& request, Func&& inference_func) -> decltype(inference_func(nullptr));

@@ -12,6 +12,10 @@
 #include <unordered_set>
 #include <utility>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace lemon {
@@ -53,6 +57,67 @@ static bool has_backend_selection(const std::string& config_section) {
     return false;
 }
 
+static bool safe_is_directory(const fs::path& path) {
+#ifdef _WIN32
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#else
+    std::error_code ec;
+    return fs::is_directory(path, ec);
+#endif
+}
+
+static void validate_rocm_install_method(const std::string& method) {
+    if (method != "auto" && method != "wheel" && method != "tarball") {
+        throw std::invalid_argument(
+            "'rocm_install_method' must be 'auto', 'wheel', or 'tarball'");
+    }
+}
+
+static void validate_extra_models_dir_access(const std::string& raw_dir) {
+    if (raw_dir.empty()) {
+        return;
+    }
+
+    const fs::path dir = utils::path_from_utf8(raw_dir);
+    if (!safe_is_directory(dir)) {
+        std::error_code status_ec;
+        const fs::file_status status = fs::status(dir, status_ec);
+
+        // Keep the existing runtime semantics for paths that do not exist yet:
+        // DirectoryWatcher may observe the directory if it is created shortly after
+        // configuration. Permission and I/O failures, however, must not be accepted
+        // as a successful config update.
+        if (status_ec) {
+            if (status_ec == std::errc::no_such_file_or_directory) {
+                return;
+            }
+            throw std::invalid_argument(
+                "'extra_models_dir' is not accessible by the Lemonade server: " +
+                raw_dir + " (" + status_ec.message() + ")");
+        }
+        if (!fs::exists(status)) {
+            return;
+        }
+        if (!fs::is_directory(status)) {
+            throw std::invalid_argument(
+                "'extra_models_dir' must reference a directory: " + raw_dir);
+        }
+    }
+
+    // status() can succeed when the process can traverse the path but cannot
+    // enumerate the directory. Probe enumeration so the GUI can report a
+    // permission error before RuntimeConfig::set applies either directory key.
+    std::error_code read_ec;
+    fs::directory_iterator{dir, read_ec};
+    if (read_ec) {
+        throw std::invalid_argument(
+            "'extra_models_dir' is not readable by the Lemonade server: " +
+            raw_dir + " (" + read_ec.message() + ")");
+    }
+}
+
 static std::pair<json, std::string> normalize_config_set_changes(const json& changes) {
     json normalized = changes;
     std::string message;
@@ -71,6 +136,24 @@ static std::pair<json, std::string> normalize_config_set_changes(const json& cha
         normalized["rocm_channel"] = "stable";
         message = "rocm_channel=preview is deprecated; using rocm_channel=stable";
         LOG(WARNING) << message << std::endl;
+    }
+
+    // Reject conflicting broadcast options
+    if (normalized.contains("broadcast") && normalized.contains("no_broadcast")) {
+        throw std::invalid_argument("Cannot specify both 'broadcast' and 'no_broadcast'");
+    }
+
+    if (normalized.contains("broadcast") && !normalized["broadcast"].is_boolean()) {
+        throw std::invalid_argument("'broadcast' must be a boolean");
+    }
+
+    // Migrate legacy no_broadcast to broadcast
+    if (normalized.contains("no_broadcast")) {
+        if (!normalized["no_broadcast"].is_boolean()) {
+            throw std::invalid_argument("'no_broadcast' must be a boolean");
+        }
+        normalized["broadcast"] = !normalized["no_broadcast"].get<bool>();
+        normalized.erase("no_broadcast");
     }
 
     // Promote flat backend keys (e.g. "vllm_args", "llamacpp_backend") into
@@ -200,7 +283,19 @@ void RuntimeConfig::validate_bin_path(const std::string& config_section,
 
 RuntimeConfig::RuntimeConfig(const json& config)
     : config_(config) {
-    // Config is expected to already have defaults merged in (by ConfigFile::load).
+    if (config_.contains("broadcast") && !config_["broadcast"].is_boolean()) {
+        throw std::invalid_argument("'broadcast' must be a boolean");
+    }
+    // Migrate legacy no_broadcast if present
+    if (config_.contains("no_broadcast")) {
+        if (!config_["no_broadcast"].is_boolean()) {
+            throw std::invalid_argument("'no_broadcast' must be a boolean");
+        }
+        if (!config_.contains("broadcast")) {
+            config_["broadcast"] = !config_["no_broadcast"].get<bool>();
+        }
+        config_.erase("no_broadcast");
+    }
 
     // In CI mode, override log level to debug for easier diagnostics
     const char* ci_mode = std::getenv("LEMONADE_CI_MODE");
@@ -239,9 +334,23 @@ std::string RuntimeConfig::extra_models_dir() const {
     return config_["extra_models_dir"].get<std::string>();
 }
 
-bool RuntimeConfig::no_broadcast() const {
+bool RuntimeConfig::broadcast() const {
     std::shared_lock lock(mutex_);
-    return config_["no_broadcast"].get<bool>();
+    if (broadcast_override_.has_value()) {
+        return *broadcast_override_;
+    }
+    if (config_.contains("broadcast") && config_["broadcast"].is_boolean()) {
+        return config_["broadcast"].get<bool>();
+    }
+    if (config_.contains("no_broadcast") && config_["no_broadcast"].is_boolean()) {
+        return !config_["no_broadcast"].get<bool>();
+    }
+    return true;
+}
+
+void RuntimeConfig::set_broadcast_override(std::optional<bool> override_val) {
+    std::unique_lock lock(mutex_);
+    broadcast_override_ = override_val;
 }
 
 long RuntimeConfig::global_timeout() const {
@@ -358,6 +467,13 @@ std::string RuntimeConfig::rocm_channel_for_recipe(const std::string& recipe) co
         }
     }
     return channel;
+}
+
+std::string RuntimeConfig::rocm_install_method() const {
+    std::string method =
+        get_string_opt("LEMONADE_ROCM_INSTALL_METHOD", {"rocm_install_method"}, "auto");
+    validate_rocm_install_method(method);
+    return method;
 }
 
 bool RuntimeConfig::telemetry_enabled() const {
@@ -585,6 +701,9 @@ void RuntimeConfig::validate(const std::string& key, const json& value) const {
         if (!value.is_string()) {
             throw std::invalid_argument("'" + key + "' must be a string");
         }
+        if (key == "extra_models_dir") {
+            validate_extra_models_dir_access(value.get<std::string>());
+        }
     } else if (key == "default_model_source") {
         if (!value.is_string()) {
             throw std::invalid_argument("'default_model_source' must be a string");
@@ -594,7 +713,7 @@ void RuntimeConfig::validate(const std::string& key, const json& value) const {
             throw std::invalid_argument(
                 "'default_model_source' must be either 'huggingface', or 'modelscope'");
         }
-    } else if (key == "no_broadcast" || key == "offline" ||
+    } else if (key == "broadcast" || key == "no_broadcast" || key == "offline" ||
                key == "auto_check_model_updates" ||
                key == "no_fetch_executables" ||
                key == "disable_model_filtering" || key == "enable_dgpu_gtt") {
@@ -672,6 +791,11 @@ void RuntimeConfig::validate(const std::string& key, const json& value) const {
         if (channel != "stable" && channel != "nightly") {
             throw std::invalid_argument("'rocm_channel' must be either 'stable' or 'nightly'");
         }
+    } else if (key == "rocm_install_method") {
+        if (!value.is_string()) {
+            throw std::invalid_argument("'rocm_install_method' must be a string");
+        }
+        validate_rocm_install_method(value.get<std::string>());
     } else if (key == "telemetry") {
         if (!value.is_object()) {
             throw std::invalid_argument("'telemetry' must be an object");
@@ -852,7 +976,7 @@ void RuntimeConfig::validate_backend(const std::string& backend, const std::stri
             throw std::invalid_argument("'" + backend + "." + key + "' must be positive");
         }
     }
-    else if (key == "lora_dir") {
+    else if (key == "lora_dir" || key == "upscaler_dir") {
         if (!value.is_string()) {
             throw std::invalid_argument("'" + backend + "." + key + "' must be a string");
         }
@@ -909,6 +1033,16 @@ void RuntimeConfig::apply_changes(const json& changes, json& applied_diff) {
                         applied_diff["telemetry"][t_key] = t_val;
                     }
                 }
+            }
+        } else if (key == "broadcast") {
+            bool bcast = value.get<bool>();
+            bool prev_effective_bcast = (broadcast_override_.has_value())
+                ? *broadcast_override_
+                : (config_.contains("broadcast") && config_["broadcast"].is_boolean() ? config_["broadcast"].get<bool>() : true);
+            config_["broadcast"] = bcast;
+            broadcast_override_ = std::nullopt;
+            if (prev_effective_bcast != bcast) {
+                applied_diff["broadcast"] = bcast;
             }
         } else {
             if (!config_.contains(key) || config_[key] != value) {

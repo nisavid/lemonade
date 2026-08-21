@@ -25,6 +25,8 @@ public:
 
     ~SDServer() override;
 
+    DeviceType effective_device(const RecipeOptions& options) const override;
+
     void load(const std::string& model_name,
              const ModelInfo& model_info,
              const RecipeOptions& options,
@@ -54,6 +56,8 @@ public:
         bool debug = false);
 
 private:
+    std::string selected_backend(const RecipeOptions& options) const;
+
     // image_defaults from the currently loaded model's server_models.json entry.
     // Applied when a request doesn't specify size / steps / cfg_scale / etc.
     // Needed because sd-server's own defaults are fixed at process startup and
@@ -77,6 +81,7 @@ namespace sdcpp {
 std::unique_ptr<WrappedServer> create(const BackendContext& ctx);
 const BackendSpec* spec();
 const BackendOps* ops();
+constexpr uint32_t capabilities() { return capability_mask_of<SDServer>(); }
 }  // namespace sdcpp
 }  // namespace backends
 }  // namespace lemon

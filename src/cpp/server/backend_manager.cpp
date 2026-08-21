@@ -262,20 +262,20 @@ bool is_therock_installed_for_current_arch(const json& backend_versions) {
         return false;
     }
 
+    const std::string version = backend_versions["therock"]["version"].get<std::string>();
     const std::string rocm_arch = SystemInfo::get_rocm_arch();
     if (rocm_arch.empty()) {
         return false;
     }
 
-    const std::string version = backend_versions["therock"]["version"].get<std::string>();
-    const fs::path version_file =
-        fs::path(backends::BackendUtils::get_therock_install_dir(rocm_arch, version)) / "version.txt";
-
-    return read_version_file(version_file) == version;
+    auto* cfg = RuntimeConfig::global();
+    const std::string requested = cfg ? cfg->rocm_install_method() : "auto";
+    return backends::BackendUtils::therock_runtime_installed(
+        rocm_arch, version, requested);
 }
 
 void install_therock_if_needed(const std::string& os, const json& backend_versions,
-                              DownloadProgressCallback progress_cb = nullptr) {
+                               DownloadProgressCallback progress_cb = nullptr) {
     if (!will_install_therock(os, backend_versions)) {
         return;
     }
@@ -283,8 +283,7 @@ void install_therock_if_needed(const std::string& os, const json& backend_versio
     std::string rocm_arch = SystemInfo::get_rocm_arch();
     std::string version = backend_versions["therock"]["version"].get<std::string>();
 
-    // Install TheRock for this architecture
-    backends::BackendUtils::install_therock(rocm_arch, version, progress_cb);
+    backends::BackendUtils::install_rocm_runtime(rocm_arch, version, progress_cb);
 }
 
 } // namespace
@@ -580,6 +579,7 @@ void BackendManager::install_backend(const std::string& recipe, const std::strin
         is_rocm_stable_backend && will_install_therock(os, backend_versions_);
     const bool rocm_runtime_update_required =
         therock_applicable && backend_update_required(recipe, backend);
+
     const bool needs_therock_download =
         therock_applicable &&
         (rocm_runtime_update_required ||
@@ -602,15 +602,7 @@ void BackendManager::install_backend(const std::string& recipe, const std::strin
                     }
 
                     const std::string version = backend_versions_["therock"]["version"].get<std::string>();
-                    const std::string install_dir =
-                        backends::BackendUtils::get_therock_install_dir(rocm_arch, version);
-
-                    std::error_code ec;
-                    fs::remove_all(install_dir, ec);
-                    if (ec) {
-                        throw std::runtime_error("Failed to remove existing TheRock runtime '" +
-                                                 install_dir + "': " + ec.message());
-                    }
+                    backends::BackendUtils::remove_therock_runtime(rocm_arch, version);
                 }
 
                 install_therock_if_needed(os, backend_versions_, runtime_progress_cb);

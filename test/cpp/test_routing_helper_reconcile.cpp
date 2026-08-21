@@ -8,13 +8,7 @@
 // isolation, so a busy helper is reclaimed by a subsequent policy reconcile once
 // idle — the real transition, not a hand-invoked second prune.
 //
-// The full load_model interleaving (the load-completion validation guard) is an
-// integration concern: it needs a real ModelManager (reads server_models.json),
-// the compile-time backend registry, and a spawned subprocess, so it is not
-// unit-testable here. That guard shares the exact predicate validated below
-// (residency == RoutingHelper, not pinned, absent from needed_helper_models_),
-// which this test covers via a StubWrappedServer injected through a friend hook.
-
+#include "lemon/config_file.h"
 #include "lemon/router.h"
 #include "lemon/runtime_config.h"
 #include "lemon/wrapped_server.h"
@@ -26,8 +20,10 @@
 #include <cstdio>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using nlohmann::json;
@@ -39,17 +35,24 @@ namespace lemon {
 // treated as a live resident instead of a dead tombstone.
 class StubWrappedServer : public WrappedServer {
 public:
-    StubWrappedServer(const std::string& model_name, ResidencyClass residency)
-        : WrappedServer("stub", "error", nullptr, nullptr) {
-        set_model_metadata(model_name, "", ModelType::CLASSIFICATION, DEVICE_CPU,
-                           RecipeOptions());
+    StubWrappedServer(
+        const std::string& model_name,
+        ResidencyClass residency,
+        ModelType model_type = ModelType::CLASSIFICATION,
+        DeviceType device = DEVICE_CPU,
+        std::shared_ptr<std::atomic<int>> unload_count =
+            std::make_shared<std::atomic<int>>(0))
+        : WrappedServer("stub", "error", nullptr, nullptr),
+          unload_count_(std::move(unload_count)) {
+        set_model_metadata(model_name, "", model_type, device,
+                           RecipeOptions("stub", json::object()));
         set_residency_class(residency);
         set_state(ModelState::READY);
     }
 
     void load(const std::string&, const ModelInfo&, const RecipeOptions&, bool) override {}
 
-    void unload() override { unloaded_.store(true); }
+    void unload() override { ++(*unload_count_); }
 
     bool is_backend_alive() const override { return alive_.load(); }
 
@@ -62,11 +65,9 @@ public:
         state_cv_.notify_all();
     }
 
-    bool was_unloaded() const { return unloaded_.load(); }
-
 private:
     std::atomic<bool> alive_{true};
-    std::atomic<bool> unloaded_{false};
+    std::shared_ptr<std::atomic<int>> unload_count_;
 };
 
 // Friend seam declared in router.h. Gives the test direct access to the
@@ -123,7 +124,7 @@ struct RoutingHelperTestHook {
     // test's Router has no ModelManager, so it must skip resolve_model_name).
     static bool ensure_residency(Router& r, const std::string& model_name,
                                  lemon::LoadPurpose load_purpose) {
-        return r.ensure_loaded_model_residency_canonical(model_name, load_purpose);
+        return r.prepare_model_load(model_name, load_purpose).already_loaded();
     }
 
     static ResidencyClass residency_of(Router& r, const std::string& model_name) {
@@ -134,6 +135,39 @@ struct RoutingHelperTestHook {
             }
         }
         return ResidencyClass::Standard;
+    }
+
+    static void set_available_memory(Router& r, double available_gb) {
+        r.available_memory_sampler_ =
+            [available_gb](DeviceType) { return available_gb; };
+    }
+
+    static json admission_state(Router& r) {
+        std::lock_guard<std::mutex> lock(r.load_mutex_);
+        return {
+            {"residents", resident_state_locked(r)},
+            {"needed_helpers", r.needed_helper_models_},
+            {"reconcile_generation", r.last_reconcile_generation_},
+        };
+    }
+
+private:
+    static json resident_state_locked(Router& r) {
+        json state = json::array();
+        for (const auto& server : r.loaded_servers_) {
+            state.push_back({
+                {"model_name", server->get_model_name()},
+                {"type", model_type_to_string(server->get_model_type())},
+                {"device", device_type_to_string(server->get_device_type())},
+                {"residency", residency_class_to_string(server->get_residency_class())},
+                {"pinned", server->is_pinned()},
+                {"busy", server->is_busy()},
+                {"state", model_state_to_string(server->get_state())},
+                {"process_id", server->get_process_id()},
+                {"gpu_memory_occupancy_gb", server->get_gpu_memory_occupancy_gb()},
+            });
+        }
+        return state;
     }
 };
 
@@ -151,6 +185,26 @@ static int failures = 0;
 static void check(const char* name, bool ok) {
     std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
     if (!ok) ++failures;
+}
+
+static bool acquire_exclusive(Router& router) {
+    while (true) {
+        auto request = router.request_exclusive();
+        while (request.pending()) {
+            const auto result = router.try_begin_exclusive(request);
+            if (result == Router::ExclusiveAcquireResult::Acquired) {
+                return true;
+            }
+            if (result != Router::ExclusiveAcquireResult::Retry) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (request.result() != Router::ExclusiveAcquireResult::Retry) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 }
 
 static std::unique_ptr<StubWrappedServer> make_helper(const std::string& name) {
@@ -356,7 +410,7 @@ static void test_deferred_reclaim_waits_for_slot(Router& router) {
     RoutingHelperTestHook::reconcile(router, {});  // marks pending-stale (busy)
     helper->set_busy(false);                       // idle + pending-stale, not needed
 
-    bool acquired = router.begin_exclusive();
+    bool acquired = acquire_exclusive(router);
 
     std::thread worker(
         [&] { RoutingHelperTestHook::reclaim_now(router, "slot.helper"); });
@@ -383,11 +437,11 @@ static void test_reclaim_rearms_when_rescued_before_commit(Router& router) {
         RoutingHelperTestHook::add_server(router, make_helper("rescue.helper"));
 
     // Take the residency slot first, while the helper is still idle, so
-    // begin_exclusive grants immediately. (begin_exclusive drains all in-flight
+    // acquire_exclusive grants immediately. (It drains all in-flight
     // requests before granting, so it can never be acquired while this helper
     // already holds one — the reclaim must be parked behind an exclusive session
     // that began idle, then rescued mid-session, exactly as in production.)
-    bool acquired = router.begin_exclusive();
+    bool acquired = acquire_exclusive(router);
 
     // A request is in flight and the policy drops the helper: prune arms the
     // release-triggered reclaim.
@@ -450,6 +504,44 @@ static void test_stale_policy_does_not_promote_standard(Router& router) {
           ensured && still_resident && stayed_standard);
 }
 
+static void test_npu_memory_rejection_preserves_residency(Router& router) {
+    auto unload_count = std::make_shared<std::atomic<int>>(0);
+    RoutingHelperTestHook::add_server(
+        router,
+        std::make_unique<StubWrappedServer>(
+            "resident.npu", ResidencyClass::Standard, lemon::ModelType::LLM,
+            lemon::DEVICE_NPU, unload_count));
+    RoutingHelperTestHook::reconcile(router, {"policy.helper"});
+    RoutingHelperTestHook::set_available_memory(router, 8.0);
+
+    const json before = RoutingHelperTestHook::admission_state(router);
+    lemon::ModelInfo candidate;
+    candidate.model_name = "user.low-memory-npu";
+    candidate.checkpoints["main"] = "unused";
+    candidate.recipe = "ryzenai-llm";
+    candidate.type = lemon::ModelType::LLM;
+    candidate.device = lemon::DEVICE_NPU;
+    candidate.size = 12.0;
+
+    bool rejected = false;
+    try {
+        auto preparation = router.prepare_model_load(
+            "", lemon::LoadPurpose::UserInference);
+        router.load_prepared_model(
+            std::move(preparation), candidate,
+            lemon::RecipeOptions(candidate.recipe, {{"ctx_size", -1}}));
+    } catch (const std::runtime_error& e) {
+        rejected = std::string(e.what()).find("Not enough memory to load") !=
+                   std::string::npos;
+    }
+
+    const json after = RoutingHelperTestHook::admission_state(router);
+    check("low-memory NPU load is rejected for insufficient memory", rejected);
+    check("low-memory NPU rejection evicts nothing", unload_count->load() == 0);
+    check("low-memory NPU rejection leaves residency and admission state unchanged",
+          after == before);
+}
+
 // Reviewer's ask #4: router shutdown while a deferred reclaim is pending. The
 // reclaim is posted to the router-owned executor and left blocked on the slot;
 // destroying the Router must wake it, join the worker, and not hang or crash.
@@ -464,7 +556,7 @@ static void test_shutdown_with_pending_reclaim(RuntimeConfig& config) {
         helper->set_busy(false);                       // idle + pending-stale
 
         // Hold the slot so the dispatched reclaim blocks on the executor worker.
-        router.begin_exclusive();
+        acquire_exclusive(router);
         helper->finish_downsize(true);  // busy->idle edge posts the reclaim
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
@@ -476,9 +568,11 @@ static void test_shutdown_with_pending_reclaim(RuntimeConfig& config) {
 }
 
 int main() {
-    json cfg = json::object();
+    json cfg = lemon::ConfigFile::get_defaults();
     cfg["max_loaded_models"] = 4;
     cfg["log_level"] = "error";
+    cfg["offline"] = false;
+    cfg["no_fetch_executables"] = true;
 
     RuntimeConfig config(cfg);
     RuntimeConfig::set_global(&config);
@@ -499,6 +593,7 @@ int main() {
         test_deferred_reclaim_waits_for_slot(router);
         test_reclaim_rearms_when_rescued_before_commit(router);
         test_stale_policy_does_not_promote_standard(router);
+        test_npu_memory_rejection_preserves_residency(router);
     }
 
     test_shutdown_with_pending_reclaim(config);
