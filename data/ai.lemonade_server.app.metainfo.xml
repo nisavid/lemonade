@@ -45,6 +45,7 @@
     <binary>lemonade-app</binary>
   </provides>
   <releases>
+    <release version="11.7.0" date="2026-08-19"/>
     <release version="11.6.0" date="2026-08-13"/>
   </releases>
   <content_rating type="oars-1.1"/>
