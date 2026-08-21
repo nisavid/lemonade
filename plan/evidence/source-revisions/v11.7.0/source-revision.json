@@ -1,0 +1,124 @@
+{
+  "fallback_state": {
+    "authority": "legacy_runtime",
+    "status": "active"
+  },
+  "maintained_fork_base": {
+    "commit": "9c6748986851c758bab48d6172e0141d8a25e2d5",
+    "tree": "30e082f1919c6c908879a2f3745c23b08abfeb04"
+  },
+  "predecessor_campaign": {
+    "accepted_append_commit": "6ab2880b6c2a6810d317bb59c808f73ecc8ec774",
+    "accepted_append_tree": "4f9bf9bbeeeb1907e2bbd303bf860114ba15aa12",
+    "implementation_base_commit": "0e5b4ad66cc38805a47a65a2bdc8a557d9cbaefb",
+    "manifest_path": "plan/portable-residency-implementation-base.json",
+    "manifest_sha256": "79909e9050d5d46b8ae221b008d2489f282ccfcd127a2d25ce8f8b98d4ba18fa",
+    "stable_release_commit": "93aac619a9df474ae1782f4bd45a0a147d6dd4b5",
+    "terminal_phase": 2,
+    "terminal_record_digest": "60c1f808141c4e6a2efe1f341f908ac16dc6754568f8c98e74bcebbda19f2810"
+  },
+  "predecessor_scout": {
+    "checkpoint_commit": "c4783e47fd7b781824a5080f796c1ebb16994b25",
+    "checkpoint_tree": "e3b7510679a28ce489582883cc7d0eec97e1a69e",
+    "path": "plan/evidence/phase-0/stable-source-scout.json",
+    "sha256": "7509ef2796c256e436502ce6360ba1361d0f8f8520ebab932534cb06d1f9c1b9"
+  },
+  "record_digest": "082d86f8a6304a4d204c563b44058608e8d4678c0531ca5bd3c324718d2f5af5",
+  "revision_id": "v11.7.0-forward-1",
+  "runtime_authority": "none",
+  "schema": "portable_residency_source_revision/v1",
+  "scout_input_dispositions": [
+    {
+      "disposition": "candidate_for_carry_forward",
+      "path": "src/cpp/include/lemon/backends/install_staging.h",
+      "predecessor_sha256": "5aac0b54db5a377bb7e4e0a9adb871b9179943a16c5e76e4586e0b3af93d8a32",
+      "upstream_sha256": "5aac0b54db5a377bb7e4e0a9adb871b9179943a16c5e76e4586e0b3af93d8a32"
+    },
+    {
+      "disposition": "revalidation_required",
+      "path": "src/cpp/include/lemon/router.h",
+      "predecessor_sha256": "811f6adbea8497c2ecb55258ca9d469940cdc9ec806e51b589a19ff8c802493f",
+      "upstream_sha256": "6d2fe317b4faa9e9f7e2e273ddf85a05a2dc6d503369a2adcb7d10fa2d7730d9"
+    },
+    {
+      "disposition": "candidate_for_carry_forward",
+      "path": "src/cpp/include/lemon/backends/backend_ops.h",
+      "predecessor_sha256": "108747ce268939151bb9db0a9cd57bfa706d5f5f51e9965156e10f7b5131033c",
+      "upstream_sha256": "108747ce268939151bb9db0a9cd57bfa706d5f5f51e9965156e10f7b5131033c"
+    },
+    {
+      "disposition": "revalidation_required",
+      "path": "src/cpp/include/lemon/runtime_config.h",
+      "predecessor_sha256": "2e71cc4f7b58cea71b07b7d1d268774b4755578c83626f89b056106d3a09584e",
+      "upstream_sha256": "e072d381bd69a17e957946df073c1946c41251a4c018ce9e411f78c66e02c2f8"
+    },
+    {
+      "disposition": "candidate_for_carry_forward",
+      "path": "src/cpp/include/lemon/utils/process_manager.h",
+      "predecessor_sha256": "735346e564f435a5d427f2aaaf3586bb0344bb7f8635197cc6797646f429298e",
+      "upstream_sha256": "735346e564f435a5d427f2aaaf3586bb0344bb7f8635197cc6797646f429298e"
+    },
+    {
+      "disposition": "revalidation_required",
+      "path": "src/cpp/include/lemon/wrapped_server.h",
+      "predecessor_sha256": "86ea156341e5bdab7cfeb8163f1f8eff767ae9e67ce95cd9094d18e18b5bce63",
+      "upstream_sha256": "a3eab5a324bfcbf82a2d162a3db3ce56d153f3e42c813d2224e1a57b38a8f8e9"
+    },
+    {
+      "disposition": "candidate_for_carry_forward",
+      "path": "src/cpp/server/backends/backend_registry.cpp",
+      "predecessor_sha256": "ce0bc134dfb621659cab995d0e5bcfd1fa0700427fa3605bed8ae2337d44d426",
+      "upstream_sha256": "ce0bc134dfb621659cab995d0e5bcfd1fa0700427fa3605bed8ae2337d44d426"
+    },
+    {
+      "disposition": "revalidation_required",
+      "path": "src/cpp/server/backends/backend_utils.cpp",
+      "predecessor_sha256": "35f195085ff50d495771082a9ee5ce4deb8b2b7ba0dbbb906f89d5e4cf80e3f3",
+      "upstream_sha256": "4c749aea2d180f8884b596fa71b67db67a107c2da8faa69ec159dbad7fea30b7"
+    },
+    {
+      "disposition": "revalidation_required",
+      "path": "src/cpp/server/eviction_engine.cpp",
+      "predecessor_sha256": "b3893b209476c562d2cde4559b2430202b3e5bce09deecfb322a40b7ead41de5",
+      "upstream_sha256": "d056727b5df78891f8b4f4af7ce69cda667d8bd1924f065f285e7879e78fa8c8"
+    },
+    {
+      "disposition": "candidate_for_carry_forward",
+      "path": "src/cpp/server/global_vram_monitor.cpp",
+      "predecessor_sha256": "747a6083e8ee4b8c3133da387bf474b84d24e97cd1222a6bd597c283d961115d",
+      "upstream_sha256": "747a6083e8ee4b8c3133da387bf474b84d24e97cd1222a6bd597c283d961115d"
+    },
+    {
+      "disposition": "revalidation_required",
+      "path": "src/cpp/server/gpu_memory_planner.cpp",
+      "predecessor_sha256": "7ba8ff406cb7060cfc7178b2ef1f79c1d01a320f98a163cf4633df4ccf84c48b",
+      "upstream_sha256": null
+    },
+    {
+      "disposition": "revalidation_required",
+      "path": "src/cpp/server/router.cpp",
+      "predecessor_sha256": "82e002c17ecb575dccf838c5a6e1755016dab3a16918acab1ab4c6252e309cca",
+      "upstream_sha256": "75210cd284d5f218140f4b70d99869f7c0d110df3a924744e582c266b11e00e5"
+    },
+    {
+      "disposition": "revalidation_required",
+      "path": "src/cpp/server/server.cpp",
+      "predecessor_sha256": "3e541f333c44c71017d4375f9af14529287c653b1b042286ae4597c2638e0ca4",
+      "upstream_sha256": "932a2907595e577239ff3fe5fe9aa76b0b4e2bc9b27826ca33de969d70ae7fcc"
+    },
+    {
+      "disposition": "candidate_for_carry_forward",
+      "path": "test/cpp/test_routing_helper_reconcile.cpp",
+      "predecessor_sha256": "d4505318247133e0511e42af4d662d7900f072a1334760db0c00d1329ba2c5d8",
+      "upstream_sha256": "d4505318247133e0511e42af4d662d7900f072a1334760db0c00d1329ba2c5d8"
+    }
+  ],
+  "status": "awaiting_maintained_fork_binding",
+  "upstream_release": {
+    "peeled_commit": "2b6a7d77c71e551736f6cc8473dc46f479cd156b",
+    "release_url": "https://github.com/lemonade-sdk/lemonade/releases/tag/v11.7.0",
+    "tag": "v11.7.0",
+    "tag_object": null,
+    "tree": "da8ce836e179cd74ddbac555af21dac544e1adc4"
+  }
+}

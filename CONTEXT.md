@@ -235,6 +235,18 @@ _Avoid_: Calling design coverage validation, implying that fallback-only behavio
 An evidence-only identity over one frozen source baseline, exact source-derived cross-variant cases, coverage dimensions, `NPC` relation selector, enumerated relation constraints, evidence/gate sets, state, and fallback. It may justify only those enumerated relation constraints; it is not a runtime cell. Participant-local slot cardinality, ownership, protection, and recovery remain obligations of separate exact promotion units. The contract binds no hardware, process, claim, or recovery identity and grants no live action authority; physical qualification creates separate exact platform cells. Its `delivery_state` gates availability, so synthetic relation evidence cannot make an absent contract usable.
 _Avoid_: Inventing one cross-platform runtime selector for variants that do not coexist on the same supported platform, importing participant-local constraints into a relation proof, or treating synthetic compatibility evidence as capacity or displacement authority.
 
+**Portable residency evidence campaign**:
+An immutable implementation-handoff and evidence lineage anchored to one selected stable upstream release and one reviewed maintained-fork source line. A later campaign preserves the earlier lineage by commit and digest rather than relabelling it or depending on a moving branch ref.
+_Avoid_: Treating `upstream-stable` as historical campaign identity or rewriting accepted phase records when a newer release is selected.
+
+**Portable residency source revision**:
+A non-authorizing record that opens a later evidence campaign by binding the predecessor campaign, the next immutable upstream release, the pre-merge maintained-fork base, and the complete prior scout-input impact roster. It contains no placeholder for a future reviewed fork commit.
+_Avoid_: Silently carrying a changed input forward, filling a pending merge identity in place, or treating an opened source revision as production authority.
+
+**Maintained-fork source binding**:
+A separate record that points backward to one portable residency source revision and binds the reviewed maintained-fork commit, its two source ancestries, and final scout-input dispositions. `source_ready` permits later evidence work; it does not activate runtime behavior.
+_Avoid_: Reusing the upstream release commit as the fork identity, accepting due inputs as carried, or interpreting source readiness as a residency cutover.
+
 **Residency evidence ceiling**:
 The strongest capability level that one frozen evidence program could justify for an exact runtime cell or evidence-only compatibility contract if every required gate passes. It is a campaign target, not the promotion unit's accepted capability level or current runtime authority.
 _Avoid_: Labeling a cell or contract modeled or validated merely because its planned evidence ceiling has that name.

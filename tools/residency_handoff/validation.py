@@ -18,6 +18,8 @@ from typing import Any
 from .contract import canonical_digest, fail, load_manifest, sha256_bytes
 
 SCHEMA = "portable_residency_implementation_handoff/v1"
+SOURCE_REVISION_SCHEMA = "portable_residency_source_revision/v1"
+FORK_BINDING_SCHEMA = "portable_residency_maintained_fork_binding/v1"
 RED_FIXTURE_SCHEMA_V1 = "portable_residency_red_fixture_result/v1"
 RED_FIXTURE_SCHEMA_V2 = "portable_residency_red_fixture_result/v2"
 HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -34,7 +36,7 @@ TASK_020_FAILURE_SIGNATURE = (
 )
 TASK_020_FALLBACK_STATE = "production_cutover_inactive"
 TASK_020_TASK_BASE_COMMIT = "0c93411bc9b0463eee0f56d38cd97fffb0bae633"
-TASK_020_EVIDENCE_COMMIT = "27d2291335e3b334ba7436e2a3cd686bf34c61f7"
+TASK_020_EVIDENCE_COMMIT = "14a737a4f80510cb86f1e4e30a9a4d0d6ccc9c5a"
 TASK_020_BUNDLE_SHA256 = (
     "4e9ff6284e599bfb3869d929416b2f915524eab14506620abd1d7fe95f93a650"
 )
@@ -636,9 +638,488 @@ def _validate_release(repo: GitRepository, value: Any) -> str:
             release[f"{prefix}_ref_commit"],
             f"stable_release.{prefix}_ref_commit",
         )
-        if repo.resolve(ref_name) != recorded or recorded != peeled:
-            fail(f"stable_release.{prefix}_ref does not resolve to peeled_commit")
+        if recorded != peeled:
+            fail(f"stable_release.{prefix}_ref_commit must equal peeled_commit")
     return peeled
+
+
+def _validate_source_release(
+    repo: GitRepository, value: Any, label: str = "upstream_release"
+) -> str:
+    release = _mapping(value, label)
+    _exact_keys(
+        release,
+        {"tag", "release_url", "tag_object", "peeled_commit", "tree"},
+        label,
+    )
+    tag = _string(release["tag"], f"{label}.tag")
+    url = _string(release["release_url"], f"{label}.release_url")
+    expected_url = f"https://github.com/lemonade-sdk/lemonade/releases/tag/{tag}"
+    if url != expected_url:
+        fail(f"{label}.release_url must be the canonical upstream release URL")
+    peeled = _commit(repo, release["peeled_commit"], f"{label}.peeled_commit")
+    _tree(repo, peeled, release["tree"], f"{label}.tree")
+    ref = f"refs/tags/{tag}"
+    ref_value = repo.resolve(ref)
+    tag_object = release["tag_object"]
+    if tag_object is None:
+        if repo.object_type(ref_value) != "commit" or ref_value != peeled:
+            fail(f"{label} lightweight tag identity is inconsistent")
+    else:
+        annotated = _object_id(tag_object, f"{label}.tag_object")
+        if repo.object_type(annotated) != "tag" or annotated != ref_value:
+            fail(f"{label}.tag_object does not match the annotated tag")
+        if repo.resolve(f"{ref}^{{commit}}") != peeled:
+            fail(f"{label} annotated tag does not peel to peeled_commit")
+    return peeled
+
+
+def _validate_predecessor_campaign(
+    repo: GitRepository, value: Any
+) -> tuple[str, dict[str, Any]]:
+    label = "predecessor_campaign"
+    predecessor = _mapping(value, label)
+    _exact_keys(
+        predecessor,
+        {
+            "manifest_path",
+            "accepted_append_commit",
+            "accepted_append_tree",
+            "manifest_sha256",
+            "terminal_phase",
+            "terminal_record_digest",
+            "stable_release_commit",
+            "implementation_base_commit",
+        },
+        label,
+    )
+    manifest_path = _path(predecessor["manifest_path"], f"{label}.manifest_path")
+    if manifest_path != "plan/portable-residency-implementation-base.json":
+        fail(f"{label}.manifest_path must name the implementation handoff")
+    append_commit = _commit(
+        repo,
+        predecessor["accepted_append_commit"],
+        f"{label}.accepted_append_commit",
+    )
+    _tree(
+        repo,
+        append_commit,
+        predecessor["accepted_append_tree"],
+        f"{label}.accepted_append_tree",
+    )
+    manifest_bytes = repo.blob(append_commit, manifest_path)
+    if sha256_bytes(manifest_bytes) != _digest(
+        predecessor["manifest_sha256"], f"{label}.manifest_sha256"
+    ):
+        fail(f"{label}.manifest_sha256 does not match the accepted append")
+    manifest = _manifest_at(repo, append_commit, manifest_path)
+    if manifest.get("schema") != SCHEMA:
+        fail(f"{label} does not bind a supported implementation handoff")
+    records = _list(manifest.get("phase_records"), f"{label}.phase_records")
+    terminal_phase = predecessor["terminal_phase"]
+    if isinstance(terminal_phase, bool) or not isinstance(terminal_phase, int):
+        fail(f"{label}.terminal_phase must be an integer")
+    if not records or len(records) != terminal_phase + 1:
+        fail(f"{label}.terminal_phase does not match the accepted manifest")
+    terminal = _mapping(records[-1], f"{label}.terminal_record")
+    if terminal.get("phase") != terminal_phase:
+        fail(f"{label}.terminal_phase does not match the terminal record")
+    terminal_digest = _digest(
+        predecessor["terminal_record_digest"], f"{label}.terminal_record_digest"
+    )
+    if terminal.get("record_digest") != terminal_digest:
+        fail(f"{label}.terminal_record_digest does not match the terminal record")
+    if canonical_digest(terminal) != terminal_digest:
+        fail(f"{label} terminal record digest is not canonical")
+    stable_commit = _commit(
+        repo,
+        predecessor["stable_release_commit"],
+        f"{label}.stable_release_commit",
+    )
+    if manifest.get("stable_release", {}).get("peeled_commit") != stable_commit:
+        fail(f"{label}.stable_release_commit does not match the accepted manifest")
+    implementation_base = _commit(
+        repo,
+        predecessor["implementation_base_commit"],
+        f"{label}.implementation_base_commit",
+    )
+    if manifest.get("implementation_base", {}).get("commit") != implementation_base:
+        fail(f"{label}.implementation_base_commit does not match the accepted manifest")
+    checkpoint = _commit(
+        repo,
+        terminal.get("phase_checkpoint_commit"),
+        f"{label}.terminal_record.phase_checkpoint_commit",
+    )
+    _tree(
+        repo,
+        checkpoint,
+        terminal.get("phase_checkpoint_tree"),
+        f"{label}.terminal_record.phase_checkpoint_tree",
+    )
+    if repo.parents(append_commit) != [checkpoint]:
+        fail(f"{label}.accepted_append_commit is not the terminal evidence append")
+    if repo.changed_paths(str(checkpoint), append_commit) != [manifest_path]:
+        fail(f"{label}.accepted_append_commit changed more than the handoff manifest")
+    return append_commit, manifest
+
+
+def _validate_predecessor_scout(
+    repo: GitRepository, value: Any
+) -> tuple[str, dict[str, Any]]:
+    label = "predecessor_scout"
+    scout = _mapping(value, label)
+    _exact_keys(
+        scout,
+        {"path", "checkpoint_commit", "checkpoint_tree", "sha256"},
+        label,
+    )
+    path = _path(scout["path"], f"{label}.path")
+    commit = _commit(repo, scout["checkpoint_commit"], f"{label}.checkpoint_commit")
+    _tree(repo, commit, scout["checkpoint_tree"], f"{label}.checkpoint_tree")
+    source = repo.blob(commit, path)
+    if sha256_bytes(source) != _digest(scout["sha256"], f"{label}.sha256"):
+        fail(f"{label}.sha256 does not match its checkpoint")
+    try:
+        report = json.loads(
+            source.decode("utf-8"),
+            object_pairs_hook=lambda pairs: _pairs_without_duplicates(
+                pairs, f"{commit}:{path}"
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        fail(f"{label} is invalid JSON: {error}")
+    report = _mapping(report, label)
+    if report.get("schema") != "portable_residency_stable_source_scout/v1":
+        fail(f"{label} schema is unsupported")
+    return commit, report
+
+
+def _blob_digest_or_none(repo: GitRepository, commit: str, path: str) -> str | None:
+    with _isolated_git_environment() as environment:
+        result = subprocess.run(
+            ["git", "-C", str(repo.root), "show", f"{commit}:{path}"],
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+    if result.returncode:
+        return None
+    return sha256_bytes(result.stdout)
+
+
+def _validate_revalidation_evidence(
+    repo: GitRepository, value: Any, reviewed_commit: str, label: str
+) -> None:
+    evidence = _mapping(value, label)
+    _exact_keys(
+        evidence,
+        {"path", "checkpoint_commit", "checkpoint_tree", "sha256"},
+        label,
+    )
+    path = _path(evidence["path"], f"{label}.path")
+    if not path.startswith("plan/evidence/source-revisions/"):
+        fail(f"{label}.path must be source-revision evidence")
+    checkpoint = _commit(
+        repo, evidence["checkpoint_commit"], f"{label}.checkpoint_commit"
+    )
+    _tree(repo, checkpoint, evidence["checkpoint_tree"], f"{label}.checkpoint_tree")
+    if not repo.is_ancestor(reviewed_commit, checkpoint):
+        fail(f"{label}.checkpoint_commit must descend from the reviewed fork")
+    source = repo.blob(checkpoint, path)
+    if sha256_bytes(source) != _digest(evidence["sha256"], f"{label}.sha256"):
+        fail(f"{label}.sha256 does not match its checkpoint")
+    try:
+        payload = json.loads(
+            source.decode("utf-8"),
+            object_pairs_hook=lambda pairs: _pairs_without_duplicates(
+                pairs, f"{checkpoint}:{path}"
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        fail(f"{label} is invalid JSON: {error}")
+    payload = _mapping(payload, label)
+    _exact_keys(
+        payload,
+        {"schema", "reviewed_maintained_fork_commit"},
+        label,
+    )
+    if payload["schema"] != "portable_residency_source_revalidation/v1":
+        fail(f"{label} schema is unsupported")
+    if payload["reviewed_maintained_fork_commit"] != reviewed_commit:
+        fail(f"{label} does not bind the reviewed maintained-fork commit")
+
+
+def _validate_fork_binding(
+    repo: GitRepository,
+    revision: dict[str, Any],
+    source_revision_path: Path,
+    binding_path: Path,
+    release_commit: str,
+    fork_base_commit: str,
+    predecessor_inputs: dict[str, str],
+) -> str:
+    resolved_binding = binding_path.resolve()
+    try:
+        resolved_binding.relative_to(repo.root)
+    except ValueError:
+        fail("fork binding must be inside the current Git repository")
+    binding = load_manifest(binding_path)
+    _exact_keys(
+        binding,
+        {
+            "schema",
+            "revision_id",
+            "source_revision",
+            "reviewed_maintained_fork",
+            "scout_input_dispositions",
+            "fallback_state",
+            "runtime_authority",
+            "status",
+            "record_digest",
+        },
+        "fork_binding",
+    )
+    if binding["schema"] != FORK_BINDING_SCHEMA:
+        fail(f"fork_binding.schema must be {FORK_BINDING_SCHEMA!r}")
+    if binding["revision_id"] != revision["revision_id"]:
+        fail("fork_binding.revision_id does not match source_revision")
+    if canonical_digest(binding) != _digest(
+        binding["record_digest"], "fork_binding.record_digest"
+    ):
+        fail("fork_binding.record_digest does not match its canonical payload")
+    source = _mapping(binding["source_revision"], "fork_binding.source_revision")
+    _exact_keys(
+        source,
+        {"path", "checkpoint_commit", "checkpoint_tree", "sha256", "record_digest"},
+        "fork_binding.source_revision",
+    )
+    source_path = _path(source["path"], "fork_binding.source_revision.path")
+    expected_source_path = (
+        source_revision_path.resolve().relative_to(repo.root).as_posix()
+    )
+    if source_path != expected_source_path:
+        fail("fork_binding.source_revision.path does not name the validated revision")
+    source_commit = _commit(
+        repo,
+        source["checkpoint_commit"],
+        "fork_binding.source_revision.checkpoint_commit",
+    )
+    _tree(
+        repo,
+        source_commit,
+        source["checkpoint_tree"],
+        "fork_binding.source_revision.checkpoint_tree",
+    )
+    source_bytes = repo.blob(source_commit, source_path)
+    source_digest = _digest(source["sha256"], "fork_binding.source_revision.sha256")
+    if sha256_bytes(source_bytes) != source_digest:
+        fail("fork_binding.source_revision.sha256 does not match its checkpoint")
+    if sha256_bytes(source_revision_path.read_bytes()) != source_digest:
+        fail("validated source revision differs from the fork binding")
+    if source["record_digest"] != revision["record_digest"]:
+        fail("fork_binding.source_revision.record_digest does not match")
+    reviewed = _mapping(binding["reviewed_maintained_fork"], "reviewed_maintained_fork")
+    _exact_keys(
+        reviewed,
+        {"commit", "tree", "review_url", "reviewed_commit"},
+        "reviewed_maintained_fork",
+    )
+    reviewed_commit = _commit(
+        repo, reviewed["commit"], "reviewed_maintained_fork.commit"
+    )
+    _tree(
+        repo,
+        reviewed_commit,
+        reviewed["tree"],
+        "reviewed_maintained_fork.tree",
+    )
+    review_url = _string(reviewed["review_url"], "reviewed_maintained_fork.review_url")
+    if not re.fullmatch(
+        r"https://github\.com/nisavid/lemonade/pull/[1-9][0-9]*", review_url
+    ):
+        fail("reviewed_maintained_fork.review_url must name a fork pull request")
+    if reviewed["reviewed_commit"] != reviewed_commit:
+        fail("reviewed_maintained_fork.reviewed_commit must equal commit")
+    if reviewed_commit == release_commit:
+        fail("reviewed maintained-fork commit must be distinct from upstream release")
+    for ancestor, label in (
+        (release_commit, "selected upstream release"),
+        (fork_base_commit, "maintained fork base"),
+        (source_commit, "source revision checkpoint"),
+    ):
+        if not repo.is_ancestor(ancestor, reviewed_commit):
+            fail(f"reviewed maintained-fork commit must descend from {label}")
+    dispositions = _list(
+        binding["scout_input_dispositions"],
+        "fork_binding.scout_input_dispositions",
+    )
+    seen: set[str] = set()
+    unresolved = False
+    for index, raw in enumerate(dispositions):
+        label = f"fork_binding.scout_input_dispositions[{index}]"
+        item = _mapping(raw, label)
+        _exact_keys(
+            item,
+            {"path", "fork_sha256", "disposition", "evidence"},
+            label,
+        )
+        path = _path(item["path"], f"{label}.path")
+        if path in seen:
+            fail(f"fork_binding.scout_input_dispositions repeats {path!r}")
+        seen.add(path)
+        if path not in predecessor_inputs:
+            fail(f"{label}.path is not a predecessor scout input")
+        actual_fork = _blob_digest_or_none(repo, reviewed_commit, path)
+        recorded_fork = item["fork_sha256"]
+        if recorded_fork is not None:
+            recorded_fork = _digest(recorded_fork, f"{label}.fork_sha256")
+        if recorded_fork != actual_fork:
+            fail(f"{label}.fork_sha256 does not match reviewed fork")
+        if actual_fork == predecessor_inputs[path]:
+            if item["disposition"] != "carried_forward" or item["evidence"] is not None:
+                fail(f"{label} byte-identical input must be carried_forward")
+        elif item["disposition"] == "revalidated":
+            _validate_revalidation_evidence(
+                repo, item["evidence"], reviewed_commit, f"{label}.evidence"
+            )
+        elif item["disposition"] == "revalidation_required":
+            if item["evidence"] is not None:
+                fail(f"{label}.evidence must be null while revalidation is required")
+            unresolved = True
+        else:
+            fail(
+                f"{label}.disposition must be 'revalidated' or 'revalidation_required'"
+            )
+    if seen != set(predecessor_inputs):
+        fail("fork_binding.scout_input_dispositions must cover every scout input")
+    _fallback(binding["fallback_state"], "fork_binding.fallback_state")
+    if binding["runtime_authority"] != "none":
+        fail("fork_binding.runtime_authority must be 'none'")
+    expected_status = "awaiting_revalidation" if unresolved else "source_ready"
+    if binding["status"] != expected_status:
+        fail(f"fork_binding.status must be {expected_status!r}")
+    return expected_status
+
+
+def validate_source_revision(
+    source_revision_path: Path, fork_binding_path: Path | None = None
+) -> str:
+    revision = load_manifest(source_revision_path)
+    _exact_keys(
+        revision,
+        {
+            "schema",
+            "revision_id",
+            "predecessor_campaign",
+            "predecessor_scout",
+            "maintained_fork_base",
+            "upstream_release",
+            "scout_input_dispositions",
+            "fallback_state",
+            "runtime_authority",
+            "status",
+            "record_digest",
+        },
+        "source_revision",
+    )
+    if revision["schema"] != SOURCE_REVISION_SCHEMA:
+        fail(f"source_revision.schema must be {SOURCE_REVISION_SCHEMA!r}")
+    _string(revision["revision_id"], "source_revision.revision_id")
+    if canonical_digest(revision) != _digest(
+        revision["record_digest"], "source_revision.record_digest"
+    ):
+        fail("source_revision.record_digest does not match its canonical payload")
+    repo = GitRepository.discover(Path.cwd())
+    resolved_source = source_revision_path.resolve()
+    try:
+        resolved_source.relative_to(repo.root)
+    except ValueError:
+        fail("source revision must be inside the current Git repository")
+    append_commit, _ = _validate_predecessor_campaign(
+        repo, revision["predecessor_campaign"]
+    )
+    scout_commit, scout = _validate_predecessor_scout(
+        repo, revision["predecessor_scout"]
+    )
+    if not repo.is_ancestor(scout_commit, append_commit):
+        fail("predecessor_scout must precede the accepted campaign append")
+    fork_base = _mapping(revision["maintained_fork_base"], "maintained_fork_base")
+    _exact_keys(fork_base, {"commit", "tree"}, "maintained_fork_base")
+    fork_commit = _commit(repo, fork_base["commit"], "maintained_fork_base.commit")
+    _tree(repo, fork_commit, fork_base["tree"], "maintained_fork_base.tree")
+    if not repo.is_ancestor(append_commit, fork_commit):
+        fail("maintained_fork_base.commit must descend from the accepted campaign")
+    release_commit = _validate_source_release(repo, revision["upstream_release"])
+    dispositions = _list(
+        revision["scout_input_dispositions"], "scout_input_dispositions"
+    )
+    prior_inputs = _list(scout.get("inputs"), "predecessor_scout.inputs")
+    expected: dict[str, str] = {}
+    for index, raw in enumerate(prior_inputs):
+        item = _mapping(raw, f"predecessor_scout.inputs[{index}]")
+        _exact_keys(item, {"path", "sha256"}, f"predecessor_scout.inputs[{index}]")
+        path = _path(item["path"], f"predecessor_scout.inputs[{index}].path")
+        if path in expected:
+            fail(f"predecessor_scout.inputs repeats {path!r}")
+        expected[path] = _digest(
+            item["sha256"], f"predecessor_scout.inputs[{index}].sha256"
+        )
+    seen: set[str] = set()
+    for index, raw in enumerate(dispositions):
+        label = f"scout_input_dispositions[{index}]"
+        item = _mapping(raw, label)
+        _exact_keys(
+            item,
+            {
+                "path",
+                "predecessor_sha256",
+                "upstream_sha256",
+                "disposition",
+            },
+            label,
+        )
+        path = _path(item["path"], f"{label}.path")
+        if path in seen:
+            fail(f"scout_input_dispositions repeats {path!r}")
+        seen.add(path)
+        if path not in expected:
+            fail(f"{label}.path is not a predecessor scout input")
+        predecessor_digest = _digest(
+            item["predecessor_sha256"], f"{label}.predecessor_sha256"
+        )
+        if predecessor_digest != expected[path]:
+            fail(f"{label}.predecessor_sha256 does not match predecessor scout")
+        actual_upstream = _blob_digest_or_none(repo, release_commit, path)
+        recorded_upstream = item["upstream_sha256"]
+        if recorded_upstream is not None:
+            recorded_upstream = _digest(recorded_upstream, f"{label}.upstream_sha256")
+        if recorded_upstream != actual_upstream:
+            fail(f"{label}.upstream_sha256 does not match selected release")
+        expected_disposition = (
+            "candidate_for_carry_forward"
+            if actual_upstream == predecessor_digest
+            else "revalidation_required"
+        )
+        if item["disposition"] != expected_disposition:
+            fail(f"{label}.disposition must be {expected_disposition!r}")
+    if seen != set(expected):
+        fail("scout_input_dispositions must cover every predecessor scout input")
+    _fallback(revision["fallback_state"], "source_revision.fallback_state")
+    if revision["runtime_authority"] != "none":
+        fail("source_revision.runtime_authority must be 'none'")
+    if revision["status"] != "awaiting_maintained_fork_binding":
+        fail("source_revision.status must be 'awaiting_maintained_fork_binding'")
+    if fork_binding_path is None:
+        return str(revision["status"])
+    return _validate_fork_binding(
+        repo,
+        revision,
+        source_revision_path,
+        fork_binding_path,
+        release_commit,
+        fork_commit,
+        expected,
+    )
 
 
 def _validate_fixed_identity(repo: GitRepository, manifest: dict[str, Any]) -> str:
@@ -1562,7 +2043,7 @@ def _find_phase_append_commits(
     if repo.blob(head, manifest_path) != Path(repo.root / manifest_path).read_bytes():
         fail("manifest working bytes do not match HEAD")
     manifest_commits = str(
-        repo.run("log", "--all", "--format=%H", "--reverse", "--", manifest_path)
+        repo.run("log", "HEAD", "--format=%H", "--reverse", "--", manifest_path)
     ).splitlines()
     append_commits: list[str] = []
     for index, record in enumerate(records):
@@ -1601,10 +2082,11 @@ def _find_phase_append_commits(
                 f"phase_records[{index}] checkpoint does not descend from the prior append"
             )
         append_commits.append(candidates[0])
-    if append_commits[-1] != head:
-        fail(
-            "latest phase record must be committed directly after its phase checkpoint"
-        )
+    latest_append = append_commits[-1]
+    if not repo.is_ancestor(latest_append, head):
+        fail("latest phase append is not an ancestor of HEAD")
+    if repo.blob(latest_append, manifest_path) != repo.blob(head, manifest_path):
+        fail("manifest changed after the latest phase append")
     return append_commits
 
 
