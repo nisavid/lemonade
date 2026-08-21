@@ -5,13 +5,13 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 #include <fcntl.h>
@@ -52,7 +52,7 @@ DurableFileResult make_result(DurableFileStatus status) {
 
 DurableFileResult make_errno_result(DurableFileStatus status,
                                     int error_number) {
-    return {status, std::strerror(error_number)};
+    return {status, std::generic_category().message(error_number)};
 }
 
 DurableFileResult open_error_result(int error_number) {
