@@ -27,6 +27,14 @@ from tools.residency_handoff.validation import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = REPO_ROOT / "tools" / "validate_residency_implementation_handoff.py"
+SOURCE_REVISION = (
+    REPO_ROOT
+    / "plan"
+    / "evidence"
+    / "source-revisions"
+    / "v11.7.0"
+    / "source-revision.json"
+)
 REQUIRED_SEAMS = (
     "artifact_install_commit",
     "artifact_pull_import_delete_cleanup",
@@ -66,7 +74,7 @@ TASK_020_COMMAND = [
 ]
 TASK_020_FAILURE = "TASK-020 durable residency persistence contract is unavailable"
 TASK_020_BASE = "0c93411bc9b0463eee0f56d38cd97fffb0bae633"
-TASK_020_EVIDENCE = "27d2291335e3b334ba7436e2a3cd686bf34c61f7"
+TASK_020_EVIDENCE = "14a737a4f80510cb86f1e4e30a9a4d0d6ccc9c5a"
 TASK_020_BUNDLE = "4e9ff6284e599bfb3869d929416b2f915524eab14506620abd1d7fe95f93a650"
 TASK_020_PATCH_PATH = "plan/evidence/red-fixtures/TASK-020/test.patch"
 TASK_020_PATCH_SHA256 = (
@@ -541,7 +549,987 @@ class HandoffRepository:
         )
 
 
+class SourceCampaignRepository:
+    def __init__(self, root: Path):
+        self.root = root
+        self.source_path = (
+            root
+            / "plan"
+            / "evidence"
+            / "source-revisions"
+            / "v2.0.0"
+            / "source-revision.json"
+        )
+        self.binding_path = self.source_path.with_name("maintained-fork-binding.json")
+        self._git("init", "-q")
+        self._git("config", "user.name", "Source Campaign Test")
+        self._git("config", "user.email", "source-campaign@example.invalid")
+
+    def _git(self, *args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            raise AssertionError(result.stderr)
+        return result.stdout.strip()
+
+    def _write(self, path: str, value: str) -> None:
+        target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(value, encoding="utf-8")
+
+    def _commit(self, message: str) -> str:
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", message)
+        return self._git("rev-parse", "HEAD")
+
+    def _tree(self, commit: str) -> str:
+        return self._git("rev-parse", f"{commit}^{{tree}}")
+
+    def _blob(self, commit: str, path: str) -> bytes | None:
+        result = subprocess.run(
+            ["git", "show", f"{commit}:{path}"],
+            cwd=self.root,
+            capture_output=True,
+            check=False,
+        )
+        return result.stdout if result.returncode == 0 else None
+
+    def build(
+        self,
+        *,
+        use_decoy_scout: bool = False,
+        predecessor_manifest_mutator: Callable[[dict[str, object]], None] | None = None,
+        source_mutator: Callable[[dict[str, object]], None] | None = None,
+    ) -> None:
+        sources = {
+            "source/unchanged.cpp": "unchanged\n",
+            "source/changed.cpp": "old\n",
+            "source/fork_only.cpp": "fork only\n",
+        }
+        for path, value in sources.items():
+            self._write(path, value)
+        implementation_base = self._commit("chore: predecessor implementation base")
+        scout_inputs = [
+            {"path": path, "sha256": _sha256(value.encode())}
+            for path, value in sources.items()
+        ]
+        self.claims_by_path = {
+            item["path"]: [f"claim-{index}"] for index, item in enumerate(scout_inputs)
+        }
+        self.claims_by_path["source/changed.cpp"].append("claim-1-extra")
+        scout_path = "plan/evidence/phase-0/stable-source-scout.json"
+        self._write(
+            scout_path,
+            json.dumps(
+                {
+                    "schema": "portable_residency_stable_source_scout/v1",
+                    "stable_release_commit": implementation_base,
+                    "implementation_base_commit": implementation_base,
+                    "inputs": scout_inputs,
+                    "source_facts": [
+                        {"id": claim, "path": path}
+                        for path, claims in self.claims_by_path.items()
+                        for claim in claims
+                    ],
+                    "source_seam_dispositions": [],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+        )
+        scout_commit = self._commit("docs: record predecessor source scout")
+        scout_tree = self._tree(scout_commit)
+        scout_sha256 = _sha256(self._blob(scout_commit, scout_path) or b"")
+        selected_scout_path = scout_path
+        selected_scout_commit = scout_commit
+        selected_scout_tree = scout_tree
+        selected_scout_sha256 = scout_sha256
+        if use_decoy_scout:
+            selected_scout_path = "plan/evidence/phase-0/decoy-source-scout.json"
+            self._write(
+                selected_scout_path,
+                json.dumps(
+                    {
+                        "schema": "portable_residency_stable_source_scout/v1",
+                        "stable_release_commit": implementation_base,
+                        "implementation_base_commit": implementation_base,
+                        "inputs": [scout_inputs[0]],
+                        "source_facts": [
+                            {
+                                "id": "decoy-claim",
+                                "path": scout_inputs[0]["path"],
+                            }
+                        ],
+                        "source_seam_dispositions": [],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+            )
+            selected_scout_commit = self._commit("docs: record decoy source scout")
+            selected_scout_tree = self._tree(selected_scout_commit)
+            selected_scout_sha256 = _sha256(
+                self._blob(selected_scout_commit, selected_scout_path) or b""
+            )
+        manifest_path = "plan/portable-residency-implementation-base.json"
+        precursor = {
+            "schema": "portable_residency_implementation_handoff/v1",
+            "stable_release": {"peeled_commit": implementation_base},
+            "implementation_base": {"commit": implementation_base},
+            "scout_runs": [
+                {
+                    "id": "implementation-base-source-scout",
+                    "commit": scout_commit,
+                    "tree": scout_tree,
+                    "inputs": scout_inputs,
+                    "outputs": [
+                        {
+                            "path": scout_path,
+                            "sha256": scout_sha256,
+                        }
+                    ],
+                }
+            ],
+            "phase_records": [],
+        }
+        self._write(
+            manifest_path,
+            json.dumps(precursor, indent=2, sort_keys=True) + "\n",
+        )
+        self._commit("chore: bootstrap predecessor handoff")
+        self._write("phase-output.txt", "accepted\n")
+        phase_checkpoint = self._commit("docs: freeze predecessor phase checkpoint")
+        phase_record: dict[str, object] = {
+            "phase": 0,
+            "phase_checkpoint_commit": phase_checkpoint,
+            "phase_checkpoint_tree": self._tree(phase_checkpoint),
+        }
+        phase_record["record_digest"] = _record_digest(phase_record)
+        accepted_manifest = {**precursor, "phase_records": [phase_record]}
+        if predecessor_manifest_mutator is not None:
+            predecessor_manifest_mutator(accepted_manifest)
+        self._write(
+            manifest_path,
+            json.dumps(accepted_manifest, indent=2, sort_keys=True) + "\n",
+        )
+        append_commit = self._commit("docs: append predecessor phase evidence")
+        self._write("later.txt", "maintained fork work\n")
+        fork_base = self._commit("feat: advance maintained fork")
+
+        self._git("switch", "-q", "-c", "upstream-release")
+        self._write("source/changed.cpp", "new upstream\n")
+        (self.root / "source" / "fork_only.cpp").unlink()
+        release_commit = self._commit("chore: upstream v2 release")
+        self._git("tag", "v2.0.0", release_commit)
+        self._git("switch", "-q", "-")
+
+        source_payload: dict[str, object] = {
+            "schema": "portable_residency_source_revision/v1",
+            "revision_id": "v2.0.0-forward-1",
+            "predecessor_campaign": {
+                "manifest_path": manifest_path,
+                "accepted_append_commit": append_commit,
+                "accepted_append_tree": self._tree(append_commit),
+                "manifest_sha256": _sha256(
+                    self._blob(append_commit, manifest_path) or b""
+                ),
+                "terminal_phase": 0,
+                "terminal_record_digest": phase_record["record_digest"],
+                "stable_release_commit": implementation_base,
+                "implementation_base_commit": implementation_base,
+            },
+            "predecessor_scout": {
+                "path": selected_scout_path,
+                "checkpoint_commit": selected_scout_commit,
+                "checkpoint_tree": selected_scout_tree,
+                "sha256": selected_scout_sha256,
+            },
+            "maintained_fork_base": {
+                "commit": fork_base,
+                "tree": self._tree(fork_base),
+            },
+            "upstream_release": {
+                "tag": "v2.0.0",
+                "release_url": (
+                    "https://github.com/lemonade-sdk/lemonade/releases/tag/v2.0.0"
+                ),
+                "tag_object": None,
+                "peeled_commit": release_commit,
+                "tree": self._tree(release_commit),
+            },
+            "scout_input_dispositions": [],
+            "fallback_state": {"authority": "legacy_runtime", "status": "active"},
+            "runtime_authority": "none",
+            "status": "awaiting_maintained_fork_binding",
+        }
+        for item in scout_inputs:
+            path = str(item["path"])
+            upstream = self._blob(release_commit, path)
+            upstream_digest = _sha256(upstream) if upstream is not None else None
+            predecessor_digest = str(item["sha256"])
+            source_payload["scout_input_dispositions"].append(
+                {
+                    "path": path,
+                    "predecessor_sha256": predecessor_digest,
+                    "upstream_sha256": upstream_digest,
+                    "disposition": (
+                        "candidate_for_carry_forward"
+                        if upstream_digest == predecessor_digest
+                        else "revalidation_required"
+                    ),
+                }
+            )
+        if source_mutator is not None:
+            source_mutator(source_payload)
+        source_payload["record_digest"] = _record_digest(source_payload)
+        self._write(
+            self.source_path.relative_to(self.root).as_posix(),
+            json.dumps(source_payload, indent=2, sort_keys=True) + "\n",
+        )
+        self.source_commit = self._commit("docs: open source revision")
+        self.source_payload = source_payload
+        self.release_commit = release_commit
+        self.fork_base = fork_base
+
+    def commit_source_payload(
+        self, message: str = "test: mutate source revision"
+    ) -> str:
+        self.source_payload["record_digest"] = _record_digest(self.source_payload)
+        self._write(
+            self.source_path.relative_to(self.root).as_posix(),
+            json.dumps(self.source_payload, indent=2, sort_keys=True) + "\n",
+        )
+        return self._commit(message)
+
+    def commit_binding_payload(self, message: str = "test: mutate fork binding") -> str:
+        self.binding_payload["record_digest"] = _record_digest(self.binding_payload)
+        self._write(
+            self.binding_path.relative_to(self.root).as_posix(),
+            json.dumps(self.binding_payload, indent=2, sort_keys=True) + "\n",
+        )
+        self.binding_commit = self._commit(message)
+        return self.binding_commit
+
+    def run_source_validator(self, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(VALIDATOR),
+                "--source-revision",
+                str(self.source_path),
+                *extra,
+            ],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def finish_binding(
+        self,
+        *,
+        binding_mutator: Callable[[dict[str, object]], None] | None = None,
+        evidence_mutator: Callable[[str, dict[str, object]], None] | None = None,
+        include_unrelated: bool = False,
+        restore_due_input: bool = False,
+    ) -> None:
+        self._git(
+            "merge",
+            "-q",
+            "--no-ff",
+            "upstream-release",
+            "-m",
+            "merge: reconcile upstream release",
+        )
+        if restore_due_input:
+            self._write("source/changed.cpp", "old\n")
+            self._commit("test: retain predecessor input in maintained fork")
+        reviewed_commit = self._git("rev-parse", "HEAD")
+        self.reviewed_commit = reviewed_commit
+        dispositions: list[dict[str, object]] = []
+        pending_evidence: dict[str, tuple[str, dict[str, object]]] = {}
+        self.evidence_payload_by_path: dict[str, dict[str, object]] = {}
+        for index, source_item in enumerate(
+            self.source_payload["scout_input_dispositions"]
+        ):
+            path = str(source_item["path"])
+            fork_blob = self._blob(reviewed_commit, path)
+            fork_digest = _sha256(fork_blob) if fork_blob is not None else None
+            predecessor_digest = str(source_item["predecessor_sha256"])
+            carried = (
+                source_item["upstream_sha256"] == predecessor_digest
+                and fork_digest == predecessor_digest
+            )
+            evidence = None
+            if not carried:
+                evidence_path = (
+                    "plan/evidence/source-revisions/v2.0.0/"
+                    f"scout-revalidation-{index}.json"
+                )
+                evidence_payload: dict[str, object] = {
+                    "schema": "portable_residency_source_revalidation/v1",
+                    "revision_id": self.source_payload["revision_id"],
+                    "source_revision_record_digest": self.source_payload[
+                        "record_digest"
+                    ],
+                    "input_path": path,
+                    "predecessor_sha256": predecessor_digest,
+                    "selected_upstream_sha256": source_item["upstream_sha256"],
+                    "reviewed_maintained_fork_commit": reviewed_commit,
+                    "reviewed_fork_sha256": fork_digest,
+                    "validated_claims": self.claims_by_path[path],
+                    "result": "accepted",
+                }
+                if evidence_mutator is not None:
+                    evidence_mutator(path, evidence_payload)
+                self._write(
+                    evidence_path,
+                    json.dumps(evidence_payload, indent=2, sort_keys=True) + "\n",
+                )
+                pending_evidence[path] = (evidence_path, evidence_payload)
+                self.evidence_payload_by_path[path] = evidence_payload
+            dispositions.append(
+                {
+                    "path": path,
+                    "fork_sha256": fork_digest,
+                    "disposition": "carried_forward" if carried else "revalidated",
+                    "evidence": evidence,
+                }
+            )
+        evidence_commit = self._commit("test: record source revalidation")
+        evidence_tree = self._tree(evidence_commit)
+        self.evidence_by_path: dict[str, dict[str, object]] = {}
+        for disposition in dispositions:
+            path = str(disposition["path"])
+            if path not in pending_evidence:
+                continue
+            evidence_path, _ = pending_evidence[path]
+            evidence = {
+                "path": evidence_path,
+                "checkpoint_commit": evidence_commit,
+                "checkpoint_tree": evidence_tree,
+                "sha256": _sha256(self._blob(evidence_commit, evidence_path) or b""),
+            }
+            disposition["evidence"] = evidence
+            self.evidence_by_path[path] = evidence
+        source_path = self.source_path.relative_to(self.root).as_posix()
+        binding: dict[str, object] = {
+            "schema": "portable_residency_maintained_fork_binding/v1",
+            "revision_id": self.source_payload["revision_id"],
+            "source_revision": {
+                "path": source_path,
+                "checkpoint_commit": self.source_commit,
+                "checkpoint_tree": self._tree(self.source_commit),
+                "sha256": _sha256(self._blob(self.source_commit, source_path) or b""),
+                "record_digest": self.source_payload["record_digest"],
+            },
+            "reviewed_maintained_fork": {
+                "commit": reviewed_commit,
+                "tree": self._tree(reviewed_commit),
+                "review_url": "https://github.com/nisavid/lemonade/pull/123",
+                "reviewed_commit": reviewed_commit,
+            },
+            "scout_input_dispositions": dispositions,
+            "fallback_state": {"authority": "legacy_runtime", "status": "active"},
+            "runtime_authority": "none",
+            "status": "source_ready",
+        }
+        self.binding_payload = binding
+        if binding_mutator is not None:
+            binding_mutator(binding)
+        if include_unrelated:
+            self._write("unrelated.txt", "not binding evidence\n")
+        self.commit_binding_payload("docs: append maintained-fork binding")
+
+
 class ResidencyImplementationHandoffCliTest(unittest.TestCase):
+    def test_predecessor_scout_must_match_the_accepted_campaign_record(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build(use_decoy_scout=True)
+
+            result = fixture.run_source_validator()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("does not match the accepted predecessor scout", result.stderr)
+
+    def test_reviewed_fork_binding_can_make_the_source_revision_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.finish_binding()
+
+            result = fixture.run_source_validator(
+                "--fork-binding",
+                str(fixture.binding_path),
+                "--require-source-ready",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "portable residency source revision: source ready\n",
+        )
+
+    def test_source_revision_checkpoint_is_its_first_introduction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.source_payload["revision_id"] = "v2.0.0-forward-rewritten"
+            fixture.commit_source_payload()
+
+            result = fixture.run_source_validator()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must be a unique first-introduction commit", result.stderr)
+
+    def test_malformed_predecessor_identities_are_bounded_cli_errors(self) -> None:
+        for field in ("stable_release", "implementation_base"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                fixture = SourceCampaignRepository(Path(directory))
+
+                def replace_identity(
+                    manifest: dict[str, object], identity_field: str = field
+                ) -> None:
+                    manifest[identity_field] = []
+
+                fixture.build(predecessor_manifest_mutator=replace_identity)
+
+                result = fixture.run_source_validator()
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(f"{field} must be an object", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
+    def test_source_revision_accepts_git_normalized_line_endings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            fixture = SourceCampaignRepository(source)
+            fixture.build()
+            checkout = Path(directory) / "checkout"
+            cloned = subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "core.autocrlf=true",
+                    "clone",
+                    "-q",
+                    str(source),
+                    str(checkout),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(cloned.returncode, 0, cloned.stderr)
+            source_revision = checkout / fixture.source_path.relative_to(source)
+            self.assertIn(b"\r\n", source_revision.read_bytes())
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(VALIDATOR),
+                    "--source-revision",
+                    str(source_revision),
+                ],
+                cwd=checkout,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "portable residency source revision: awaiting maintained-fork binding\n",
+        )
+
+    def test_fork_binding_must_be_committed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.finish_binding()
+            reviewed = fixture.binding_payload["reviewed_maintained_fork"]
+            reviewed["review_url"] = (
+                "https://github.com/nisavid/lemonade/pull/987654321"
+            )
+            fixture.binding_payload["record_digest"] = _record_digest(
+                fixture.binding_payload
+            )
+            fixture._write(
+                fixture.binding_path.relative_to(fixture.root).as_posix(),
+                json.dumps(fixture.binding_payload, indent=2, sort_keys=True) + "\n",
+            )
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("differs from its committed checkpoint", result.stderr)
+
+    def test_fork_binding_checkpoint_changes_only_the_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+
+            def mutate(binding: dict[str, object]) -> None:
+                binding["reviewed_maintained_fork"][
+                    "review_url"
+                ] = "https://github.com/nisavid/lemonade/pull/987654321"
+
+            fixture.finish_binding(
+                binding_mutator=mutate,
+                include_unrelated=True,
+            )
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "must be a unique path-only first-introduction append", result.stderr
+        )
+
+    def test_fork_binding_checkpoint_is_its_first_introduction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.finish_binding()
+            fixture.binding_payload["reviewed_maintained_fork"][
+                "review_url"
+            ] = "https://github.com/nisavid/lemonade/pull/987654321"
+            fixture.commit_binding_payload()
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "must be a unique path-only first-introduction append", result.stderr
+        )
+
+    def test_fork_binding_must_descend_from_every_evidence_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+
+            def select_side_evidence(binding: dict[str, object]) -> None:
+                main_branch = fixture._git("branch", "--show-current")
+                input_path = "source/changed.cpp"
+                evidence = fixture.evidence_by_path[input_path]
+                evidence_path = str(evidence["path"])
+                payload = fixture.evidence_payload_by_path[input_path]
+                fixture._git(
+                    "switch",
+                    "-q",
+                    "-c",
+                    "side-evidence",
+                    fixture.reviewed_commit,
+                )
+                fixture._write(
+                    evidence_path,
+                    json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                )
+                side_commit = fixture._commit("test: record side-line evidence")
+                side_evidence = {
+                    "path": evidence_path,
+                    "checkpoint_commit": side_commit,
+                    "checkpoint_tree": fixture._tree(side_commit),
+                    "sha256": _sha256(fixture._blob(side_commit, evidence_path) or b""),
+                }
+                fixture._git("switch", "-q", main_branch)
+                for disposition in binding["scout_input_dispositions"]:
+                    if disposition["path"] == input_path:
+                        disposition["evidence"] = side_evidence
+                        break
+
+            fixture.finish_binding(binding_mutator=select_side_evidence)
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "must descend from revalidation evidence checkpoint", result.stderr
+        )
+
+    def test_binding_cannot_reselect_a_later_source_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+
+            def reselect_source(binding: dict[str, object]) -> None:
+                source = binding["source_revision"]
+                source["checkpoint_commit"] = fixture.reviewed_commit
+                source["checkpoint_tree"] = fixture._tree(fixture.reviewed_commit)
+
+            fixture.finish_binding(binding_mutator=reselect_source)
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "does not match the committed source revision checkpoint", result.stderr
+        )
+
+    def test_revalidation_evidence_is_bound_to_one_changed_input(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+
+            def swap_evidence(binding: dict[str, object]) -> None:
+                dispositions = {
+                    item["path"]: item for item in binding["scout_input_dispositions"]
+                }
+                dispositions["source/changed.cpp"]["evidence"] = (
+                    fixture.evidence_by_path["source/fork_only.cpp"]
+                )
+
+            fixture.finish_binding(binding_mutator=swap_evidence)
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("does not bind input_path", result.stderr)
+
+    def test_revalidation_claim_order_is_not_authorizing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+
+            def reverse_claims(path: str, payload: dict[str, object]) -> None:
+                if path == "source/changed.cpp":
+                    payload["validated_claims"] = list(
+                        reversed(payload["validated_claims"])
+                    )
+
+            fixture.finish_binding(evidence_mutator=reverse_claims)
+
+            result = fixture.run_source_validator(
+                "--fork-binding",
+                str(fixture.binding_path),
+                "--require-source-ready",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "portable residency source revision: source ready\n",
+        )
+
+    def test_revalidation_evidence_binds_digests_claims_and_result(self) -> None:
+        mutations = (
+            ("revision_id", "wrong-revision", "does not bind revision_id"),
+            (
+                "source_revision_record_digest",
+                "0" * 64,
+                "does not bind source_revision_record_digest",
+            ),
+            (
+                "predecessor_sha256",
+                "0" * 64,
+                "does not bind predecessor_sha256",
+            ),
+            (
+                "selected_upstream_sha256",
+                "0" * 64,
+                "does not bind selected_upstream_sha256",
+            ),
+            (
+                "reviewed_fork_sha256",
+                "0" * 64,
+                "does not bind reviewed_fork_sha256",
+            ),
+            (
+                "validated_claims",
+                ["wrong-claim"],
+                "does not match predecessor claims",
+            ),
+            (
+                "validated_claims",
+                ["claim-1", "claim-1"],
+                "repeats a claim",
+            ),
+            ("result", "rejected", "result must be 'accepted'"),
+        )
+        for field, value, diagnostic in mutations:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                fixture = SourceCampaignRepository(Path(directory))
+                fixture.build()
+
+                def mutate_evidence(
+                    path: str,
+                    payload: dict[str, object],
+                    *,
+                    evidence_field: str = field,
+                    evidence_value: object = value,
+                ) -> None:
+                    if path == "source/changed.cpp":
+                        payload[evidence_field] = evidence_value
+
+                fixture.finish_binding(evidence_mutator=mutate_evidence)
+
+                result = fixture.run_source_validator(
+                    "--fork-binding", str(fixture.binding_path)
+                )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(diagnostic, result.stderr)
+
+    def test_repository_read_failure_is_not_treated_as_an_absent_input(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+
+            def erase_recorded_digest(source: dict[str, object]) -> None:
+                source["scout_input_dispositions"][1]["upstream_sha256"] = None
+
+            fixture.build(source_mutator=erase_recorded_digest)
+            blob = fixture._git(
+                "rev-parse", f"{fixture.release_commit}:source/changed.cpp"
+            )
+            object_path = fixture.root / ".git" / "objects" / blob[:2] / blob[2:]
+            self.assertTrue(object_path.is_file())
+            object_path.unlink()
+
+            result = fixture.run_source_validator()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot read repository blob", result.stderr)
+
+    def test_source_fallback_cannot_claim_production_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+
+            def grant_fallback_authority(source: dict[str, object]) -> None:
+                source["fallback_state"]["authority"] = "production"
+
+            fixture.build(source_mutator=grant_fallback_authority)
+
+            result = fixture.run_source_validator()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("authority must be 'legacy_runtime'", result.stderr)
+
+    def test_binding_fallback_cannot_claim_production_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+
+            def grant_fallback_authority(binding: dict[str, object]) -> None:
+                binding["fallback_state"]["authority"] = "production"
+
+            fixture.finish_binding(binding_mutator=grant_fallback_authority)
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("authority must be 'legacy_runtime'", result.stderr)
+
+    def test_reviewed_fork_identity_must_be_distinct_from_the_release(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+
+            def select_release_as_fork(binding: dict[str, object]) -> None:
+                reviewed = binding["reviewed_maintained_fork"]
+                reviewed["commit"] = fixture.release_commit
+                reviewed["tree"] = fixture._tree(fixture.release_commit)
+                reviewed["reviewed_commit"] = fixture.release_commit
+
+            fixture.finish_binding(binding_mutator=select_release_as_fork)
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must be distinct from upstream release", result.stderr)
+
+    def test_reviewed_fork_must_descend_from_both_source_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+
+            def select_unrelated_fork(binding: dict[str, object]) -> None:
+                reviewed = binding["reviewed_maintained_fork"]
+                unrelated = fixture._git(
+                    "commit-tree",
+                    reviewed["tree"],
+                    "-m",
+                    "unrelated reviewed candidate",
+                )
+                reviewed["commit"] = unrelated
+                reviewed["reviewed_commit"] = unrelated
+
+            fixture.finish_binding(binding_mutator=select_unrelated_fork)
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must descend from selected upstream release", result.stderr)
+
+    def test_changed_fork_input_cannot_be_carried_forward(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+
+            def carry_due_input(binding: dict[str, object]) -> None:
+                changed = binding["scout_input_dispositions"][1]
+                changed["disposition"] = "carried_forward"
+                changed["evidence"] = None
+
+            fixture.finish_binding(
+                binding_mutator=carry_due_input,
+                restore_due_input=True,
+            )
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must be 'revalidated' or 'revalidation_required'", result.stderr)
+
+    def test_restored_due_input_can_be_revalidated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.finish_binding(restore_due_input=True)
+
+            result = fixture.run_source_validator(
+                "--fork-binding",
+                str(fixture.binding_path),
+                "--require-source-ready",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "portable residency source revision: source ready\n",
+        )
+
+    def test_due_fork_input_keeps_the_revision_non_authorizing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+
+            def leave_input_due(binding: dict[str, object]) -> None:
+                changed = binding["scout_input_dispositions"][1]
+                changed["disposition"] = "revalidation_required"
+                changed["evidence"] = None
+                binding["status"] = "awaiting_revalidation"
+
+            fixture.finish_binding(binding_mutator=leave_input_due)
+
+            pending = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+            required = fixture.run_source_validator(
+                "--fork-binding",
+                str(fixture.binding_path),
+                "--require-source-ready",
+            )
+
+        self.assertEqual(pending.returncode, 0, pending.stderr)
+        self.assertEqual(
+            pending.stdout,
+            "portable residency source revision: awaiting revalidation\n",
+        )
+        self.assertEqual(required.returncode, 2)
+        self.assertIn("source revision is not ready", required.stderr)
+
+    def test_source_records_cannot_grant_runtime_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+
+            def grant_runtime_authority(source: dict[str, object]) -> None:
+                source["runtime_authority"] = "production"
+
+            fixture.build(source_mutator=grant_runtime_authority)
+
+            result = fixture.run_source_validator()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("runtime_authority must be 'none'", result.stderr)
+
+    def test_source_revision_classifies_changed_scout_inputs_as_due(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+
+            def carry_changed_input(source: dict[str, object]) -> None:
+                source["scout_input_dispositions"][1][
+                    "disposition"
+                ] = "candidate_for_carry_forward"
+
+            fixture.build(source_mutator=carry_changed_input)
+
+            result = fixture.run_source_validator()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("disposition must be 'revalidation_required'", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_forward_source_revision_is_valid_but_non_authorizing(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(VALIDATOR),
+                "--source-revision",
+                str(SOURCE_REVISION),
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "portable residency source revision: awaiting maintained-fork binding\n",
+        )
+
+    def test_forward_source_revision_cannot_claim_readiness_without_binding(
+        self,
+    ) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(VALIDATOR),
+                "--source-revision",
+                str(SOURCE_REVISION),
+                "--require-source-ready",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("maintained-fork binding is required", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_duplicate_json_key_is_rejected_without_a_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             manifest = Path(directory) / "handoff.json"
@@ -628,7 +1616,7 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
         self.assertIn("sha256 does not match", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
-    def test_phase_record_must_be_an_append_only_evidence_commit(self) -> None:
+    def test_historical_phase_record_survives_an_unrelated_head_advance(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = HandoffRepository(Path(directory))
             fixture.build()
@@ -637,11 +1625,103 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
 
             result = fixture.run_validator()
 
-        self.assertEqual(result.returncode, 2)
-        self.assertIn(
-            "must be committed directly after its phase checkpoint", result.stderr
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "portable residency implementation handoff: phase 0 valid\n",
         )
-        self.assertNotIn("Traceback", result.stderr)
+
+    def test_unrelated_ref_cannot_duplicate_the_accepted_phase_append(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = HandoffRepository(Path(directory))
+            fixture.build()
+            phase = fixture.manifest["phase_records"][0]
+            alternate = fixture._git(
+                "commit-tree",
+                fixture._tree(fixture._git("rev-parse", "HEAD")),
+                "-p",
+                phase["phase_checkpoint_commit"],
+                "-m",
+                "unrelated duplicate append",
+            )
+            fixture._git("update-ref", "refs/heads/unrelated", alternate)
+
+            result = fixture.run_validator()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "portable residency implementation handoff: phase 0 valid\n",
+        )
+
+    def test_historical_release_survives_the_canonical_stable_ref_moving(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = HandoffRepository(Path(directory))
+            fixture.build()
+            manifest_before = fixture.manifest_path.read_bytes()
+            stable_tree = fixture._tree(
+                fixture.manifest["stable_release"]["peeled_commit"]
+            )
+            next_release = fixture._git(
+                "commit-tree", stable_tree, "-m", "next non-descendant stable release"
+            )
+            fixture._git("update-ref", "refs/heads/upstream-stable", next_release)
+            fixture._git(
+                "update-ref", "refs/remotes/origin/upstream-stable", next_release
+            )
+
+            result = fixture.run_validator()
+            manifest_after = fixture.manifest_path.read_bytes()
+
+        self.assertEqual(manifest_after, manifest_before)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "portable residency implementation handoff: phase 0 valid\n",
+        )
+
+    def test_checked_in_phase_two_accepts_git_normalized_line_endings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "checkout"
+            cloned = subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "core.autocrlf=true",
+                    "clone",
+                    "--no-local",
+                    "-q",
+                    str(REPO_ROOT),
+                    str(checkout),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(cloned.returncode, 0, cloned.stderr)
+            manifest = checkout / "plan/portable-residency-implementation-base.json"
+            self.assertIn(b"\r\n", manifest.read_bytes())
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(VALIDATOR),
+                    "--manifest",
+                    str(manifest),
+                    "--phase",
+                    "2",
+                ],
+                cwd=checkout,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "portable residency implementation handoff: phase 2 valid\n",
+        )
 
     def test_diagnostic_is_globally_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -860,6 +1940,14 @@ class ResidencyImplementationHandoffV2Test(unittest.TestCase):
         self.assertEqual(replay.returncode, observed.exit_code)
         self.assertEqual(replay.stdout, observed.stdout)
         self.assertEqual(replay.stderr, observed.stderr)
+
+    def test_task020_v2_uses_the_published_evidence_lineage(self) -> None:
+        repo = GitRepository(REPO_ROOT)
+
+        self.assertTrue(
+            repo.is_ancestor(TASK_020_EVIDENCE, repo.resolve("HEAD")),
+            "TASK-020 evidence must be reachable from the published history",
+        )
 
     def test_task020_v2_missing_patched_fixture_fails_closed(self) -> None:
         repo, _, patch = self._inputs()
