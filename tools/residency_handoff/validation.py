@@ -598,6 +598,23 @@ def _json_mapping(source: bytes, label: str, origin: str) -> dict[str, Any]:
     return _mapping(value, label)
 
 
+def _require_working_path_matches_committed(
+    repo: GitRepository,
+    working_path: Path,
+    relative_path: str,
+    committed: bytes,
+    label: str,
+) -> None:
+    try:
+        working = working_path.read_bytes()
+    except OSError as error:
+        fail(f"cannot read {label}: {error}")
+    if working.replace(b"\r\n", b"\n") != committed.replace(
+        b"\r\n", b"\n"
+    ) or not repo.index_matches_head(relative_path):
+        fail(f"{label} differs from its committed checkpoint")
+
+
 def _committed_path_checkpoint(
     repo: GitRepository,
     working_path: Path,
@@ -611,16 +628,13 @@ def _committed_path_checkpoint(
     committed = repo.blob_or_none(head, relative_path)
     if committed is None:
         fail(f"{label} is absent from HEAD")
-    try:
-        working = working_path.read_bytes()
-    except OSError as error:
-        fail(f"cannot read {label}: {error}")
-    normalized_working = working.replace(b"\r\n", b"\n")
-    normalized_committed = committed.replace(b"\r\n", b"\n")
-    if normalized_working != normalized_committed or not repo.index_matches_head(
-        relative_path
-    ):
-        fail(f"{label} differs from its committed checkpoint")
+    _require_working_path_matches_committed(
+        repo,
+        working_path,
+        relative_path,
+        committed,
+        label,
+    )
     digest = sha256_bytes(committed)
     commits = str(repo.run("rev-list", head, "--", relative_path)).splitlines()
     candidates: list[str] = []
@@ -2329,8 +2343,13 @@ def _find_phase_append_commits(
     records: list[dict[str, Any]],
 ) -> list[str]:
     head = repo.resolve("HEAD")
-    if repo.blob(head, manifest_path) != Path(repo.root / manifest_path).read_bytes():
-        fail("manifest working bytes do not match HEAD")
+    _require_working_path_matches_committed(
+        repo,
+        repo.root / manifest_path,
+        manifest_path,
+        repo.blob(head, manifest_path),
+        "manifest",
+    )
     manifest_commits = str(
         repo.run("log", "HEAD", "--format=%H", "--reverse", "--", manifest_path)
     ).splitlines()

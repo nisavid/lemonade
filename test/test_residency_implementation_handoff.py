@@ -1627,6 +1627,49 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
             "portable residency implementation handoff: phase 0 valid\n",
         )
 
+    def test_checked_in_phase_two_accepts_git_normalized_line_endings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "checkout"
+            cloned = subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "core.autocrlf=true",
+                    "clone",
+                    "--no-local",
+                    "-q",
+                    str(REPO_ROOT),
+                    str(checkout),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(cloned.returncode, 0, cloned.stderr)
+            manifest = checkout / "plan/portable-residency-implementation-base.json"
+            self.assertIn(b"\r\n", manifest.read_bytes())
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(VALIDATOR),
+                    "--manifest",
+                    str(manifest),
+                    "--phase",
+                    "2",
+                ],
+                cwd=checkout,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "portable residency implementation handoff: phase 2 valid\n",
+        )
+
     def test_diagnostic_is_globally_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = HandoffRepository(Path(directory))
