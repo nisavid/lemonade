@@ -2,6 +2,7 @@ import os
 import signal
 import time
 import unittest
+
 import requests
 from utils.capabilities import (
     get_current_config,
@@ -233,33 +234,38 @@ class PinningTests(ServerTestBase):
 
     @unittest.skipIf(os.name == "nt", "POSIX signal tests skipped on Windows")
     def test_watchdog_reload_preserves_pin_state(self):
-        """Watchdog reloads preserve the pinning status of the crashed backend."""
-        # 1. Load model pinned
-        entry = self._get_loaded_model_info(self.MODEL2)
-        if entry is None:
-            response = requests.post(
-                f"{self.base_url}/load",
-                json={"model_name": self.MODEL2, "pinned": True},
-                timeout=TIMEOUT_MODEL_OPERATION,
-            )
-            self.assertEqual(response.status_code, 200)
-            entry = self._wait_for_loaded_model(self.MODEL2)
-        else:
-            # Pin it dynamically
-            requests.post(
-                f"{self.internal_url}/pin",
-                json={"model_name": self.MODEL2, "pinned": True},
-                timeout=TIMEOUT_DEFAULT,
-            )
-            entry = self._wait_for_loaded_model(self.MODEL2)
+        """Watchdog reloads preserve runtime pin state and transient options."""
+        requests.post(
+            f"{self.base_url}/unload",
+            json={},
+            timeout=TIMEOUT_MODEL_OPERATION,
+        ).raise_for_status()
+        response = requests.post(
+            f"{self.base_url}/load",
+            json={"model_name": self.MODEL2, "pinned": True, "ctx_size": 2048},
+            timeout=TIMEOUT_MODEL_OPERATION,
+        )
+        self.assertEqual(response.status_code, 200)
+        entry = self._wait_for_loaded_model(self.MODEL2)
 
         self.assertTrue(entry.get("pinned"), f"Model must be pinned initially: {entry}")
+        self.assertEqual(entry.get("recipe_options", {}).get("ctx_size"), 2048)
         old_pid = int(entry["pid"])
+        os.kill(old_pid, 0)
 
-        # 2. Kill backend process
         os.kill(old_pid, signal.SIGKILL)
 
-        # 3. Request completion to trigger watchdog reload
+        self.assertIsNone(
+            self._wait_for_model_status(self.MODEL2, {None}),
+            "Crashed backend must become unavailable before competing cleanup",
+        )
+        response = requests.post(
+            f"{self.base_url}/load",
+            json={"model_name": ENDPOINT_TEST_MODEL, "pinned": False},
+            timeout=TIMEOUT_MODEL_OPERATION,
+        )
+        self.assertEqual(response.status_code, 200)
+
         client = self.get_openai_client()
         completion = client.chat.completions.create(
             model=self.MODEL2,
@@ -268,13 +274,56 @@ class PinningTests(ServerTestBase):
         )
         self.assertTrue(completion.choices)
 
-        # 4. Check status and ensure fresh pid and retained pin
         entry_after = self._wait_for_loaded_model(self.MODEL2)
         new_pid = int(entry_after["pid"])
         self.assertNotEqual(old_pid, new_pid)
         self.assertTrue(
             entry_after.get("pinned"),
             "Pinned flag must be preserved after watchdog reload",
+        )
+        self.assertEqual(
+            entry_after.get("recipe_options", {}).get("ctx_size"),
+            2048,
+            "Transient load options must be preserved after watchdog reload",
+        )
+
+        response = requests.post(
+            f"{self.internal_url}/pin",
+            json={"model_name": self.MODEL2, "pinned": False},
+            timeout=TIMEOUT_DEFAULT,
+        )
+        self.assertEqual(response.status_code, 200)
+        unpinned_entry = self._wait_for_loaded_model(self.MODEL2)
+        self.assertFalse(unpinned_entry.get("pinned"))
+        second_pid = int(unpinned_entry["pid"])
+
+        os.kill(second_pid, signal.SIGKILL)
+        self.assertIsNone(
+            self._wait_for_model_status(self.MODEL2, {None}),
+            "Crashed backend must become unavailable before the second cleanup",
+        )
+        response = requests.post(
+            f"{self.base_url}/load",
+            json={"model_name": ENDPOINT_TEST_MODEL, "pinned": False},
+            timeout=TIMEOUT_MODEL_OPERATION,
+        )
+        self.assertEqual(response.status_code, 200)
+        completion = client.chat.completions.create(
+            model=self.MODEL2,
+            messages=[{"role": "user", "content": "Hi again"}],
+            max_tokens=8,
+        )
+        self.assertTrue(completion.choices)
+
+        second_entry_after = self._wait_for_loaded_model(self.MODEL2)
+        self.assertNotEqual(second_pid, int(second_entry_after["pid"]))
+        self.assertFalse(
+            second_entry_after.get("pinned"),
+            "Dynamic unpin must survive a later watchdog reload",
+        )
+        self.assertEqual(
+            second_entry_after.get("recipe_options", {}).get("ctx_size"),
+            2048,
         )
 
     def test_pin_api_validation(self):

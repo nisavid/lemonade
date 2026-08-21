@@ -86,6 +86,23 @@ namespace lemon {
 
 namespace {
 
+class RouterExclusiveRollback {
+public:
+    explicit RouterExclusiveRollback(Router* router) : router_(router) {}
+
+    RouterExclusiveRollback(const RouterExclusiveRollback&) = delete;
+    RouterExclusiveRollback& operator=(const RouterExclusiveRollback&) = delete;
+
+    ~RouterExclusiveRollback() {
+        if (router_) router_->end_exclusive();
+    }
+
+    void release() noexcept { router_ = nullptr; }
+
+private:
+    Router* router_;
+};
+
 int hex_value(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -426,7 +443,7 @@ Server::Server(std::shared_ptr<RuntimeConfig> config, const std::string& cache_d
 
     // Seed the router's needed-helper set from policies already present at
     // startup so a helper loaded before the first policy change still validates
-    // against an authoritative set (see Router::load_model). Reserve the
+    // against an authoritative set (see Router::load_prepared_model). Reserve the
     // generation BEFORE snapshotting the policies: the directory watcher may
     // already be publishing newer snapshots, and evaluating next_notify_generation()
     // after computing the snapshot (argument evaluation order is unspecified in
@@ -483,8 +500,13 @@ Server::Server(std::shared_ptr<RuntimeConfig> config, const std::string& cache_d
             if (!params.contains("model") || !params["model"].is_string())
                 throw lemon::jobs::JobError(400, "load requires a 'model' string");
             const std::string model = params["model"].get<std::string>();
-            if (!model_manager_->model_exists(model))
+            auto preparation = router_->prepare_model_load(
+                model, LoadPurpose::UserInference,
+                Router::ExistingModelPolicy::ReconcileOptions);
+            if (!model_manager_->model_exists(model)) {
+                router_->abandon_prepared_model_load(std::move(preparation));
                 throw lemon::jobs::JobError(404, "unknown model '" + model + "'");
+            }
             if (!model_manager_->is_model_downloaded(model))
                 throw lemon::jobs::JobError(404, "model '" + model + "' is not downloaded");
             auto info = model_manager_->get_model_info(model);
@@ -494,8 +516,9 @@ Server::Server(std::shared_ptr<RuntimeConfig> config, const std::string& cache_d
             if (params.contains("pinned") && params["pinned"].is_boolean())
                 pinned = params["pinned"].get<bool>();
             try {
-                router_->load_model(model, info, options, true, true, pinned,
-                                    LoadPurpose::UserInference, &cancel);
+                router_->load_prepared_model(
+                    std::move(preparation), info, options, true, pinned,
+                    &cancel);
             } catch (const std::exception& e) {
                 throw lemon::jobs::JobError(500, e.what());
             }
@@ -563,11 +586,38 @@ Server::Server(std::shared_ptr<RuntimeConfig> config, const std::string& cache_d
         providers.begin_exclusive = [this, job_states, current_job, state_mutex](
                                         const std::string& job_id,
                                         lemon::jobs::CancelFlag* cancel) -> bool {
-            if (!router_->begin_exclusive(cancel)) return false;
+            bool acquired = false;
+            while (true) {
+                auto request = router_->request_exclusive(cancel);
+                while (request.pending()) {
+                    const auto result =
+                        router_->try_begin_exclusive(request, cancel);
+                    if (result == Router::ExclusiveAcquireResult::Acquired) {
+                        acquired = true;
+                        break;
+                    }
+                    if (result != Router::ExclusiveAcquireResult::Retry) {
+                        return false;
+                    }
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(25));
+                }
+                if (acquired) {
+                    break;
+                }
+                if (request.result() !=
+                    Router::ExclusiveAcquireResult::Retry) {
+                    return false;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            }
+            RouterExclusiveRollback rollback(router_.get());
             std::lock_guard<std::mutex> lk(*state_mutex);
             if (!job_states->count(job_id))
-                (*job_states)[job_id].snapshot = router_->snapshot_loaded_models();
+                (*job_states)[job_id].snapshot =
+                    router_->snapshot_loaded_models();
             *current_job = job_id;
+            rollback.release();
             return true;
         };
         providers.end_exclusive = [this, current_job, state_mutex] {
@@ -632,13 +682,17 @@ Server::Server(std::shared_ptr<RuntimeConfig> config, const std::string& cache_d
                     continue;
                 }
                 try {
+                    auto preparation = router_->prepare_model_load(
+                        kv.first, LoadPurpose::UserInference,
+                        Router::ExistingModelPolicy::ReconcileOptions);
                     auto info = model_manager_->get_model_info(kv.first);
                     RecipeOptions options(info.recipe, kv.second.value("options", nlohmann::json::object()));
                     std::optional<bool> pinned = std::nullopt;
                     if (kv.second.contains("pinned") && kv.second["pinned"].is_boolean())
                         pinned = kv.second["pinned"].get<bool>();
-                    router_->load_model(kv.first, info, options, true, true, pinned,
-                                        LoadPurpose::UserInference, cancel);
+                    router_->load_prepared_model(
+                        std::move(preparation), info, options, true, pinned,
+                        cancel);
                     const int pid = router_->loaded_model_pid(kv.first);
                     std::lock_guard<std::mutex> lk(*state_mutex);
                     auto it = job_states->find(job_id);
@@ -762,6 +816,9 @@ void Server::load_pinned_model(const std::string& model_name) {
         throw std::runtime_error("Pinned model is not available: " + model_name);
     }
 
+    auto preparation = router_->prepare_model_load(
+        model_name, LoadPurpose::UserInference,
+        Router::ExistingModelPolicy::UpdatePinAndResidency);
     auto info = model_manager_->get_model_info(model_name);
     const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
 
@@ -774,9 +831,9 @@ void Server::load_pinned_model(const std::string& model_name) {
     }
 
     RecipeOptions options(info.recipe, json::object());
-    router_->load_model(canonical_model_name, info, options, true,
-                        /*allow_reload_on_option_change=*/false,
-                        /*pinned=*/true);
+    router_->load_prepared_model(
+        std::move(preparation), info, options, true,
+        /*pinned=*/true);
     if (!is_config_model_pinned(canonical_model_name)) {
         router_->set_model_pinned(canonical_model_name, false);
         return;
@@ -811,7 +868,7 @@ void Server::mark_model_loading(const std::string& model_name) {
 void Server::clear_model_loading(const std::string& model_name) {
     const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
     const auto pin_override = model_load_tracker_.finish(canonical_model_name);
-    if (pin_override.has_value() && router_->is_model_loaded(canonical_model_name)) {
+    if (pin_override.has_value() && router_->is_model_tracked(canonical_model_name)) {
         router_->set_model_pinned(canonical_model_name, *pin_override);
         if (*pin_override) {
             clear_pin_load_error(canonical_model_name);
@@ -868,7 +925,7 @@ bool Server::remove_model_pin(const std::string& model_name) {
 
     if (!model_load_tracker_.set_pin_override_if_loading(
             canonical_model_name, false) &&
-        router_->is_model_loaded(canonical_model_name)) {
+        router_->is_model_tracked(canonical_model_name)) {
         router_->set_model_pinned(canonical_model_name, false);
     }
     clear_pin_load_error(canonical_model_name);
@@ -2581,11 +2638,12 @@ void Server::auto_load_model_if_needed(
     const std::string& requested_model,
     const json& request_options,
     LoadPurpose load_purpose) {
+    auto preparation = router_->prepare_model_load(
+        requested_model, load_purpose);
     // A live process follows its current use without a reload: routing work
     // promotes it to RoutingHelper, while direct inference demotes it into the
     // counted Standard pool. Destination-pool admission remains authoritative.
-    if (router_->ensure_loaded_model_residency(
-            requested_model, load_purpose)) {
+    if (preparation.already_loaded()) {
         LOG(DEBUG, "Server")
             << "Model already loaded: " << requested_model
             << " (residency="
@@ -2608,6 +2666,7 @@ void Server::auto_load_model_if_needed(
 
     // Get model info
     if (!model_manager_->model_exists(requested_model)) {
+        router_->abandon_prepared_model_load(std::move(preparation));
         throw std::runtime_error("Model not found: " + requested_model);
     }
 
@@ -2615,6 +2674,7 @@ void Server::auto_load_model_if_needed(
 
     // Collections have no backend of their own — load each component instead.
     if (is_omni_collection_recipe(info.recipe)) {
+        router_->abandon_prepared_model_load(std::move(preparation));
         ensure_collection_loaded(info);
         return;
     }
@@ -2645,11 +2705,9 @@ void Server::auto_load_model_if_needed(
         }
 
         // FLM handles its own downloads. Other recipes use the cached files above.
-        router_->load_model(requested_model, info,
-                            RecipeOptions(info.recipe, request_options), true,
-                            /*allow_reload_on_option_change=*/false,
-                            /*pinned=*/std::nullopt,
-                            load_purpose);
+        router_->load_prepared_model(
+            std::move(preparation), info,
+            RecipeOptions(info.recipe, request_options), true);
         clear_model_loading(canonical_model_name);
     } catch (...) {
         clear_model_loading(canonical_model_name);
@@ -2666,7 +2724,10 @@ void Server::ensure_collection_loaded(const ModelInfo& info) {
                 "Collection '" + info.model_name + "' references unknown component '" + component + "'"
             );
         }
-        if (router_->is_model_loaded(component)) {
+        auto preparation = router_->prepare_model_load(
+            component, LoadPurpose::UserInference,
+            Router::ExistingModelPolicy::ReuseExisting);
+        if (preparation.already_loaded()) {
             LOG(DEBUG, "Server") << "Component already loaded: " << component << std::endl;
             continue;
         }
@@ -2697,8 +2758,9 @@ void Server::ensure_collection_loaded(const ModelInfo& info) {
         // to its components. Each component uses its own saved recipe_options.json
         // entry.
         try {
-            router_->load_model(component, comp_info, comp_info.recipe_options, true,
-                                /*allow_reload_on_option_change=*/true);
+            router_->load_prepared_model(
+                std::move(preparation), comp_info, comp_info.recipe_options,
+                true);
             const std::string canonical_component_name = model_manager_->resolve_model_name(component);
             if (is_config_model_pinned(canonical_component_name)) {
                 router_->set_model_pinned(canonical_component_name, true);
@@ -3035,6 +3097,9 @@ std::string Server::register_model_definition_internal(
         return model_name;
     }
 
+    auto runtime_mutation =
+        router_->begin_model_runtime_mutation(model_name);
+
     if (local_import) {
         std::string hf_cache = model_manager_->get_hf_cache_dir();
         std::string model_name_clean = model_name.substr(5);
@@ -3297,7 +3362,7 @@ void Server::handle_model_files(const httplib::Request& req, httplib::Response& 
     }
 }
 
-// `pinned` is live-process state: Router::load_model keeps a running server's
+// `pinned` is live-process state: Router::load_prepared_model keeps a running server's
 // own pin rather than the resolved one, so a value saved here would not reach a
 // model that is already up. /v1/load and /internal/pin own it, and this endpoint
 // neither reports it in effective/defaults nor accepts it.
@@ -6102,10 +6167,10 @@ void Server::handle_pin_model(const httplib::Request& req, httplib::Response& re
         }
 
         const bool model_is_loading = is_model_loading(model_name);
-        if (!model_is_loading && !router_->is_model_loaded(model_name)) {
+        if (!model_is_loading && !router_->is_model_tracked(model_name)) {
             res.status = 400;
             nlohmann::json error = {{"error", {
-                {"message", "Only currently loaded or loading models can be pinned"},
+                {"message", "Only loaded, loading, or awaiting automatic reload models can be pinned"},
                 {"type", "invalid_request_error"},
                 {"code", "model_not_loaded_or_loading"}
             }}};
@@ -6114,6 +6179,7 @@ void Server::handle_pin_model(const httplib::Request& req, httplib::Response& re
         }
 
         const std::string canonical_model_name = model_manager_->resolve_model_name(model_name);
+        bool added_pin = false;
         {
             std::lock_guard<std::mutex> lock(pinned_models_mutex_);
             auto pinned_models = config_->pinned_models();
@@ -6121,12 +6187,45 @@ void Server::handle_pin_model(const httplib::Request& req, httplib::Response& re
                 == pinned_models.end()) {
                 pinned_models.push_back(canonical_model_name);
                 save_pinned_models(pinned_models);
+                added_pin = true;
             }
         }
-        if (!model_load_tracker_.set_pin_override_if_loading(
-                canonical_model_name, true) &&
-            router_->is_model_loaded(canonical_model_name)) {
-            router_->set_model_pinned(canonical_model_name, true);
+
+        auto rollback_new_pin = [&] {
+            if (!added_pin) {
+                return;
+            }
+            std::lock_guard<std::mutex> lock(pinned_models_mutex_);
+            auto pinned_models = config_->pinned_models();
+            pinned_models.erase(
+                std::remove(
+                    pinned_models.begin(), pinned_models.end(),
+                    canonical_model_name),
+                pinned_models.end());
+            save_pinned_models(pinned_models);
+        };
+
+        try {
+            const bool loading_pin_applied =
+                model_load_tracker_.set_pin_override_if_loading(
+                    canonical_model_name, true);
+            if (!loading_pin_applied) {
+                if (!router_->is_model_tracked(canonical_model_name)) {
+                    rollback_new_pin();
+                    res.status = 400;
+                    nlohmann::json error = {{"error", {
+                        {"message", "Only loaded, loading, or awaiting automatic reload models can be pinned"},
+                        {"type", "invalid_request_error"},
+                        {"code", "model_not_loaded_or_loading"}
+                    }}};
+                    res.set_content(error.dump(), "application/json");
+                    return;
+                }
+                router_->set_model_pinned(canonical_model_name, true);
+            }
+        } catch (...) {
+            rollback_new_pin();
+            throw;
         }
         clear_pin_load_error(canonical_model_name);
 
@@ -6221,6 +6320,9 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
             return;
         }
 
+        auto preparation = router_->prepare_model_load(
+            model_name, LoadPurpose::UserInference,
+            Router::ExistingModelPolicy::ReconcileOptions);
         auto info = model_manager_->get_model_info(model_name);
 
         // Extract optional per-model settings. Omitted options keep saved values;
@@ -6310,6 +6412,7 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
 
         // Collection models: load each component instead
         if (is_omni_collection_recipe(info.recipe) && !info.components.empty()) {
+            router_->abandon_prepared_model_load(std::move(preparation));
             ensure_collection_loaded(info);
 
             nlohmann::json response = {
@@ -6319,6 +6422,7 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
             };
             res.set_content(response.dump(), "application/json");
         } else if (is_router_collection_recipe(info.recipe)) {
+            router_->abandon_prepared_model_load(std::move(preparation));
             // Router collections are virtual: each request is dispatched to one
             // candidate at request time, which lazy-loads it. There is no backend
             // of the collection's own to bring up, and eagerly loading every
@@ -6333,9 +6437,9 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
             // Load model with optional per-model settings (declarative: no-op
             // if already loaded with matching options, reload only if options
             // differ)
-            router_->load_model(model_name, info, options, true,
-                                /*allow_reload_on_option_change=*/true,
-                                pinned_opt);
+            router_->load_prepared_model(
+                std::move(preparation), info, options, true,
+                pinned_opt);
             if (!pinned_opt.has_value()) {
                 apply_config_pin_if_needed(model_name);
             }
@@ -6508,17 +6612,19 @@ void Server::handle_delete(const httplib::Request& req, httplib::Response& res) 
         std::string model_name = request_json.contains("model") ?
             request_json["model"].get<std::string>() :
             request_json["model_name"].get<std::string>();
-        std::string pin_model_name = model_manager_->model_exists(model_name)
-            ? model_manager_->resolve_model_name(model_name)
-            : model_name;
 
         LOG(INFO, "Server") << "Deleting model: " << model_name << std::endl;
 
-        // If the model is currently loaded, unload it first to release file locks
-        if (router_->is_model_loaded(model_name)) {
-            LOG(INFO, "Server") << "Model is loaded, unloading before delete: " << model_name << std::endl;
-            router_->unload_model(model_name);
+        if (router_->is_model_tracked(model_name)) {
+            LOG(INFO, "Server") << "Model has runtime state, unloading before delete: "
+                                << model_name << std::endl;
         }
+        auto runtime_mutation =
+            router_->begin_model_runtime_mutation(model_name);
+        const std::string pin_model_name =
+            model_manager_->model_exists(model_name)
+                ? model_manager_->resolve_model_name(model_name)
+                : model_name;
 
         // Retry delete with delays to handle in-progress downloads releasing file handles
         // This handles the race condition where a cancelled download hasn't yet released
@@ -7443,8 +7549,12 @@ void Server::handle_bin_change(const std::string& section,
     // Best-effort reload of previously-loaded models on the new binary.
     for (const auto& s : previously_loaded) {
         try {
+            auto preparation = router_->prepare_model_load(
+                s.name, LoadPurpose::UserInference,
+                Router::ExistingModelPolicy::UpdatePinAndResidency);
             auto info = model_manager_->get_model_info(s.name);
-            router_->load_model(s.name, info, s.opts, true);
+            router_->load_prepared_model(
+                std::move(preparation), info, s.opts, true);
             LOG(INFO, "Server") << "Reloaded " << s.name << " on new "
                                 << recipe << ":" << backend << " binary" << std::endl;
         } catch (const std::exception& e) {

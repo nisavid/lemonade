@@ -3356,6 +3356,14 @@ if(BUILD_TESTING AND EXISTS "${_GPU_MEMORY_PLANNER_TEST_SRC}")
     add_cpp_ci_test(GpuMemoryPlannerTest CI ON COMMAND test_gpu_memory_planner)
 endif()
 
+set(_ROUTER_MODEL_LIFECYCLE_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_router_model_lifecycle.cpp")
+if(BUILD_TESTING AND EXISTS "${_ROUTER_MODEL_LIFECYCLE_TEST_SRC}")
+    add_executable(test_router_model_lifecycle test/cpp/test_router_model_lifecycle.cpp)
+    target_link_libraries(test_router_model_lifecycle PRIVATE lemonade-server-core)
+    add_cpp_ci_test(RouterModelLifecycleTest CI ON COMMAND test_router_model_lifecycle)
+    set_tests_properties(RouterModelLifecycleTest PROPERTIES TIMEOUT 30)
+endif()
+
 # Routing-helper reconciliation: durable needed-set + non-blocking prune that
 # skips busy/pinned helpers, plus a policy-update-vs-busy concurrency race.
 set(_ROUTING_HELPER_RECONCILE_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_routing_helper_reconcile.cpp")

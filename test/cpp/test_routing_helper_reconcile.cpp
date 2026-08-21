@@ -8,6 +8,7 @@
 // isolation, so a busy helper is reclaimed by a subsequent policy reconcile once
 // idle — the real transition, not a hand-invoked second prune.
 //
+#include "lemon/config_file.h"
 #include "lemon/router.h"
 #include "lemon/runtime_config.h"
 #include "lemon/wrapped_server.h"
@@ -125,7 +126,7 @@ struct RoutingHelperTestHook {
     // test's Router has no ModelManager, so it must skip resolve_model_name).
     static bool ensure_residency(Router& r, const std::string& model_name,
                                  lemon::LoadPurpose load_purpose) {
-        return r.ensure_loaded_model_residency_canonical(model_name, load_purpose);
+        return r.prepare_model_load(model_name, load_purpose).already_loaded();
     }
 
     static ResidencyClass residency_of(Router& r, const std::string& model_name) {
@@ -191,6 +192,26 @@ static int failures = 0;
 static void check(const char* name, bool ok) {
     std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
     if (!ok) ++failures;
+}
+
+static bool acquire_exclusive(Router& router) {
+    while (true) {
+        auto request = router.request_exclusive();
+        while (request.pending()) {
+            const auto result = router.try_begin_exclusive(request);
+            if (result == Router::ExclusiveAcquireResult::Acquired) {
+                return true;
+            }
+            if (result != Router::ExclusiveAcquireResult::Retry) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (request.result() != Router::ExclusiveAcquireResult::Retry) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 }
 
 static std::unique_ptr<StubWrappedServer> make_helper(const std::string& name) {
@@ -396,7 +417,7 @@ static void test_deferred_reclaim_waits_for_slot(Router& router) {
     RoutingHelperTestHook::reconcile(router, {});  // marks pending-stale (busy)
     helper->set_busy(false);                       // idle + pending-stale, not needed
 
-    bool acquired = router.begin_exclusive();
+    bool acquired = acquire_exclusive(router);
 
     std::thread worker(
         [&] { RoutingHelperTestHook::reclaim_now(router, "slot.helper"); });
@@ -423,11 +444,11 @@ static void test_reclaim_rearms_when_rescued_before_commit(Router& router) {
         RoutingHelperTestHook::add_server(router, make_helper("rescue.helper"));
 
     // Take the residency slot first, while the helper is still idle, so
-    // begin_exclusive grants immediately. (begin_exclusive drains all in-flight
+    // acquire_exclusive grants immediately. (It drains all in-flight
     // requests before granting, so it can never be acquired while this helper
     // already holds one — the reclaim must be parked behind an exclusive session
     // that began idle, then rescued mid-session, exactly as in production.)
-    bool acquired = router.begin_exclusive();
+    bool acquired = acquire_exclusive(router);
 
     // A request is in flight and the policy drops the helper: prune arms the
     // release-triggered reclaim.
@@ -511,8 +532,10 @@ static void test_npu_memory_rejection_preserves_residency(Router& router) {
 
     bool rejected = false;
     try {
-        router.load_model(
-            "", candidate,
+        auto preparation = router.prepare_model_load(
+            "", lemon::LoadPurpose::UserInference);
+        router.load_prepared_model(
+            std::move(preparation), candidate,
             lemon::RecipeOptions(candidate.recipe, {{"ctx_size", -1}}));
     } catch (const std::runtime_error& e) {
         rejected = std::string(e.what()).find("Not enough memory to load") !=
@@ -538,7 +561,7 @@ static void test_shutdown_with_pending_reclaim(RuntimeConfig& config) {
         helper->set_busy(false);                       // idle + pending-stale
 
         // Hold the slot so the dispatched reclaim blocks on the executor worker.
-        router.begin_exclusive();
+        acquire_exclusive(router);
         helper->finish_downsize(true);  // busy->idle edge posts the reclaim
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
@@ -550,7 +573,7 @@ static void test_shutdown_with_pending_reclaim(RuntimeConfig& config) {
 }
 
 int main() {
-    json cfg = json::object();
+    json cfg = lemon::ConfigFile::get_defaults();
     cfg["max_loaded_models"] = 4;
     cfg["log_level"] = "error";
     cfg["offline"] = false;
