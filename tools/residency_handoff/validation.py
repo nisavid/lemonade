@@ -309,6 +309,32 @@ class GitRepository:
         )
         return [line for line in output.splitlines() if line]
 
+    def index_matches_head(self, path: str) -> bool:
+        with _isolated_git_environment() as environment:
+            result = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(self.root),
+                    "diff",
+                    "--quiet",
+                    "--cached",
+                    "--no-ext-diff",
+                    "HEAD",
+                    "--",
+                    path,
+                ],
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+        if result.returncode not in {0, 1}:
+            fail(
+                f"cannot compare repository path {path!r} with HEAD: "
+                f"{result.stderr.decode('utf-8', 'replace').strip()}"
+            )
+        return result.returncode == 0
+
     def materialize(self, commit: str, destination: Path) -> None:
         resolved_commit = self.resolve(commit)
         object_format = str(self.run("rev-parse", "--show-object-format")).strip()
@@ -578,6 +604,7 @@ def _committed_path_checkpoint(
     label: str,
     *,
     path_only: bool,
+    first_introduction: bool,
 ) -> tuple[str, str, bytes]:
     relative_path = _repository_path(repo, working_path, f"{label}.path")
     head = repo.resolve("HEAD^{commit}")
@@ -588,7 +615,11 @@ def _committed_path_checkpoint(
         working = working_path.read_bytes()
     except OSError as error:
         fail(f"cannot read {label}: {error}")
-    if working != committed:
+    normalized_working = working.replace(b"\r\n", b"\n")
+    normalized_committed = committed.replace(b"\r\n", b"\n")
+    if normalized_working != normalized_committed or not repo.index_matches_head(
+        relative_path
+    ):
         fail(f"{label} differs from its committed checkpoint")
     digest = sha256_bytes(committed)
     commits = str(repo.run("rev-list", head, "--", relative_path)).splitlines()
@@ -602,11 +633,25 @@ def _committed_path_checkpoint(
             continue
         if path_only and changed != [relative_path]:
             continue
+        if (
+            first_introduction
+            and repo.blob_or_none(parents[0], relative_path) is not None
+        ):
+            continue
         candidate = repo.blob_or_none(commit, relative_path)
         if candidate is not None and sha256_bytes(candidate) == digest:
             candidates.append(commit)
     if len(candidates) != 1:
-        requirement = "a unique path-only append" if path_only else "a unique commit"
+        if first_introduction:
+            requirement = (
+                "a unique path-only first-introduction append"
+                if path_only
+                else "a unique first-introduction commit"
+            )
+        else:
+            requirement = (
+                "a unique path-only append" if path_only else "a unique commit"
+            )
         fail(f"{label} must be {requirement} in HEAD history")
     return candidates[0], relative_path, committed
 
@@ -1055,6 +1100,7 @@ def _validate_fork_binding(
         binding_path,
         "fork binding",
         path_only=True,
+        first_introduction=True,
     )
     binding = _json_mapping(binding_bytes, "fork_binding", str(binding_path))
     _exact_keys(
@@ -1178,7 +1224,11 @@ def _validate_fork_binding(
             recorded_fork = _digest(recorded_fork, f"{label}.fork_sha256")
         if recorded_fork != actual_fork:
             fail(f"{label}.fork_sha256 does not match reviewed fork")
-        if actual_fork == predecessor_inputs[path]:
+        can_carry_forward = (
+            upstream_inputs[path] == predecessor_inputs[path]
+            and actual_fork == predecessor_inputs[path]
+        )
+        if can_carry_forward:
             if item["disposition"] != "carried_forward" or item["evidence"] is not None:
                 fail(f"{label} byte-identical input must be carried_forward")
         elif item["disposition"] == "revalidated":
@@ -1258,6 +1308,7 @@ def validate_source_revision(
         source_revision_path,
         "source revision",
         path_only=False,
+        first_introduction=True,
     )
     append_commit, predecessor_manifest = _validate_predecessor_campaign(
         repo, revision["predecessor_campaign"]
