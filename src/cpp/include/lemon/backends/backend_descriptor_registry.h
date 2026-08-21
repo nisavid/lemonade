@@ -26,8 +26,7 @@ bool has_backend(const std::string& recipe);
 // rocm build is a single artifact (or that have no rocm build at all).
 bool recipe_has_rocm_channels(const std::string& recipe);
 
-// Every deployment mode the recipe's backend can serve, most-default first.
-// Empty for recipes with no registered descriptor (collections, unknown recipes).
+// See BackendDescriptor::supported_modes.
 const std::vector<std::string>& supported_modes_for(const std::string& recipe);
 
 // The deployment label a model of this recipe carries when its own labels name

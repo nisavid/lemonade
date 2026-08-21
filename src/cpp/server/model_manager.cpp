@@ -3301,13 +3301,7 @@ size_t ModelManager::count_cloud_models(const std::string& provider) const {
                          });
 }
 
-// The label set a user or inline model definition normalizes to. Kept in one
-// place so model registration (register_user_model) and collection.router
-// capability validation (validate_collection_request) derive the same type for
-// the same definition: explicit labels + the capability booleans + the recipe's
-// default deployment mode. `illegal`, when given, receives why the definition
-// cannot describe a model, so the caller can refuse it in those words. The
-// returned set is meaningless when it is non-empty.
+// See backends::illegal_deployment_labels for the refusal contract.
 static std::set<std::string> normalized_definition_labels(
     const json& model_data, std::string* illegal = nullptr) {
     const std::string recipe = model_data.value("recipe", std::string());
