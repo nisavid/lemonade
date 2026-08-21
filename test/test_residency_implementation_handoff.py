@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -599,7 +600,7 @@ class SourceCampaignRepository:
         )
         return result.stdout if result.returncode == 0 else None
 
-    def build(self) -> None:
+    def build(self, *, use_decoy_scout: bool = False) -> None:
         sources = {
             "source/unchanged.cpp": "unchanged\n",
             "source/changed.cpp": "old\n",
@@ -618,7 +619,17 @@ class SourceCampaignRepository:
             json.dumps(
                 {
                     "schema": "portable_residency_stable_source_scout/v1",
+                    "stable_release_commit": implementation_base,
+                    "implementation_base_commit": implementation_base,
                     "inputs": scout_inputs,
+                    "source_facts": [
+                        {
+                            "id": f"claim-{index}",
+                            "path": item["path"],
+                        }
+                        for index, item in enumerate(scout_inputs)
+                    ],
+                    "source_seam_dispositions": [],
                 },
                 indent=2,
                 sort_keys=True,
@@ -626,11 +637,59 @@ class SourceCampaignRepository:
             + "\n",
         )
         scout_commit = self._commit("docs: record predecessor source scout")
+        scout_tree = self._tree(scout_commit)
+        scout_sha256 = _sha256(self._blob(scout_commit, scout_path) or b"")
+        selected_scout_path = scout_path
+        selected_scout_commit = scout_commit
+        selected_scout_tree = scout_tree
+        selected_scout_sha256 = scout_sha256
+        if use_decoy_scout:
+            selected_scout_path = "plan/evidence/phase-0/decoy-source-scout.json"
+            self._write(
+                selected_scout_path,
+                json.dumps(
+                    {
+                        "schema": "portable_residency_stable_source_scout/v1",
+                        "stable_release_commit": implementation_base,
+                        "implementation_base_commit": implementation_base,
+                        "inputs": [scout_inputs[0]],
+                        "source_facts": [
+                            {
+                                "id": "decoy-claim",
+                                "path": scout_inputs[0]["path"],
+                            }
+                        ],
+                        "source_seam_dispositions": [],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+            )
+            selected_scout_commit = self._commit("docs: record decoy source scout")
+            selected_scout_tree = self._tree(selected_scout_commit)
+            selected_scout_sha256 = _sha256(
+                self._blob(selected_scout_commit, selected_scout_path) or b""
+            )
         manifest_path = "plan/portable-residency-implementation-base.json"
         precursor = {
             "schema": "portable_residency_implementation_handoff/v1",
             "stable_release": {"peeled_commit": implementation_base},
             "implementation_base": {"commit": implementation_base},
+            "scout_runs": [
+                {
+                    "id": "implementation-base-source-scout",
+                    "commit": scout_commit,
+                    "tree": scout_tree,
+                    "inputs": scout_inputs,
+                    "outputs": [
+                        {
+                            "path": scout_path,
+                            "sha256": scout_sha256,
+                        }
+                    ],
+                }
+            ],
             "phase_records": [],
         }
         self._write(
@@ -678,10 +737,10 @@ class SourceCampaignRepository:
                 "implementation_base_commit": implementation_base,
             },
             "predecessor_scout": {
-                "path": scout_path,
-                "checkpoint_commit": scout_commit,
-                "checkpoint_tree": self._tree(scout_commit),
-                "sha256": _sha256(self._blob(scout_commit, scout_path) or b""),
+                "path": selected_scout_path,
+                "checkpoint_commit": selected_scout_commit,
+                "checkpoint_tree": selected_scout_tree,
+                "sha256": selected_scout_sha256,
             },
             "maintained_fork_base": {
                 "commit": fork_base,
@@ -728,6 +787,25 @@ class SourceCampaignRepository:
         self.release_commit = release_commit
         self.fork_base = fork_base
 
+    def commit_source_payload(
+        self, message: str = "test: mutate source revision"
+    ) -> str:
+        self.source_payload["record_digest"] = _record_digest(self.source_payload)
+        self._write(
+            self.source_path.relative_to(self.root).as_posix(),
+            json.dumps(self.source_payload, indent=2, sort_keys=True) + "\n",
+        )
+        return self._commit(message)
+
+    def commit_binding_payload(self, message: str = "test: mutate fork binding") -> str:
+        self.binding_payload["record_digest"] = _record_digest(self.binding_payload)
+        self._write(
+            self.binding_path.relative_to(self.root).as_posix(),
+            json.dumps(self.binding_payload, indent=2, sort_keys=True) + "\n",
+        )
+        self.binding_commit = self._commit(message)
+        return self.binding_commit
+
     def run_source_validator(self, *extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
@@ -753,41 +831,67 @@ class SourceCampaignRepository:
             "merge: reconcile upstream release",
         )
         reviewed_commit = self._git("rev-parse", "HEAD")
-        evidence_path = "plan/evidence/source-revisions/v2.0.0/scout-revalidation.json"
-        self._write(
-            evidence_path,
-            json.dumps(
-                {
-                    "schema": "portable_residency_source_revalidation/v1",
-                    "reviewed_maintained_fork_commit": reviewed_commit,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-        )
-        evidence_commit = self._commit("test: record source revalidation")
-        evidence = {
-            "path": evidence_path,
-            "checkpoint_commit": evidence_commit,
-            "checkpoint_tree": self._tree(evidence_commit),
-            "sha256": _sha256(self._blob(evidence_commit, evidence_path) or b""),
-        }
         dispositions: list[dict[str, object]] = []
-        for source_item in self.source_payload["scout_input_dispositions"]:
+        pending_evidence: dict[str, tuple[str, dict[str, object]]] = {}
+        self.evidence_payload_by_path: dict[str, dict[str, object]] = {}
+        for index, source_item in enumerate(
+            self.source_payload["scout_input_dispositions"]
+        ):
             path = str(source_item["path"])
             fork_blob = self._blob(reviewed_commit, path)
             fork_digest = _sha256(fork_blob) if fork_blob is not None else None
             predecessor_digest = str(source_item["predecessor_sha256"])
             carried = fork_digest == predecessor_digest
+            evidence = None
+            if not carried:
+                evidence_path = (
+                    "plan/evidence/source-revisions/v2.0.0/"
+                    f"scout-revalidation-{index}.json"
+                )
+                evidence_payload: dict[str, object] = {
+                    "schema": "portable_residency_source_revalidation/v1",
+                    "revision_id": self.source_payload["revision_id"],
+                    "source_revision_record_digest": self.source_payload[
+                        "record_digest"
+                    ],
+                    "input_path": path,
+                    "predecessor_sha256": predecessor_digest,
+                    "selected_upstream_sha256": source_item["upstream_sha256"],
+                    "reviewed_maintained_fork_commit": reviewed_commit,
+                    "reviewed_fork_sha256": fork_digest,
+                    "validated_claims": [f"claim-{index}"],
+                    "result": "accepted",
+                }
+                self._write(
+                    evidence_path,
+                    json.dumps(evidence_payload, indent=2, sort_keys=True) + "\n",
+                )
+                pending_evidence[path] = (evidence_path, evidence_payload)
+                self.evidence_payload_by_path[path] = evidence_payload
             dispositions.append(
                 {
                     "path": path,
                     "fork_sha256": fork_digest,
                     "disposition": "carried_forward" if carried else "revalidated",
-                    "evidence": None if carried else evidence,
+                    "evidence": evidence,
                 }
             )
+        evidence_commit = self._commit("test: record source revalidation")
+        evidence_tree = self._tree(evidence_commit)
+        self.evidence_by_path: dict[str, dict[str, object]] = {}
+        for disposition in dispositions:
+            path = str(disposition["path"])
+            if path not in pending_evidence:
+                continue
+            evidence_path, _ = pending_evidence[path]
+            evidence = {
+                "path": evidence_path,
+                "checkpoint_commit": evidence_commit,
+                "checkpoint_tree": evidence_tree,
+                "sha256": _sha256(self._blob(evidence_commit, evidence_path) or b""),
+            }
+            disposition["evidence"] = evidence
+            self.evidence_by_path[path] = evidence
         source_path = self.source_path.relative_to(self.root).as_posix()
         binding: dict[str, object] = {
             "schema": "portable_residency_maintained_fork_binding/v1",
@@ -810,16 +914,45 @@ class SourceCampaignRepository:
             "runtime_authority": "none",
             "status": "source_ready",
         }
-        binding["record_digest"] = _record_digest(binding)
-        self._write(
-            self.binding_path.relative_to(self.root).as_posix(),
-            json.dumps(binding, indent=2, sort_keys=True) + "\n",
-        )
         self.binding_payload = binding
+        self.commit_binding_payload("docs: append maintained-fork binding")
         self.reviewed_commit = reviewed_commit
+
+    def replace_revalidation_evidence(
+        self, input_path: str, payload: dict[str, object]
+    ) -> None:
+        evidence_path = str(self.evidence_by_path[input_path]["path"])
+        self._write(
+            evidence_path,
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        )
+        evidence_commit = self._commit("test: mutate source revalidation evidence")
+        evidence = {
+            "path": evidence_path,
+            "checkpoint_commit": evidence_commit,
+            "checkpoint_tree": self._tree(evidence_commit),
+            "sha256": _sha256(self._blob(evidence_commit, evidence_path) or b""),
+        }
+        for disposition in self.binding_payload["scout_input_dispositions"]:
+            if disposition["path"] == input_path:
+                disposition["evidence"] = evidence
+                break
+        self.evidence_by_path[input_path] = evidence
+        self.evidence_payload_by_path[input_path] = payload
+        self.commit_binding_payload()
 
 
 class ResidencyImplementationHandoffCliTest(unittest.TestCase):
+    def test_predecessor_scout_must_match_the_accepted_campaign_record(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build(use_decoy_scout=True)
+
+            result = fixture.run_source_validator()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("does not match the accepted predecessor scout", result.stderr)
+
     def test_reviewed_fork_binding_can_make_the_source_revision_ready(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = SourceCampaignRepository(Path(directory))
@@ -838,6 +971,227 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
             "portable residency source revision: source ready\n",
         )
 
+    def test_fork_binding_must_be_committed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.finish_binding()
+            reviewed = fixture.binding_payload["reviewed_maintained_fork"]
+            reviewed["review_url"] = (
+                "https://github.com/nisavid/lemonade/pull/987654321"
+            )
+            fixture.binding_payload["record_digest"] = _record_digest(
+                fixture.binding_payload
+            )
+            fixture._write(
+                fixture.binding_path.relative_to(fixture.root).as_posix(),
+                json.dumps(fixture.binding_payload, indent=2, sort_keys=True) + "\n",
+            )
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("differs from its committed checkpoint", result.stderr)
+
+    def test_fork_binding_checkpoint_changes_only_the_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.finish_binding()
+            fixture.binding_payload["reviewed_maintained_fork"][
+                "review_url"
+            ] = "https://github.com/nisavid/lemonade/pull/987654321"
+            fixture.binding_payload["record_digest"] = _record_digest(
+                fixture.binding_payload
+            )
+            fixture._write(
+                fixture.binding_path.relative_to(fixture.root).as_posix(),
+                json.dumps(fixture.binding_payload, indent=2, sort_keys=True) + "\n",
+            )
+            fixture._write("unrelated.txt", "not binding evidence\n")
+            fixture._commit("test: mix fork binding with unrelated changes")
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must be a unique path-only append", result.stderr)
+
+    def test_fork_binding_must_descend_from_every_evidence_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.finish_binding()
+            main_branch = fixture._git("branch", "--show-current")
+            input_path = "source/changed.cpp"
+            evidence = fixture.evidence_by_path[input_path]
+            evidence_path = str(evidence["path"])
+            payload = fixture.evidence_payload_by_path[input_path]
+            fixture._git("switch", "-q", "-c", "side-evidence", fixture.reviewed_commit)
+            fixture._write(
+                evidence_path,
+                json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            )
+            side_commit = fixture._commit("test: record side-line evidence")
+            side_evidence = {
+                "path": evidence_path,
+                "checkpoint_commit": side_commit,
+                "checkpoint_tree": fixture._tree(side_commit),
+                "sha256": _sha256(fixture._blob(side_commit, evidence_path) or b""),
+            }
+            fixture._git("switch", "-q", main_branch)
+            for disposition in fixture.binding_payload["scout_input_dispositions"]:
+                if disposition["path"] == input_path:
+                    disposition["evidence"] = side_evidence
+                    break
+            fixture.commit_binding_payload()
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "must descend from revalidation evidence checkpoint", result.stderr
+        )
+
+    def test_binding_cannot_reselect_a_later_source_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.finish_binding()
+            source = fixture.binding_payload["source_revision"]
+            source["checkpoint_commit"] = fixture.reviewed_commit
+            source["checkpoint_tree"] = fixture._tree(fixture.reviewed_commit)
+            fixture.commit_binding_payload()
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "does not match the committed source revision checkpoint", result.stderr
+        )
+
+    def test_revalidation_evidence_is_bound_to_one_changed_input(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.finish_binding()
+            dispositions = {
+                item["path"]: item
+                for item in fixture.binding_payload["scout_input_dispositions"]
+            }
+            dispositions["source/changed.cpp"]["evidence"] = fixture.evidence_by_path[
+                "source/fork_only.cpp"
+            ]
+            fixture.commit_binding_payload()
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("does not bind input_path", result.stderr)
+
+    def test_revalidation_evidence_binds_digests_claims_and_result(self) -> None:
+        mutations = (
+            ("revision_id", "wrong-revision", "does not bind revision_id"),
+            (
+                "source_revision_record_digest",
+                "0" * 64,
+                "does not bind source_revision_record_digest",
+            ),
+            (
+                "predecessor_sha256",
+                "0" * 64,
+                "does not bind predecessor_sha256",
+            ),
+            (
+                "selected_upstream_sha256",
+                "0" * 64,
+                "does not bind selected_upstream_sha256",
+            ),
+            (
+                "reviewed_fork_sha256",
+                "0" * 64,
+                "does not bind reviewed_fork_sha256",
+            ),
+            (
+                "validated_claims",
+                ["wrong-claim"],
+                "does not match predecessor claims",
+            ),
+            ("result", "rejected", "result must be 'accepted'"),
+        )
+        for field, value, diagnostic in mutations:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                fixture = SourceCampaignRepository(Path(directory))
+                fixture.build()
+                fixture.finish_binding()
+                payload = copy.deepcopy(
+                    fixture.evidence_payload_by_path["source/changed.cpp"]
+                )
+                payload[field] = value
+                fixture.replace_revalidation_evidence("source/changed.cpp", payload)
+
+                result = fixture.run_source_validator(
+                    "--fork-binding", str(fixture.binding_path)
+                )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(diagnostic, result.stderr)
+
+    def test_repository_read_failure_is_not_treated_as_an_absent_input(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            changed = fixture.source_payload["scout_input_dispositions"][1]
+            changed["upstream_sha256"] = None
+            fixture.commit_source_payload()
+            blob = fixture._git(
+                "rev-parse", f"{fixture.release_commit}:source/changed.cpp"
+            )
+            object_path = fixture.root / ".git" / "objects" / blob[:2] / blob[2:]
+            self.assertTrue(object_path.is_file())
+            object_path.unlink()
+
+            result = fixture.run_source_validator()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot read repository blob", result.stderr)
+
+    def test_source_fallback_cannot_claim_production_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.source_payload["fallback_state"]["authority"] = "production"
+            fixture.commit_source_payload()
+
+            result = fixture.run_source_validator()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("authority must be 'legacy_runtime'", result.stderr)
+
+    def test_binding_fallback_cannot_claim_production_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+            fixture.finish_binding()
+            fixture.binding_payload["fallback_state"]["authority"] = "production"
+            fixture.commit_binding_payload()
+
+            result = fixture.run_source_validator(
+                "--fork-binding", str(fixture.binding_path)
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("authority must be 'legacy_runtime'", result.stderr)
+
     def test_reviewed_fork_identity_must_be_distinct_from_the_release(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = SourceCampaignRepository(Path(directory))
@@ -847,13 +1201,7 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
             reviewed["commit"] = fixture.release_commit
             reviewed["tree"] = fixture._tree(fixture.release_commit)
             reviewed["reviewed_commit"] = fixture.release_commit
-            fixture.binding_payload["record_digest"] = _record_digest(
-                fixture.binding_payload
-            )
-            fixture._write(
-                fixture.binding_path.relative_to(fixture.root).as_posix(),
-                json.dumps(fixture.binding_payload, indent=2, sort_keys=True) + "\n",
-            )
+            fixture.commit_binding_payload()
 
             result = fixture.run_source_validator(
                 "--fork-binding", str(fixture.binding_path)
@@ -876,13 +1224,7 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
             )
             reviewed["commit"] = unrelated
             reviewed["reviewed_commit"] = unrelated
-            fixture.binding_payload["record_digest"] = _record_digest(
-                fixture.binding_payload
-            )
-            fixture._write(
-                fixture.binding_path.relative_to(fixture.root).as_posix(),
-                json.dumps(fixture.binding_payload, indent=2, sort_keys=True) + "\n",
-            )
+            fixture.commit_binding_payload()
 
             result = fixture.run_source_validator(
                 "--fork-binding", str(fixture.binding_path)
@@ -899,13 +1241,7 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
             changed = fixture.binding_payload["scout_input_dispositions"][1]
             changed["disposition"] = "carried_forward"
             changed["evidence"] = None
-            fixture.binding_payload["record_digest"] = _record_digest(
-                fixture.binding_payload
-            )
-            fixture._write(
-                fixture.binding_path.relative_to(fixture.root).as_posix(),
-                json.dumps(fixture.binding_payload, indent=2, sort_keys=True) + "\n",
-            )
+            fixture.commit_binding_payload()
 
             result = fixture.run_source_validator(
                 "--fork-binding", str(fixture.binding_path)
@@ -923,13 +1259,7 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
             changed["disposition"] = "revalidation_required"
             changed["evidence"] = None
             fixture.binding_payload["status"] = "awaiting_revalidation"
-            fixture.binding_payload["record_digest"] = _record_digest(
-                fixture.binding_payload
-            )
-            fixture._write(
-                fixture.binding_path.relative_to(fixture.root).as_posix(),
-                json.dumps(fixture.binding_payload, indent=2, sort_keys=True) + "\n",
-            )
+            fixture.commit_binding_payload()
 
             pending = fixture.run_source_validator(
                 "--fork-binding", str(fixture.binding_path)
@@ -953,13 +1283,7 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
             fixture = SourceCampaignRepository(Path(directory))
             fixture.build()
             fixture.source_payload["runtime_authority"] = "production"
-            fixture.source_payload["record_digest"] = _record_digest(
-                fixture.source_payload
-            )
-            fixture._write(
-                fixture.source_path.relative_to(fixture.root).as_posix(),
-                json.dumps(fixture.source_payload, indent=2, sort_keys=True) + "\n",
-            )
+            fixture.commit_source_payload()
 
             result = fixture.run_source_validator()
 
@@ -972,13 +1296,7 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
             fixture.build()
             changed = fixture.source_payload["scout_input_dispositions"][1]
             changed["disposition"] = "candidate_for_carry_forward"
-            fixture.source_payload["record_digest"] = _record_digest(
-                fixture.source_payload
-            )
-            fixture._write(
-                fixture.source_path.relative_to(fixture.root).as_posix(),
-                json.dumps(fixture.source_payload, indent=2, sort_keys=True) + "\n",
-            )
+            fixture.commit_source_payload()
 
             result = fixture.run_source_validator()
 

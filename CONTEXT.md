@@ -244,7 +244,7 @@ A non-authorizing record that opens a later evidence campaign by binding the pre
 _Avoid_: Silently carrying a changed input forward, filling a pending merge identity in place, or treating an opened source revision as production authority.
 
 **Maintained-fork source binding**:
-A separate record that points backward to one portable residency source revision and binds the reviewed maintained-fork commit, its two source ancestries, and final scout-input dispositions. `source_ready` permits later evidence work; it does not activate runtime behavior.
+A separate committed path-only append that points backward to one unchanged portable residency source revision, descends from the reviewed maintained-fork commit and all referenced revalidation checkpoints, and binds both source ancestries plus final scout-input dispositions. Revalidation evidence names the exact input, source revisions, content digests, and predecessor claims it accepts. `source_ready` permits later evidence work; it does not activate runtime behavior.
 _Avoid_: Reusing the upstream release commit as the fork identity, accepting due inputs as carried, or interpreting source readiness as a residency cutover.
 
 **Residency evidence ceiling**:

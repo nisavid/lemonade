@@ -243,6 +243,44 @@ class GitRepository:
     def blob(self, commit: str, path: str) -> bytes:
         return bytes(self.run("show", f"{commit}:{path}", text=False))
 
+    def blob_or_none(self, commit: str, path: str) -> bytes | None:
+        listing = bytes(
+            self.run(
+                "ls-tree",
+                "-z",
+                "--full-tree",
+                commit,
+                "--",
+                path,
+                text=False,
+            )
+        )
+        if not listing:
+            return None
+        entries = listing.removesuffix(b"\0").split(b"\0")
+        if len(entries) != 1 or b"\t" not in entries[0]:
+            fail(f"repository path lookup for {path!r} is ambiguous")
+        metadata, encoded_path = entries[0].split(b"\t", 1)
+        fields = metadata.split()
+        if len(fields) != 3 or fields[1] != b"blob":
+            fail(f"repository path {path!r} does not identify a blob")
+        if encoded_path != path.encode("utf-8"):
+            fail(f"repository path lookup for {path!r} returned another path")
+        object_id = fields[2].decode("ascii")
+        with _isolated_git_environment() as environment:
+            result = subprocess.run(
+                ["git", "-C", str(self.root), "cat-file", "blob", object_id],
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+        if result.returncode:
+            fail(
+                f"cannot read repository blob for {path!r}: "
+                f"{result.stderr.decode('utf-8', 'replace').strip()}"
+            )
+        return result.stdout
+
     def parents(self, commit: str) -> list[str]:
         line = str(self.run("rev-list", "--parents", "-n", "1", commit)).strip()
         return line.split()[1:]
@@ -514,6 +552,65 @@ def _path(value: Any, label: str) -> str:
     return path
 
 
+def _repository_path(repo: GitRepository, path: Path, label: str) -> str:
+    resolved = path.resolve()
+    try:
+        relative = resolved.relative_to(repo.root).as_posix()
+    except ValueError:
+        fail(f"{label} must be inside the current Git repository")
+    return _path(relative, label)
+
+
+def _json_mapping(source: bytes, label: str, origin: str) -> dict[str, Any]:
+    try:
+        value = json.loads(
+            source.decode("utf-8"),
+            object_pairs_hook=lambda pairs: _pairs_without_duplicates(pairs, origin),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        fail(f"{label} is invalid JSON: {error}")
+    return _mapping(value, label)
+
+
+def _committed_path_checkpoint(
+    repo: GitRepository,
+    working_path: Path,
+    label: str,
+    *,
+    path_only: bool,
+) -> tuple[str, str, bytes]:
+    relative_path = _repository_path(repo, working_path, f"{label}.path")
+    head = repo.resolve("HEAD^{commit}")
+    committed = repo.blob_or_none(head, relative_path)
+    if committed is None:
+        fail(f"{label} is absent from HEAD")
+    try:
+        working = working_path.read_bytes()
+    except OSError as error:
+        fail(f"cannot read {label}: {error}")
+    if working != committed:
+        fail(f"{label} differs from its committed checkpoint")
+    digest = sha256_bytes(committed)
+    commits = str(repo.run("rev-list", head, "--", relative_path)).splitlines()
+    candidates: list[str] = []
+    for commit in commits:
+        parents = repo.parents(commit)
+        if len(parents) != 1:
+            continue
+        changed = repo.changed_paths(parents[0], commit)
+        if relative_path not in changed:
+            continue
+        if path_only and changed != [relative_path]:
+            continue
+        candidate = repo.blob_or_none(commit, relative_path)
+        if candidate is not None and sha256_bytes(candidate) == digest:
+            candidates.append(commit)
+    if len(candidates) != 1:
+        requirement = "a unique path-only append" if path_only else "a unique commit"
+        fail(f"{label} must be {requirement} in HEAD history")
+    return candidates[0], relative_path, committed
+
+
 def _commit(repo: GitRepository, value: Any, label: str) -> str:
     commit = _object_id(value, label)
     if repo.object_type(commit) != "commit":
@@ -532,7 +629,8 @@ def _tree(repo: GitRepository, commit: str, value: Any, label: str) -> str:
 def _fallback(value: Any, label: str) -> None:
     fallback = _mapping(value, label)
     _exact_keys(fallback, {"authority", "status"}, label)
-    _string(fallback["authority"], f"{label}.authority")
+    if fallback["authority"] != "legacy_runtime":
+        fail(f"{label}.authority must be 'legacy_runtime'")
     if fallback["status"] != "active":
         fail(f"{label}.status must be 'active'")
 
@@ -779,37 +877,102 @@ def _validate_predecessor_scout(
     source = repo.blob(commit, path)
     if sha256_bytes(source) != _digest(scout["sha256"], f"{label}.sha256"):
         fail(f"{label}.sha256 does not match its checkpoint")
-    try:
-        report = json.loads(
-            source.decode("utf-8"),
-            object_pairs_hook=lambda pairs: _pairs_without_duplicates(
-                pairs, f"{commit}:{path}"
-            ),
-        )
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        fail(f"{label} is invalid JSON: {error}")
-    report = _mapping(report, label)
+    report = _json_mapping(source, label, f"{commit}:{path}")
     if report.get("schema") != "portable_residency_stable_source_scout/v1":
         fail(f"{label} schema is unsupported")
     return commit, report
 
 
 def _blob_digest_or_none(repo: GitRepository, commit: str, path: str) -> str | None:
-    with _isolated_git_environment() as environment:
-        result = subprocess.run(
-            ["git", "-C", str(repo.root), "show", f"{commit}:{path}"],
-            capture_output=True,
-            check=False,
-            env=environment,
+    source = repo.blob_or_none(commit, path)
+    return sha256_bytes(source) if source is not None else None
+
+
+def _validate_accepted_predecessor_scout(
+    manifest: dict[str, Any],
+    scout_reference: Any,
+    scout_commit: str,
+    scout: dict[str, Any],
+) -> dict[str, tuple[str, ...]]:
+    reference = _mapping(scout_reference, "predecessor_scout")
+    runs = _list(manifest.get("scout_runs"), "predecessor_campaign.scout_runs")
+    matches = [
+        _mapping(run, f"predecessor_campaign.scout_runs[{index}]")
+        for index, run in enumerate(runs)
+        if isinstance(run, dict) and run.get("id") == "implementation-base-source-scout"
+    ]
+    if len(matches) != 1:
+        fail("accepted predecessor campaign must contain one implementation-base scout")
+    run = matches[0]
+    _exact_keys(run, {"id", "commit", "tree", "inputs", "outputs"}, "accepted scout")
+    expected_path = _path(reference["path"], "predecessor_scout.path")
+    expected_digest = _digest(reference["sha256"], "predecessor_scout.sha256")
+    if run["commit"] != scout_commit or run["tree"] != reference["checkpoint_tree"]:
+        fail("predecessor_scout does not match the accepted predecessor scout")
+    outputs = _list(run["outputs"], "accepted scout.outputs")
+    matching_outputs = []
+    for index, raw in enumerate(outputs):
+        output = _mapping(raw, f"accepted scout.outputs[{index}]")
+        _exact_keys(output, {"path", "sha256"}, f"accepted scout.outputs[{index}]")
+        if output["path"] == expected_path and output["sha256"] == expected_digest:
+            matching_outputs.append(output)
+    if len(matching_outputs) != 1:
+        fail("predecessor_scout does not match the accepted predecessor scout")
+    if run["inputs"] != scout.get("inputs"):
+        fail(
+            "predecessor_scout input roster differs from the accepted predecessor scout"
         )
-    if result.returncode:
-        return None
-    return sha256_bytes(result.stdout)
+    stable = manifest.get("stable_release", {})
+    implementation_base = manifest.get("implementation_base", {})
+    if scout.get("stable_release_commit") != stable.get("peeled_commit"):
+        fail("predecessor_scout stable release differs from the accepted campaign")
+    if scout.get("implementation_base_commit") != implementation_base.get("commit"):
+        fail("predecessor_scout implementation base differs from the accepted campaign")
+
+    inputs: set[str] = set()
+    for index, raw in enumerate(_list(scout.get("inputs"), "predecessor_scout.inputs")):
+        label = f"predecessor_scout.inputs[{index}]"
+        item = _mapping(raw, label)
+        _exact_keys(item, {"path", "sha256"}, label)
+        path = _path(item.get("path"), f"{label}.path")
+        _digest(item.get("sha256"), f"{label}.sha256")
+        if path in inputs:
+            fail(f"predecessor_scout.inputs repeats {path!r}")
+        inputs.add(path)
+    claims: dict[str, set[str]] = {path: set() for path in inputs}
+    for collection in ("source_facts", "source_seam_dispositions"):
+        for index, raw in enumerate(
+            _list(scout.get(collection), f"predecessor_scout.{collection}")
+        ):
+            item = _mapping(raw, f"predecessor_scout.{collection}[{index}]")
+            path = _path(
+                item.get("path"), f"predecessor_scout.{collection}[{index}].path"
+            )
+            claim = _string(
+                item.get("id"), f"predecessor_scout.{collection}[{index}].id"
+            )
+            if path not in claims:
+                fail(f"predecessor_scout claim {claim!r} names an untracked input")
+            if claim in claims[path]:
+                fail(f"predecessor_scout repeats claim {claim!r} for {path!r}")
+            claims[path].add(claim)
+    if any(not values for values in claims.values()):
+        fail("every predecessor scout input must bind at least one claim")
+    return {path: tuple(sorted(values)) for path, values in claims.items()}
 
 
 def _validate_revalidation_evidence(
-    repo: GitRepository, value: Any, reviewed_commit: str, label: str
-) -> None:
+    repo: GitRepository,
+    value: Any,
+    revision: dict[str, Any],
+    reviewed_commit: str,
+    input_path: str,
+    predecessor_digest: str,
+    upstream_digest: str | None,
+    fork_digest: str | None,
+    expected_claims: tuple[str, ...],
+    label: str,
+) -> str:
     evidence = _mapping(value, label)
     _exact_keys(
         evidence,
@@ -828,42 +991,72 @@ def _validate_revalidation_evidence(
     source = repo.blob(checkpoint, path)
     if sha256_bytes(source) != _digest(evidence["sha256"], f"{label}.sha256"):
         fail(f"{label}.sha256 does not match its checkpoint")
-    try:
-        payload = json.loads(
-            source.decode("utf-8"),
-            object_pairs_hook=lambda pairs: _pairs_without_duplicates(
-                pairs, f"{checkpoint}:{path}"
-            ),
-        )
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        fail(f"{label} is invalid JSON: {error}")
-    payload = _mapping(payload, label)
+    payload = _json_mapping(source, label, f"{checkpoint}:{path}")
     _exact_keys(
         payload,
-        {"schema", "reviewed_maintained_fork_commit"},
+        {
+            "schema",
+            "revision_id",
+            "source_revision_record_digest",
+            "input_path",
+            "predecessor_sha256",
+            "selected_upstream_sha256",
+            "reviewed_maintained_fork_commit",
+            "reviewed_fork_sha256",
+            "validated_claims",
+            "result",
+        },
         label,
     )
     if payload["schema"] != "portable_residency_source_revalidation/v1":
         fail(f"{label} schema is unsupported")
+    if payload["revision_id"] != revision["revision_id"]:
+        fail(f"{label} does not bind revision_id")
+    if payload["source_revision_record_digest"] != revision["record_digest"]:
+        fail(f"{label} does not bind source_revision_record_digest")
+    if payload["input_path"] != input_path:
+        fail(f"{label} does not bind input_path")
+    if payload["predecessor_sha256"] != predecessor_digest:
+        fail(f"{label} does not bind predecessor_sha256")
+    if payload["selected_upstream_sha256"] != upstream_digest:
+        fail(f"{label} does not bind selected_upstream_sha256")
     if payload["reviewed_maintained_fork_commit"] != reviewed_commit:
         fail(f"{label} does not bind the reviewed maintained-fork commit")
+    if payload["reviewed_fork_sha256"] != fork_digest:
+        fail(f"{label} does not bind reviewed_fork_sha256")
+    claims = tuple(
+        _string(claim, f"{label}.validated_claims[{index}]")
+        for index, claim in enumerate(
+            _list(payload["validated_claims"], f"{label}.validated_claims")
+        )
+    )
+    if claims != expected_claims:
+        fail(f"{label}.validated_claims does not match predecessor claims")
+    if payload["result"] != "accepted":
+        fail(f"{label}.result must be 'accepted'")
+    return checkpoint
 
 
 def _validate_fork_binding(
     repo: GitRepository,
     revision: dict[str, Any],
-    source_revision_path: Path,
+    source_checkpoint_commit: str,
+    source_checkpoint_path: str,
+    source_checkpoint_digest: str,
     binding_path: Path,
     release_commit: str,
     fork_base_commit: str,
     predecessor_inputs: dict[str, str],
+    upstream_inputs: dict[str, str | None],
+    predecessor_claims: dict[str, tuple[str, ...]],
 ) -> str:
-    resolved_binding = binding_path.resolve()
-    try:
-        resolved_binding.relative_to(repo.root)
-    except ValueError:
-        fail("fork binding must be inside the current Git repository")
-    binding = load_manifest(binding_path)
+    binding_commit, _, binding_bytes = _committed_path_checkpoint(
+        repo,
+        binding_path,
+        "fork binding",
+        path_only=True,
+    )
+    binding = _json_mapping(binding_bytes, "fork_binding", str(binding_path))
     _exact_keys(
         binding,
         {
@@ -894,10 +1087,7 @@ def _validate_fork_binding(
         "fork_binding.source_revision",
     )
     source_path = _path(source["path"], "fork_binding.source_revision.path")
-    expected_source_path = (
-        source_revision_path.resolve().relative_to(repo.root).as_posix()
-    )
-    if source_path != expected_source_path:
+    if source_path != source_checkpoint_path:
         fail("fork_binding.source_revision.path does not name the validated revision")
     source_commit = _commit(
         repo,
@@ -910,12 +1100,17 @@ def _validate_fork_binding(
         source["checkpoint_tree"],
         "fork_binding.source_revision.checkpoint_tree",
     )
+    if source_commit != source_checkpoint_commit:
+        fail(
+            "fork_binding.source_revision.checkpoint_commit does not match "
+            "the committed source revision checkpoint"
+        )
     source_bytes = repo.blob(source_commit, source_path)
     source_digest = _digest(source["sha256"], "fork_binding.source_revision.sha256")
     if sha256_bytes(source_bytes) != source_digest:
         fail("fork_binding.source_revision.sha256 does not match its checkpoint")
-    if sha256_bytes(source_revision_path.read_bytes()) != source_digest:
-        fail("validated source revision differs from the fork binding")
+    if source_digest != source_checkpoint_digest:
+        fail("fork_binding.source_revision.sha256 does not match source revision")
     if source["record_digest"] != revision["record_digest"]:
         fail("fork_binding.source_revision.record_digest does not match")
     reviewed = _mapping(binding["reviewed_maintained_fork"], "reviewed_maintained_fork")
@@ -942,6 +1137,10 @@ def _validate_fork_binding(
         fail("reviewed_maintained_fork.reviewed_commit must equal commit")
     if reviewed_commit == release_commit:
         fail("reviewed maintained-fork commit must be distinct from upstream release")
+    if reviewed_commit == source_commit:
+        fail(
+            "reviewed maintained-fork commit must follow the source revision checkpoint"
+        )
     for ancestor, label in (
         (release_commit, "selected upstream release"),
         (fork_base_commit, "maintained fork base"),
@@ -949,12 +1148,16 @@ def _validate_fork_binding(
     ):
         if not repo.is_ancestor(ancestor, reviewed_commit):
             fail(f"reviewed maintained-fork commit must descend from {label}")
+    reviewed_source = repo.blob_or_none(reviewed_commit, source_path)
+    if reviewed_source is None or sha256_bytes(reviewed_source) != source_digest:
+        fail("reviewed maintained-fork commit changed the bound source revision")
     dispositions = _list(
         binding["scout_input_dispositions"],
         "fork_binding.scout_input_dispositions",
     )
     seen: set[str] = set()
     unresolved = False
+    evidence_checkpoints: set[str] = set()
     for index, raw in enumerate(dispositions):
         label = f"fork_binding.scout_input_dispositions[{index}]"
         item = _mapping(raw, label)
@@ -979,8 +1182,19 @@ def _validate_fork_binding(
             if item["disposition"] != "carried_forward" or item["evidence"] is not None:
                 fail(f"{label} byte-identical input must be carried_forward")
         elif item["disposition"] == "revalidated":
-            _validate_revalidation_evidence(
-                repo, item["evidence"], reviewed_commit, f"{label}.evidence"
+            evidence_checkpoints.add(
+                _validate_revalidation_evidence(
+                    repo,
+                    item["evidence"],
+                    revision,
+                    reviewed_commit,
+                    path,
+                    predecessor_inputs[path],
+                    upstream_inputs[path],
+                    actual_fork,
+                    predecessor_claims[path],
+                    f"{label}.evidence",
+                )
             )
         elif item["disposition"] == "revalidation_required":
             if item["evidence"] is not None:
@@ -992,6 +1206,15 @@ def _validate_fork_binding(
             )
     if seen != set(predecessor_inputs):
         fail("fork_binding.scout_input_dispositions must cover every scout input")
+    for ancestor, label in (
+        (reviewed_commit, "reviewed maintained-fork commit"),
+        *(
+            (checkpoint, "revalidation evidence checkpoint")
+            for checkpoint in sorted(evidence_checkpoints)
+        ),
+    ):
+        if ancestor == binding_commit or not repo.is_ancestor(ancestor, binding_commit):
+            fail(f"fork binding checkpoint must descend from {label}")
     _fallback(binding["fallback_state"], "fork_binding.fallback_state")
     if binding["runtime_authority"] != "none":
         fail("fork_binding.runtime_authority must be 'none'")
@@ -1030,12 +1253,13 @@ def validate_source_revision(
     ):
         fail("source_revision.record_digest does not match its canonical payload")
     repo = GitRepository.discover(Path.cwd())
-    resolved_source = source_revision_path.resolve()
-    try:
-        resolved_source.relative_to(repo.root)
-    except ValueError:
-        fail("source revision must be inside the current Git repository")
-    append_commit, _ = _validate_predecessor_campaign(
+    source_checkpoint, source_path, source_bytes = _committed_path_checkpoint(
+        repo,
+        source_revision_path,
+        "source revision",
+        path_only=False,
+    )
+    append_commit, predecessor_manifest = _validate_predecessor_campaign(
         repo, revision["predecessor_campaign"]
     )
     scout_commit, scout = _validate_predecessor_scout(
@@ -1043,18 +1267,27 @@ def validate_source_revision(
     )
     if not repo.is_ancestor(scout_commit, append_commit):
         fail("predecessor_scout must precede the accepted campaign append")
+    predecessor_claims = _validate_accepted_predecessor_scout(
+        predecessor_manifest,
+        revision["predecessor_scout"],
+        scout_commit,
+        scout,
+    )
     fork_base = _mapping(revision["maintained_fork_base"], "maintained_fork_base")
     _exact_keys(fork_base, {"commit", "tree"}, "maintained_fork_base")
     fork_commit = _commit(repo, fork_base["commit"], "maintained_fork_base.commit")
     _tree(repo, fork_commit, fork_base["tree"], "maintained_fork_base.tree")
     if not repo.is_ancestor(append_commit, fork_commit):
         fail("maintained_fork_base.commit must descend from the accepted campaign")
+    if not repo.is_ancestor(fork_commit, source_checkpoint):
+        fail("source revision checkpoint must descend from maintained_fork_base")
     release_commit = _validate_source_release(repo, revision["upstream_release"])
     dispositions = _list(
         revision["scout_input_dispositions"], "scout_input_dispositions"
     )
     prior_inputs = _list(scout.get("inputs"), "predecessor_scout.inputs")
     expected: dict[str, str] = {}
+    upstream_inputs: dict[str, str | None] = {}
     for index, raw in enumerate(prior_inputs):
         item = _mapping(raw, f"predecessor_scout.inputs[{index}]")
         _exact_keys(item, {"path", "sha256"}, f"predecessor_scout.inputs[{index}]")
@@ -1095,6 +1328,7 @@ def validate_source_revision(
             recorded_upstream = _digest(recorded_upstream, f"{label}.upstream_sha256")
         if recorded_upstream != actual_upstream:
             fail(f"{label}.upstream_sha256 does not match selected release")
+        upstream_inputs[path] = actual_upstream
         expected_disposition = (
             "candidate_for_carry_forward"
             if actual_upstream == predecessor_digest
@@ -1114,11 +1348,15 @@ def validate_source_revision(
     return _validate_fork_binding(
         repo,
         revision,
-        source_revision_path,
+        source_checkpoint,
+        source_path,
+        sha256_bytes(source_bytes),
         fork_binding_path,
         release_commit,
         fork_commit,
         expected,
+        upstream_inputs,
+        predecessor_claims,
     )
 
 
