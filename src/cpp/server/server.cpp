@@ -6382,12 +6382,8 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
             info = model_manager_->get_model_info(model_name);
         }
 
-        // ModelInfo::recipe_options contains the model-level defaults plus the
-        // recipe_options.json overlay. Rebuild that local copy with request-masked
-        // saved keys removed. Concrete *_args then override the saved same-key
-        // layer while merge_args can still combine model defaults and the lower
-        // architecture/backend/global layers. This load does not alter the
-        // persistent recipe_options.json entry.
+        // A transient null masks a saved option for this load without changing
+        // the persistent recipe_options.json entry.
         if (!transient_saved_option_masks.empty()) {
             json per_model_options = model_manager_->get_model_default_options(info).to_json();
             const json saved = model_manager_->get_saved_model_options(model_name);
