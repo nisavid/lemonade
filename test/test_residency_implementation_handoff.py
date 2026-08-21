@@ -618,6 +618,10 @@ class SourceCampaignRepository:
             {"path": path, "sha256": _sha256(value.encode())}
             for path, value in sources.items()
         ]
+        self.claims_by_path = {
+            item["path"]: [f"claim-{index}"] for index, item in enumerate(scout_inputs)
+        }
+        self.claims_by_path["source/changed.cpp"].append("claim-1-extra")
         scout_path = "plan/evidence/phase-0/stable-source-scout.json"
         self._write(
             scout_path,
@@ -628,11 +632,9 @@ class SourceCampaignRepository:
                     "implementation_base_commit": implementation_base,
                     "inputs": scout_inputs,
                     "source_facts": [
-                        {
-                            "id": f"claim-{index}",
-                            "path": item["path"],
-                        }
-                        for index, item in enumerate(scout_inputs)
+                        {"id": claim, "path": path}
+                        for path, claims in self.claims_by_path.items()
+                        for claim in claims
                     ],
                     "source_seam_dispositions": [],
                 },
@@ -882,7 +884,7 @@ class SourceCampaignRepository:
                     "selected_upstream_sha256": source_item["upstream_sha256"],
                     "reviewed_maintained_fork_commit": reviewed_commit,
                     "reviewed_fork_sha256": fork_digest,
-                    "validated_claims": [f"claim-{index}"],
+                    "validated_claims": self.claims_by_path[path],
                     "result": "accepted",
                 }
                 if evidence_mutator is not None:
@@ -1206,6 +1208,31 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("does not bind input_path", result.stderr)
 
+    def test_revalidation_claim_order_is_not_authorizing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = SourceCampaignRepository(Path(directory))
+            fixture.build()
+
+            def reverse_claims(path: str, payload: dict[str, object]) -> None:
+                if path == "source/changed.cpp":
+                    payload["validated_claims"] = list(
+                        reversed(payload["validated_claims"])
+                    )
+
+            fixture.finish_binding(evidence_mutator=reverse_claims)
+
+            result = fixture.run_source_validator(
+                "--fork-binding",
+                str(fixture.binding_path),
+                "--require-source-ready",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "portable residency source revision: source ready\n",
+        )
+
     def test_revalidation_evidence_binds_digests_claims_and_result(self) -> None:
         mutations = (
             ("revision_id", "wrong-revision", "does not bind revision_id"),
@@ -1233,6 +1260,11 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
                 "validated_claims",
                 ["wrong-claim"],
                 "does not match predecessor claims",
+            ),
+            (
+                "validated_claims",
+                ["claim-1", "claim-1"],
+                "repeats a claim",
             ),
             ("result", "rejected", "result must be 'accepted'"),
         )

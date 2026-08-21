@@ -587,15 +587,21 @@ def _repository_path(repo: GitRepository, path: Path, label: str) -> str:
     return _path(relative, label)
 
 
-def _json_mapping(source: bytes, label: str, origin: str) -> dict[str, Any]:
+def _decode_json_mapping(
+    source: bytes, label: str, origin: str, invalid_label: str
+) -> dict[str, Any]:
     try:
         value = json.loads(
             source.decode("utf-8"),
             object_pairs_hook=lambda pairs: _pairs_without_duplicates(pairs, origin),
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        fail(f"{label} is invalid JSON: {error}")
+        fail(f"{invalid_label}: {error}")
     return _mapping(value, label)
+
+
+def _json_mapping(source: bytes, label: str, origin: str) -> dict[str, Any]:
+    return _decode_json_mapping(source, label, origin, f"{label} is invalid JSON")
 
 
 def _require_working_path_matches_committed(
@@ -1098,7 +1104,9 @@ def _validate_revalidation_evidence(
             _list(payload["validated_claims"], f"{label}.validated_claims")
         )
     )
-    if claims != expected_claims:
+    if len(set(claims)) != len(claims):
+        fail(f"{label}.validated_claims repeats a claim")
+    if tuple(sorted(claims)) != expected_claims:
         fail(f"{label}.validated_claims does not match predecessor claims")
     if payload["result"] != "accepted":
         fail(f"{label}.result must be 'accepted'")
@@ -1786,14 +1794,7 @@ def _run_at_commit(
 
 
 def _json_object_bytes(source: bytes, label: str) -> dict[str, Any]:
-    try:
-        value = json.loads(
-            source.decode("utf-8"),
-            object_pairs_hook=lambda pairs: _pairs_without_duplicates(pairs, label),
-        )
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        fail(f"{label} is invalid: {error}")
-    return _mapping(value, label)
+    return _decode_json_mapping(source, label, label, f"{label} is invalid")
 
 
 def _patch_paths(patch: bytes, label: str) -> list[str]:
