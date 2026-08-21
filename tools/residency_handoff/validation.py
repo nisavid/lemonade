@@ -893,14 +893,18 @@ def _validate_predecessor_campaign(
         predecessor["stable_release_commit"],
         f"{label}.stable_release_commit",
     )
-    if manifest.get("stable_release", {}).get("peeled_commit") != stable_commit:
+    stable_release = _mapping(manifest.get("stable_release"), f"{label}.stable_release")
+    if stable_release.get("peeled_commit") != stable_commit:
         fail(f"{label}.stable_release_commit does not match the accepted manifest")
     implementation_base = _commit(
         repo,
         predecessor["implementation_base_commit"],
         f"{label}.implementation_base_commit",
     )
-    if manifest.get("implementation_base", {}).get("commit") != implementation_base:
+    accepted_base = _mapping(
+        manifest.get("implementation_base"), f"{label}.implementation_base"
+    )
+    if accepted_base.get("commit") != implementation_base:
         fail(f"{label}.implementation_base_commit does not match the accepted manifest")
     checkpoint = _commit(
         repo,
@@ -981,8 +985,13 @@ def _validate_accepted_predecessor_scout(
         fail(
             "predecessor_scout input roster differs from the accepted predecessor scout"
         )
-    stable = manifest.get("stable_release", {})
-    implementation_base = manifest.get("implementation_base", {})
+    stable = _mapping(
+        manifest.get("stable_release"), "predecessor_campaign.stable_release"
+    )
+    implementation_base = _mapping(
+        manifest.get("implementation_base"),
+        "predecessor_campaign.implementation_base",
+    )
     if scout.get("stable_release_commit") != stable.get("peeled_commit"):
         fail("predecessor_scout stable release differs from the accepted campaign")
     if scout.get("implementation_base_commit") != implementation_base.get("commit"):

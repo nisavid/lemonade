@@ -603,6 +603,7 @@ class SourceCampaignRepository:
         self,
         *,
         use_decoy_scout: bool = False,
+        predecessor_manifest_mutator: Callable[[dict[str, object]], None] | None = None,
         source_mutator: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         sources = {
@@ -710,6 +711,8 @@ class SourceCampaignRepository:
         }
         phase_record["record_digest"] = _record_digest(phase_record)
         accepted_manifest = {**precursor, "phase_records": [phase_record]}
+        if predecessor_manifest_mutator is not None:
+            predecessor_manifest_mutator(accepted_manifest)
         self._write(
             manifest_path,
             json.dumps(accepted_manifest, indent=2, sort_keys=True) + "\n",
@@ -984,6 +987,24 @@ class ResidencyImplementationHandoffCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("must be a unique first-introduction commit", result.stderr)
+
+    def test_malformed_predecessor_identities_are_bounded_cli_errors(self) -> None:
+        for field in ("stable_release", "implementation_base"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                fixture = SourceCampaignRepository(Path(directory))
+
+                def replace_identity(
+                    manifest: dict[str, object], identity_field: str = field
+                ) -> None:
+                    manifest[identity_field] = []
+
+                fixture.build(predecessor_manifest_mutator=replace_identity)
+
+                result = fixture.run_source_validator()
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(f"{field} must be an object", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
 
     def test_source_revision_accepts_git_normalized_line_endings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
