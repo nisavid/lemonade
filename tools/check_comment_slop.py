@@ -379,10 +379,17 @@ def main():
     from_ref = args.from_ref or os.environ.get("PRE_COMMIT_FROM_REF")
     to_ref = os.environ.get("PRE_COMMIT_TO_REF") or args.to_ref
 
+    diff_args = [
+        "git",
+        "diff",
+        "--no-ext-diff",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+    ]
     if from_ref:
-        diff = run(["git", "diff", "--unified=0", f"{from_ref}..{to_ref}"])
+        diff = run([*diff_args, "--unified=0", f"{from_ref}..{to_ref}"])
     else:
-        diff = run(["git", "diff", "--cached", "--unified=0"])
+        diff = run([*diff_args, "--cached", "--unified=0"])
 
     blocks, code = collect(diff)
     comment_lines = sum(len(b.lines) for b in blocks)

@@ -31,7 +31,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 IS_WINDOWS = platform.system() == "Windows"
-BACKEND_VERSIONS_PATH = Path("src/cpp/resources/backend_versions.json")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_VERSIONS_PATH = REPO_ROOT / "src/cpp/resources/backend_versions.json"
+
+
+def _default_binaries_dir() -> Path:
+    cache_env = "LOCALAPPDATA" if IS_WINDOWS else "XDG_CACHE_HOME"
+    fallback = Path.home() / ("AppData/Local" if IS_WINDOWS else ".cache")
+    return Path(os.environ.get(cache_env) or fallback) / "lemonade/bench-binaries"
+
+
+DEFAULT_BINARIES_DIR = _default_binaries_dir()
 # Long-context scenarios (context-32k/64k/128k) need the model loaded with a
 # matching ctx window; bench loads once at 4096 by default, so a 32k prompt gets
 # HTTP 400. Until per-scenario ctx is wired up, run only the short scenarios
@@ -81,16 +91,41 @@ def resolve_latest_version(repo: str, token: str | None, tag_prefix: str = "") -
     return gh_api(f"repos/{repo}/releases/latest", token)["tag_name"]
 
 
+class StripAuthorizationOnCrossOriginRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is None:
+            return None
+
+        def origin(url):
+            parsed = urllib.parse.urlparse(url)
+            scheme = parsed.scheme.lower()
+            default_port = {"http": 80, "https": 443}.get(scheme)
+            port = parsed.port if parsed.port is not None else default_port
+            return scheme, (parsed.hostname or "").lower(), port
+
+        source_origin = origin(req.full_url)
+        if source_origin[0] != "https" or source_origin != origin(newurl):
+            redirected.headers.pop("Authorization", None)
+            redirected.unredirected_hdrs.pop("Authorization", None)
+        return redirected
+
+
 def download_file(url: str, dest: Path, token: str | None = None) -> None:
     print(f"  Downloading {url}")
     headers = {}
     parsed = urllib.parse.urlparse(url)
     host = (parsed.hostname or "").lower()
-    if token and (host == "github.com" or host.endswith(".github.com")):
+    if (
+        token
+        and parsed.scheme == "https"
+        and (host == "github.com" or host.endswith(".github.com"))
+    ):
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, headers=headers)
+    opener = urllib.request.build_opener(StripAuthorizationOnCrossOriginRedirect())
     try:
-        with urllib.request.urlopen(req, timeout=300) as r, open(dest, "wb") as f:
+        with opener.open(req, timeout=300) as r, open(dest, "wb") as f:
             shutil.copyfileobj(r, f)
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"Download failed ({e.code}): {url}") from e
@@ -118,7 +153,7 @@ def extract_archive(archive: Path, dest: Path) -> None:
             z.extractall(dest)
     elif ".tar" in archive.name:
         with tarfile.open(archive) as t:
-            t.extractall(dest)
+            t.extractall(dest, filter="data")
     else:
         raise RuntimeError(f"Unknown archive format: {archive}")
 
@@ -138,9 +173,9 @@ def find_lemonade_bin() -> str:
         return os.environ["LEMONADE_EXE"]
     # CI artifacts (build job path)
     for c in [
-        Path("build/Release/lemonade.exe"),
-        Path("build/lemonade"),
-        Path("build/Release/lemonade"),
+        REPO_ROOT / "build/Release/lemonade.exe",
+        REPO_ROOT / "build/lemonade",
+        REPO_ROOT / "build/Release/lemonade",
     ]:
         if c.exists():
             return str(c)
@@ -292,7 +327,6 @@ def install_backend(base_url: str, recipe: str, backend: str) -> None:
 def run_bench(
     fork: dict,
     version: str,
-    binary_path: Path,
     model: str,
     output_file: Path,
     compare_file: Path | None,
@@ -403,7 +437,7 @@ def find_previous_result(results_dir: Path, fork_id: str, model: str) -> Path | 
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
-    return runs[1] if len(runs) > 1 else None
+    return runs[0] if runs else None
 
 
 def backend_results(data: dict, model: str | None = None) -> list[dict]:
@@ -520,15 +554,13 @@ def update_leaderboard(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--forks", default="src/cpp/resources/benchmark_forks.json")
+    parser.add_argument(
+        "--forks", default=str(REPO_ROOT / "src/cpp/resources/benchmark_forks.json")
+    )
     parser.add_argument("--output", default="ci/results")
     parser.add_argument(
         "--binaries-dir",
-        default=(
-            "C:/lemonade-bench-binaries"
-            if IS_WINDOWS
-            else "/opt/lemonade-bench-binaries"
-        ),
+        default=str(DEFAULT_BINARIES_DIR),
     )
     parser.add_argument("--fork-filter", default="")
     parser.add_argument("--model-filter", default="")
@@ -676,7 +708,6 @@ def main() -> int:
             result = run_bench(
                 fork,
                 version,
-                binary_path,
                 model,
                 run_file,
                 prev_result,

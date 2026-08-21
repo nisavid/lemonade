@@ -25,8 +25,6 @@ env:
   LEMONADE_DISABLE_SYSTEMD_JOURNAL: "1"
   LEMONADE_CI_MODE: "True"
   PYTHONIOENCODING: utf-8
-  HF_TOKEN: ${{ secrets.HUGGINGFACE_ACCESS_TOKEN }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   SDCPP_REPO: leejet/stable-diffusion.cpp
   SDCPP_CUDA_REPO: lemonade-sdk/stable-diffusion.cpp
   # Non-CUDA assets are published by leejet. CUDA assets are published by the
@@ -355,7 +353,6 @@ jobs:
       - name: Run validation with lemond
         shell: PowerShell
         env:
-          HF_TOKEN: ${{ env.HF_TOKEN }}
           LEMONADE_VALIDATE_SD_PROMPT: ${{ env.SDCPP_TEST_PROMPT }}
           LEMONADE_VALIDATE_SD_STEPS: ${{ env.SDCPP_TEST_STEPS }}
           LEMONADE_VALIDATE_SD_TIMEOUT: ${{ env.LEMONADE_VALIDATE_SD_TIMEOUT }}

@@ -5,6 +5,7 @@ import importlib
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 
@@ -276,6 +277,45 @@ class TestPathTests(unittest.TestCase):
     def test_a_root_level_test_file_is_recognised(self):
         for path in ("test.cpp", "tests.py", "test.py"):
             self.assertTrue(slop.TEST_PATH_RE.search(path), path)
+
+
+class GitDiffInvocationTests(unittest.TestCase):
+    def test_range_diff_ignores_repository_diff_customization(self):
+        with mock.patch.object(
+            sys, "argv", ["check_comment_slop.py", "--from-ref", "base"]
+        ), mock.patch.object(slop, "run", return_value="") as run:
+            self.assertEqual(slop.main(), 0)
+
+        run.assert_called_once_with(
+            [
+                "git",
+                "diff",
+                "--no-ext-diff",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--unified=0",
+                "base..HEAD",
+            ]
+        )
+
+    def test_staged_diff_ignores_repository_diff_customization(self):
+        with mock.patch.object(sys, "argv", ["check_comment_slop.py"]), mock.patch.dict(
+            os.environ,
+            {"PRE_COMMIT_FROM_REF": "", "PRE_COMMIT_TO_REF": ""},
+        ), mock.patch.object(slop, "run", return_value="") as run:
+            self.assertEqual(slop.main(), 0)
+
+        run.assert_called_once_with(
+            [
+                "git",
+                "diff",
+                "--no-ext-diff",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--cached",
+                "--unified=0",
+            ]
+        )
 
 
 if __name__ == "__main__":

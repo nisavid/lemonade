@@ -1,6 +1,7 @@
 import os
 import threading
 import time
+from collections import Counter
 
 import requests
 from utils.server_base import (
@@ -12,8 +13,8 @@ from utils.test_models import (
     ENDPOINT_TEST_MODEL,
     MULTI_MODEL_TERTIARY,
     PORT,
-    TIMEOUT_MODEL_OPERATION,
     TIMEOUT_DEFAULT,
+    TIMEOUT_MODEL_OPERATION,
 )
 
 IDLE_EVALUATION_PCT = -1.0
@@ -295,6 +296,8 @@ class EvictionTests(ServerTestBase):
 
         stop = threading.Event()
         errors = []
+        idle_evaluation_statuses = Counter()
+        idle_evaluation_statuses_lock = threading.Lock()
 
         def load_model():
             # Keep this helper assertion-free: transient HTTP status races are not
@@ -330,7 +333,15 @@ class EvictionTests(ServerTestBase):
         def drive_idle_evaluation():
             try:
                 while not stop.is_set():
-                    self._evaluate_idle_now(timeout=RACE_REQUEST_TIMEOUT)
+                    response = requests.post(
+                        f"{self.base_url.replace('/api/v1', '')}"
+                        "/internal/simulate-vram-pressure",
+                        json={"pct": IDLE_EVALUATION_PCT},
+                        headers=self._admin_headers(),
+                        timeout=RACE_REQUEST_TIMEOUT,
+                    )
+                    with idle_evaluation_statuses_lock:
+                        idle_evaluation_statuses[response.status_code] += 1
                     time.sleep(RACE_EVALUATION_PAUSE_SECONDS)
             except Exception as exc:  # noqa: BLE001 - surfaced via errors list
                 errors.append(exc)
@@ -364,6 +375,25 @@ class EvictionTests(ServerTestBase):
             all(not thread.is_alive() for thread in threads),
             "Concurrent churn threads should terminate promptly",
         )
+
+        with idle_evaluation_statuses_lock:
+            observed_idle_evaluation_statuses = dict(idle_evaluation_statuses)
+        self.assertGreater(
+            observed_idle_evaluation_statuses.get(200, 0),
+            0,
+            "Concurrent churn completed without a successful idle evaluation; "
+            f"observed statuses: {observed_idle_evaluation_statuses}",
+        )
+        unexpected_statuses = {
+            status: count
+            for status, count in observed_idle_evaluation_statuses.items()
+            if status != 200
+        }
+        if unexpected_statuses:
+            print(
+                "[RACE] Idle-evaluation response statuses during churn: "
+                f"{unexpected_statuses}"
+            )
         self.assertEqual(errors, [], f"Concurrent churn raised errors: {errors}")
 
         health = requests.get(f"{self.base_url}/health", timeout=TIMEOUT_DEFAULT)
