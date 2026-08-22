@@ -64,7 +64,7 @@ void require_rejected(const ClaimSourcesResult &result, std::string_view operati
     require(!result.sources.has_value(), "transfer rejection returned a partial value");
 }
 
-} // namespace
+}
 
 int main() {
     const auto first = full_capacity_family("gpu/first/");
