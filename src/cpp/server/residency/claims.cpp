@@ -17,7 +17,6 @@ namespace lemon::residency {
 
 namespace {
 
-constexpr std::size_t claim_family_count = 4;
 constexpr std::size_t claim_view_count = 4;
 
 class ClaimFailure final : public std::runtime_error {
@@ -57,6 +56,12 @@ bool identifier_is_valid(std::string_view value) {
 void require_identifier(std::string_view value) {
     if (!identifier_is_valid(value)) {
         reject(ClaimStatus::InvalidIdentifier, "claim source or constraint identifier is invalid");
+    }
+}
+
+void require_claim_family_size(std::size_t size) {
+    if (size > max_journal_array_entries) {
+        reject(ClaimStatus::LimitExceeded, "claim family exceeds the entry limit");
     }
 }
 
@@ -137,6 +142,7 @@ ClaimSetParts claim_set_parts(
     std::array<ClaimCompleteness, claim_family_count> empty_states) {
     ClaimSetParts parts;
     for (std::size_t index = 0; index < claim_family_count; ++index) {
+        require_claim_family_size(maps[index].size());
         parts.entries[index].reserve(maps[index].size());
         for (const auto &[constraint_id, amount] : maps[index]) {
             parts.entries[index].push_back(
@@ -225,9 +231,14 @@ bool ClaimTotal::operator!=(const ClaimTotal &other) const noexcept {
     return !(*this == other);
 }
 
-CheckedClaimSet::CheckedClaimSet(std::array<std::vector<ClaimTotal>, 4> entries,
-                                 std::array<ClaimCompleteness, 4> completeness)
-    : entries_(std::move(entries)), completeness_(completeness) {}
+CheckedClaimSet::CheckedClaimSet(
+    std::array<std::vector<ClaimTotal>, claim_family_count> entries,
+    std::array<ClaimCompleteness, claim_family_count> completeness)
+    : entries_(std::move(entries)), completeness_(completeness) {
+    for (const auto &family_entries : entries_) {
+        require_claim_family_size(family_entries.size());
+    }
+}
 
 CheckedClaimSet::CheckedClaimSet(CheckedClaimSet &&other) noexcept
     : entries_(std::move(other.entries_)), completeness_(other.completeness_) {
@@ -361,9 +372,7 @@ CheckedClaimSetResult check_claim_closure(std::vector<ClaimFamilyClosure> closur
                        "claim closure has a duplicate or invalid family");
             }
             seen[*index] = true;
-            if (family.entries.size() > max_journal_array_entries) {
-                reject(ClaimStatus::LimitExceeded, "claim family exceeds the entry limit");
-            }
+            require_claim_family_size(family.entries.size());
             switch (family.completeness) {
             case ClaimCompleteness::Unknown:
                 reject(ClaimStatus::IncompleteClaimClosure,
@@ -524,7 +533,7 @@ ClaimSourcesResult checked_commit_transfer(std::vector<ClaimSource> sources,
 ClaimSourcesResult
 checked_quarantine_transfer(std::vector<ClaimSource> sources, std::string_view source_id,
                             ClaimViewKind expected_view,
-                            std::vector<CheckedClaimSet> plausible_claims) {
+                            const std::vector<CheckedClaimSet> &plausible_claims) {
     try {
         require_identifier(source_id);
         const std::string stable_source_id(source_id);

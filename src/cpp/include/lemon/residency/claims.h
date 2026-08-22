@@ -12,6 +12,8 @@
 
 namespace lemon::residency {
 
+inline constexpr std::size_t claim_family_count = 4;
+
 enum class ClaimStatus {
     Accepted,
     InvalidIdentifier,
@@ -53,8 +55,8 @@ public:
     bool operator!=(const CheckedClaimSet &other) const;
 
 private:
-    CheckedClaimSet(std::array<std::vector<ClaimTotal>, 4> entries,
-                    std::array<ClaimCompleteness, 4> completeness);
+    CheckedClaimSet(std::array<std::vector<ClaimTotal>, claim_family_count> entries,
+                    std::array<ClaimCompleteness, claim_family_count> completeness);
 
     static CheckedClaimSet known_zero();
     static CheckedClaimSet add_sets(const CheckedClaimSet &left,
@@ -64,8 +66,8 @@ private:
     static CheckedClaimSet maximum_sets(const CheckedClaimSet &left,
                                         const CheckedClaimSet &right);
 
-    std::array<std::vector<ClaimTotal>, 4> entries_;
-    std::array<ClaimCompleteness, 4> completeness_;
+    std::array<std::vector<ClaimTotal>, claim_family_count> entries_;
+    std::array<ClaimCompleteness, claim_family_count> completeness_;
 
     friend CheckedClaimSetResult check_claim_closure(std::vector<ClaimFamilyClosure> closure);
     friend CheckedClaimSetResult checked_add(const CheckedClaimSet &left,
@@ -136,7 +138,7 @@ ClaimSourcesResult checked_commit_transfer(std::vector<ClaimSource> sources,
 ClaimSourcesResult
 checked_quarantine_transfer(std::vector<ClaimSource> sources, std::string_view source_id,
                             ClaimViewKind expected_view,
-                            std::vector<CheckedClaimSet> plausible_claims);
+                            const std::vector<CheckedClaimSet> &plausible_claims);
 
 ClaimSourcesResult checked_release(std::vector<ClaimSource> sources, std::string_view source_id,
                                    ClaimViewKind expected_view);
