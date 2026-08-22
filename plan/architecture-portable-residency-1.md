@@ -218,7 +218,7 @@ Each prototype publishes a pass record or the exact catalog fallback/deferred-ce
 |---|---|---|---|---|
 | TASK-019 | TASK-013 | Define journal-record candidates, opaque validated history, authority-root candidates, claim families, resident states, recovery dispositions, and quarantine origins with schema, sequence, predecessor, daemon epoch, operation identity, complete claim closure, and checksum. | ✅ | 2026-08-18 |
 | TASK-020 | TASK-014, TASK-019 | Implement crash-safe append, fsync, atomic root publication, replay, compaction, and downgrade export through platform durable-file adapters. | ✅ | 2026-08-20 |
-| TASK-021 | TASK-019 | Implement checked nonnegative claim algebra and current, provisional, retained, quarantine, and conservative-overlay projections. | | |
+| TASK-021 | TASK-019 | Implement checked nonnegative claim algebra and current, provisional, retained, quarantine, and conservative-overlay projections. | ✅ | 2026-08-21 |
 | TASK-094 | TASK-019 | Define and implement the content-addressed recovery-origin store with durable hash verification before references, transactional reachability/tombstone/deleting states, safe revival/GC, missing-object corruption fencing, and topology/catalog rebind. | | |
 | TASK-095 | TASK-020, TASK-094 | Add crash and fault matrices for object write/reference ordering, hash mismatch, missing objects, concurrent revival/GC, tombstone/deleting recovery, rebind, and journal compaction. | | |
 | TASK-022 | TASK-014, TASK-019 | Define recovery-profile interfaces for prepared launch, containment, ownership, and verified release. Implement fakes plus the common protocol only; do not claim every real platform/profile. | | |

@@ -227,6 +227,18 @@ _Avoid_: Adding aliased views of one physical allocation as if each constraint c
 A reservation or occupancy recorded in the server-owned constraint ledger. Claims cover every affected constraint and move atomically through reserved, provisional, committed, quarantined, or released accounting states.
 _Avoid_: Reserving only familiar memory or compatibility constraints while leaving count or adapter-declared constraints available to competing plans.
 
+**Checked residency claim set**:
+A complete, canonical, nonnegative constraint-claim closure whose families and units remain distinct through arithmetic.
+_Avoid_: Treating an incomplete family as zero, converting between bytes and counts, or accepting overflow or underflow.
+
+**Residency claim view**:
+A source-attributed accounting projection that assigns each checked claim set to current, provisional, retained, or quarantine state.
+_Avoid_: Releasing an anonymous aggregate amount or counting one source in more than one state.
+
+**Conservative claim overlay**:
+The deterministic checked sum of the current, provisional, retained, and quarantine claim views after each ambiguity is widened to its maximum plausible closure.
+_Avoid_: Treating the overlay as mutable authority or adding mutually exclusive alternatives instead of taking their maximum.
+
 **Residency capability level**:
 The evidence-backed status of one exact runtime cell or evidence-only compatibility contract. **Validated** means end-to-end physical tests of the runtime operation; **modeled** means primary-evidence architecture and every applicable signal or contract proof without full physical validation; **fallback-only** means a cataloged concrete fallback or refusal without full capacity automation; **unsupported** means no safe residency behavior. A compatibility contract never gains live authority merely from its level.
 _Avoid_: Calling design coverage validation, implying that fallback-only behavior provides capacity-aware automation, or treating a modeled pressure-reclamation cell as authority for a destructive automatic action.
