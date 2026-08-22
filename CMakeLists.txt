@@ -2280,6 +2280,34 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_JOURNAL_TEST_SRC}")
     add_cpp_ci_test(ResidencyJournal CI ON COMMAND test_residency_journal)
 endif()
 
+set(_RESIDENCY_CLAIMS_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_claims.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_CLAIMS_TEST_SRC}")
+    add_executable(test_residency_claims
+        ${_RESIDENCY_CLAIMS_TEST_SRC}
+        src/cpp/server/residency/claims.cpp
+    )
+    target_include_directories(test_residency_claims PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+    )
+    add_cpp_ci_test(ResidencyClaims CI ON COMMAND test_residency_claims)
+endif()
+
+set(_RESIDENCY_CLAIM_FAMILY_LIMIT_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_claim_family_limit.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_CLAIM_FAMILY_LIMIT_TEST_SRC}")
+    add_executable(test_residency_claim_family_limit
+        ${_RESIDENCY_CLAIM_FAMILY_LIMIT_TEST_SRC}
+        src/cpp/server/residency/claims.cpp
+    )
+    target_include_directories(test_residency_claim_family_limit PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+    )
+    add_cpp_ci_test(ResidencyClaimFamilyLimit CI ON COMMAND test_residency_claim_family_limit)
+endif()
+
 set(_RESIDENCY_CONTRACT_CATALOG_TEST_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_contract_catalog.cpp"
 )

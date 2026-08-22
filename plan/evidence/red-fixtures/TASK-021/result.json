@@ -1,0 +1,22 @@
+{
+  "command": [
+    "python3",
+    "-B",
+    "test/residency/recovery/test_claims_public_seam.py"
+  ],
+  "environment": {
+    "platform": "Linux x86_64",
+    "python_version": "3.14.6",
+    "toolchain": [
+      "c++ (GCC) 16.2.1 20260810",
+      "python3"
+    ]
+  },
+  "observed_result": {
+    "exit_code": 1,
+    "failure_signature": "TASK-021 checked residency claims contract is unavailable"
+  },
+  "schema": "portable_residency_red_fixture_result/v1",
+  "task_base_commit": "388c16ff74265664e080be3e85de423710dc9718",
+  "task_id": "TASK-021"
+}
