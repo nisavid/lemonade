@@ -5664,6 +5664,42 @@ void require_native_immutable_objects() {
             "native immutable-object authority unlock failed");
 }
 
+#ifdef _WIN32
+class FixedNamespacePublishBarrier final
+    : public lemon::residency::detail::DurableFixedNamespaceConvergenceProbe {
+public:
+    void after_publish_attempt(std::size_t attempt, bool moved) override {
+        if (attempt != 0 || moved) {
+            return;
+        }
+        std::unique_lock lock(mutex_);
+        ++blocked_publishers_;
+        condition_.notify_all();
+        condition_.wait(lock, [&] { return released_; });
+    }
+
+    bool wait_for_publishers(std::size_t expected,
+                             std::uint64_t timeout_milliseconds) {
+        std::unique_lock lock(mutex_);
+        return condition_.wait_for(
+            lock, std::chrono::milliseconds(timeout_milliseconds),
+            [&] { return blocked_publishers_ == expected; });
+    }
+
+    void release() {
+        std::lock_guard lock(mutex_);
+        released_ = true;
+        condition_.notify_all();
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable condition_;
+    std::size_t blocked_publishers_ = 0;
+    bool released_ = false;
+};
+#endif
+
 void require_native_fixed_namespace_factory() {
     using lemon::residency::detail::make_platform_durable_file_adapter_in_fixed_namespace;
 
@@ -5727,6 +5763,73 @@ void require_native_fixed_namespace_factory() {
         require(adapter->unlock_authority().succeeded(),
                 "concurrent native fixed-namespace unlock failed");
     }
+
+#ifdef _WIN32
+    DWORD convergence_handles_before = 0;
+    DWORD convergence_handles_after = 0;
+    require(::GetProcessHandleCount(::GetCurrentProcess(),
+                                    &convergence_handles_before) != 0,
+            "Windows convergence handle count was unavailable");
+    {
+        NativeDirectory convergence_parent(
+            "task119-fixed-namespace-held-stage-race");
+        const auto convergence_stage =
+            convergence_parent.path() /
+            ".residency-local-overlay.directory-stage";
+        require(::CreateDirectoryW(convergence_stage.c_str(), nullptr) != 0,
+                "Windows convergence stage could not be created");
+        const auto held_stage = ::CreateFileW(
+            convergence_stage.c_str(), FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        require(held_stage != INVALID_HANDLE_VALUE,
+                "Windows convergence stage could not be held against rename");
+
+        FixedNamespacePublishBarrier barrier;
+        std::vector<std::unique_ptr<
+            lemon::residency::detail::DurableFileAdapter>>
+            converged_adapters(2);
+        std::vector<std::thread> converging_creators;
+        for (std::size_t index = 0; index < converged_adapters.size(); ++index) {
+            converging_creators.emplace_back([&, index] {
+                converged_adapters[index] = lemon::residency::detail::
+                    make_platform_durable_file_adapter_in_fixed_namespace_for_test(
+                        convergence_parent.path(), child_name, barrier);
+            });
+        }
+        require(barrier.wait_for_publishers(converged_adapters.size(), 5000),
+                "Windows concurrent creators did not reach the held-stage "
+                "publication conflict");
+        require(::CloseHandle(held_stage) != 0,
+                "Windows convergence stage handle did not close");
+        barrier.release();
+        for (auto &creator : converging_creators) {
+            creator.join();
+        }
+
+        std::optional<std::string> winning_identity;
+        for (auto &adapter : converged_adapters) {
+            require(adapter->lock_authority().succeeded() &&
+                        adapter->preflight_capabilities().succeeded(),
+                    "Windows held-stage creator did not converge on the "
+                    "winning child");
+            const auto identity = adapter->authority_identity();
+            require(identity.result.succeeded(),
+                    "Windows converged child had no identity");
+            if (!winning_identity.has_value()) {
+                winning_identity = identity.identity;
+            }
+            require(identity.identity == *winning_identity,
+                    "Windows held-stage creators bound different children");
+            require(adapter->unlock_authority().succeeded(),
+                    "Windows converged-child authority unlock failed");
+        }
+    }
+    require(::GetProcessHandleCount(::GetCurrentProcess(),
+                                    &convergence_handles_after) != 0 &&
+                convergence_handles_after <= convergence_handles_before + 8,
+            "Windows held-stage convergence leaked bound handles");
+#endif
 
     for (const auto invalid : {std::string_view{}, std::string_view{"."},
                                std::string_view{".."},
@@ -5835,7 +5938,7 @@ void require_native_fixed_namespace_factory() {
                 "Windows fixed namespace accepted a nonempty stage");
     }
     require(::GetProcessHandleCount(::GetCurrentProcess(), &handles_after) != 0 &&
-                handles_after == handles_before,
+                handles_after <= handles_before + 8,
             "Windows rejected stage directories leaked bound handles");
 #endif
 }

@@ -768,14 +768,20 @@ probe_native_lock_path_revalidation(std::string directory) {
 }
 
 class JournalTestStorage::Adapter final : public detail::DurableFileAdapter {
+    static std::uint64_t capture_bound_directory_identity(
+        const std::shared_ptr<State> &state, bool fixed_namespace) {
+        std::lock_guard lock(state->mutex);
+        return fixed_namespace ? state->named_directory_identity
+                               : state->directory_identity;
+    }
+
 public:
     explicit Adapter(std::shared_ptr<State> state,
                      bool fixed_namespace = false)
         : state_(std::move(state)),
           fixed_namespace_(fixed_namespace),
-          bound_directory_identity_(fixed_namespace
-                                        ? state_->named_directory_identity
-                                        : state_->directory_identity),
+          bound_directory_identity_(capture_bound_directory_identity(
+              state_, fixed_namespace_)),
           lock_handle_identity_(next_handle_identity.fetch_add(1)) {}
 
     ~Adapter() override {

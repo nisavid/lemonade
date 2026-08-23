@@ -462,6 +462,9 @@ def require_platform_source_contract() -> None:
         ADAPTER_WINDOWS.read_text(encoding="utf-8")
     )
     macos = strip_cpp_comments_and_literals(ADAPTER_MACOS.read_text(encoding="utf-8"))
+    test_support = strip_cpp_comments_and_literals(
+        TEST_SUPPORT.read_text(encoding="utf-8")
+    )
     durable = DURABLE_SOURCE.read_text(encoding="utf-8")
     authority_fence = AUTHORITY_FENCE.read_text(encoding="utf-8")
     durable_header_raw = DURABLE_HEADER.read_text(encoding="utf-8")
@@ -1027,8 +1030,11 @@ enum class JournalQuiescence { Unconfirmed, Confirmed, Assumed };
     require_fixed_namespace_factory_contract(
         adapter_header, common, posix, macos, windows
     )
+    require_windows_fixed_namespace_convergence_mutants(windows)
     require_windows_bound_directory_factory(windows)
     require_windows_bound_directory_factory_mutants(windows)
+    require_test_storage_identity_capture_contract(test_support)
+    require_test_storage_identity_capture_mutant(test_support)
     require_transaction_helper_contract(all_adapter_sources)
     require_bounded_read_helper_contract(f"{adapter_header}\n{all_adapter_sources}")
     require_close_read_once_contract(all_adapter_sources)
@@ -5972,12 +5978,19 @@ def require_fixed_namespace_factory_contract(
         ):
             raise AssertionError(f"{label} fixed namespace follows its child")
 
-    factories = function_bodies(
+    factories = function_bodies(windows, "make_windows_fixed_namespace_adapter")
+    public_factories = function_bodies(
         windows, "make_platform_durable_file_adapter_in_fixed_namespace"
     )
     binders = function_bodies(windows, "bind_windows_directory")
     emptiness_checks = function_bodies(windows, "windows_directory_is_empty")
-    if len(factories) != 1 or len(binders) != 1 or len(emptiness_checks) != 1:
+    if (
+        len(factories) != 1
+        or len(public_factories) != 1
+        or len(binders) != 1
+        or len(emptiness_checks) != 1
+        or "make_windows_fixed_namespace_adapter" not in public_factories[0]
+    ):
         raise AssertionError("Windows fixed-namespace seams are not unique")
     factory = factories[0]
     binder = binders[0]
@@ -6054,6 +6067,129 @@ def require_fixed_namespace_factory_contract(
         factory,
     ):
         raise AssertionError("Windows fixed namespace can skip a bound-stage close")
+
+    require_windows_fixed_namespace_convergence_contract(windows)
+
+
+def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
+    factories = function_bodies(source, "make_windows_fixed_namespace_adapter")
+    if len(factories) != 1:
+        raise AssertionError("Windows fixed-namespace convergence seam is not unique")
+    factory = factories[0]
+    compact = compact_cpp(factory)
+    required = (
+        "fixed_namespace_convergence_attempts",
+        "yield_fixed_namespace_convergence",
+        "WindowsDirectoryBindStatus::Retry",
+        "WindowsStageCleanupStatus::Retry",
+        "after_publish_attempt(attempt,moved)",
+    )
+    if not all(token in compact for token in required):
+        raise AssertionError("Windows fixed namespace omits bounded convergence")
+    if (
+        re.search(
+            r"for\s*\([^;]*\battempt\b[^;]*;\s*"
+            r"\battempt\s*<\s*fixed_namespace_convergence_attempts\s*;",
+            factory,
+        )
+        is None
+    ):
+        raise AssertionError("Windows fixed namespace does not bound its retries")
+    if factory.count("bind_windows_directory(child)") < 2:
+        raise AssertionError("Windows fixed namespace does not bind the winner")
+    if factory.count("yield_fixed_namespace_convergence();") < 2:
+        raise AssertionError("Windows fixed namespace spins during convergence")
+
+
+def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
+    def rejected(mutant: str, name: str) -> None:
+        try:
+            require_windows_fixed_namespace_convergence_contract(mutant)
+        except AssertionError:
+            return
+        raise AssertionError(
+            f"Windows fixed-namespace convergence accepted {name} mutant"
+        )
+
+    rejected(
+        replace_unique_function_body(
+            source,
+            "make_windows_fixed_namespace_adapter",
+            lambda body: body.replace(
+                "attempt < fixed_namespace_convergence_attempts", "attempt < 1", 1
+            ),
+        ),
+        "one-shot",
+    )
+    rejected(
+        replace_unique_function_body(
+            source,
+            "make_windows_fixed_namespace_adapter",
+            lambda body: body.replace("yield_fixed_namespace_convergence();", ""),
+        ),
+        "busy-spin",
+    )
+
+    def skip_winner_rebind(body: str) -> str:
+        target = "bind_windows_directory(child)"
+        occurrence = body.rfind(target)
+        if occurrence < 0:
+            return body
+        return (
+            body[:occurrence]
+            + "WindowsDirectoryBinding{}"
+            + body[occurrence + len(target) :]
+        )
+
+    rejected(
+        replace_unique_function_body(
+            source,
+            "make_windows_fixed_namespace_adapter",
+            skip_winner_rebind,
+        ),
+        "winner-rebind",
+    )
+
+
+def require_test_storage_identity_capture_contract(source: str) -> None:
+    helpers = [
+        body
+        for body in function_bodies(source, "capture_bound_directory_identity")
+        if "state->named_directory_identity" in body
+        and "state->directory_identity" in body
+    ]
+    if len(helpers) != 1:
+        raise AssertionError("fake storage identity capture seam is not unique")
+    helper = helpers[0]
+    compact_helper = compact_cpp(helper)
+    lock_at = compact_helper.find("std::lock_guardlock(state->mutex)")
+    named_at = compact_helper.find("state->named_directory_identity")
+    directory_at = compact_helper.find("state->directory_identity")
+    if not 0 <= lock_at < named_at < directory_at:
+        raise AssertionError("fake storage captures its bound identity without locking")
+    if (
+        "bound_directory_identity_(capture_bound_directory_identity("
+        "state_,fixed_namespace_))" not in compact_cpp(source)
+    ):
+        raise AssertionError(
+            "fake adapter constructor bypasses locked identity capture"
+        )
+
+
+def require_test_storage_identity_capture_mutant(source: str) -> None:
+    mutant, replacements = re.subn(
+        r"std::lock_guard\s+lock\s*\(\s*state->mutex\s*\)\s*;",
+        "",
+        source,
+        count=1,
+    )
+    if replacements != 1:
+        raise AssertionError("fake storage identity lock mutation target drifted")
+    try:
+        require_test_storage_identity_capture_contract(mutant)
+    except AssertionError:
+        return
+    raise AssertionError("fake storage identity capture accepted an unlocked mutant")
 
 
 def require_windows_bound_directory_factory_mutants(source: str) -> None:
