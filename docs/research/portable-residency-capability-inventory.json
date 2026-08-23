@@ -4602,7 +4602,7 @@
             "required": true
           },
           "safety_margin_claims": {
-            "type": "local_overlay_claim_closure",
+            "type": "local_overlay_safety_margin_claim_closure",
             "required": true
           },
           "confidence_basis_points": {
@@ -4610,7 +4610,7 @@
             "required": true
           },
           "qualified_at": {
-            "type": "rfc3339",
+            "type": "local_overlay_timestamp",
             "required": true
           },
           "expires_at": {
@@ -4802,7 +4802,7 @@
             "required": true
           },
           "activated_at": {
-            "type": "rfc3339",
+            "type": "local_overlay_timestamp",
             "required": true
           },
           "expires_at": {
@@ -4905,7 +4905,7 @@
             "required": true
           },
           "observed_at": {
-            "type": "rfc3339",
+            "type": "local_overlay_timestamp",
             "required": true
           },
           "fresh_until": {

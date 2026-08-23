@@ -65,6 +65,14 @@ LOCAL_OVERLAY_CONSTRAINT_KINDS = (
     "npu_exclusive",
     "ownership",
 )
+LOCAL_OVERLAY_UTC_SECOND_PATTERN = (
+    r"^(?:(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|"
+    r"[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|"
+    r"(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|"
+    r"(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|"
+    r"(?:0[48]|[2468][048]|[13579][26])00)-02-29)"
+    r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+)
 REQUIRED_SCHEMA_KEYWORDS = (
     "x-max-utf8-bytes",
     "x-nfc",
@@ -215,6 +223,33 @@ def _local_overlay_claim_closure() -> dict[str, Any]:
         "prefixItems": list(families),
         "items": False,
         "x-canonical-order": True,
+    }
+
+
+def _local_overlay_safety_margin_claim_closure() -> dict[str, Any]:
+    return {
+        "allOf": [
+            {"$ref": "#/$defs/claim_closure"},
+            {
+                "contains": {
+                    "type": "object",
+                    "properties": {"completeness": {"const": "bounded"}},
+                    "required": ["completeness"],
+                },
+                "minContains": 1,
+            },
+        ]
+    }
+
+
+def _local_overlay_timestamp() -> dict[str, Any]:
+    return {
+        "type": "string",
+        "format": "date-time",
+        "minLength": 20,
+        "maxLength": 20,
+        "pattern": LOCAL_OVERLAY_UTC_SECOND_PATTERN,
+        "x-max-utf8-bytes": 20,
     }
 
 
@@ -399,19 +434,21 @@ def _local_overlay_definitions(registry: Mapping[str, Any]) -> dict[str, Any]:
         "claim_closure": _local_overlay_claim_closure(),
         "decision_trace_reference": _fixed_lower_hex(64),
         "deployment_identity": _fixed_lower_hex(64),
-        "expiry": {"type": "string", "format": "date-time"},
+        "expiry": {"$ref": "#/$defs/timestamp"},
         "method_identity": _local_overlay_method_identity(registry),
         "object_status": {"const": "qualified"},
         "previous_root_reference": {"oneOf": [{"type": "null"}, _fixed_lower_hex(64)]},
         "root_transition": _string_schema(
             values=("qualification", "rollback"), max_length=len("qualification")
         ),
+        "safety_margin_claim_closure": _local_overlay_safety_margin_claim_closure(),
         "schema_version": _object(
             {"major": {"const": 1}, "minor": {"const": 0}},
             ("major", "minor"),
         ),
         "selector_identity": _local_overlay_selector_identity(registry),
         "source_generations": _local_overlay_source_generations(),
+        "timestamp": _local_overlay_timestamp(),
     }
 
 
@@ -438,9 +475,11 @@ def _local_overlay_field_schema(
         "local_overlay_object_status": "object_status",
         "local_overlay_previous_root_reference": "previous_root_reference",
         "local_overlay_root_transition": "root_transition",
+        "local_overlay_safety_margin_claim_closure": "safety_margin_claim_closure",
         "local_overlay_schema_version": "schema_version",
         "local_overlay_selector_identity": "selector_identity",
         "local_overlay_source_generations": "source_generations",
+        "local_overlay_timestamp": "timestamp",
     }
     definition = definitions.get(spec["type"])
     return None if definition is None else {"$ref": f"#/$defs/{definition}"}
@@ -1398,6 +1437,7 @@ def _local_overlay_field_example(
         "local_overlay_object_status": "qualified",
         "local_overlay_previous_root_reference": None,
         "local_overlay_root_transition": "qualification",
+        "local_overlay_safety_margin_claim_closure": _local_overlay_claim_example(),
         "local_overlay_schema_version": {"major": 1, "minor": 0},
         "local_overlay_selector_identity": _local_overlay_selector_example(),
         "local_overlay_source_generations": {
@@ -1409,6 +1449,7 @@ def _local_overlay_field_example(
             "topology": 4,
             "workload": 7,
         },
+        "local_overlay_timestamp": "2026-01-01T00:00:00Z",
     }
     if field_type not in examples:
         return False, None

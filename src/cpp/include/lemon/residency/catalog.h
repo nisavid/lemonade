@@ -50,6 +50,38 @@ struct CompatibilityCatalogSelector {
     std::vector<ConstraintKind> constraints;
 };
 
+inline constexpr bool
+operation_template_accepts(OperationTemplate operation_template,
+                           OperationKind operation_kind) noexcept {
+    switch (operation_template) {
+    case OperationTemplate::Adm:
+    case OperationTemplate::Lfr:
+    case OperationTemplate::Npc:
+        return operation_kind == OperationKind::Admission;
+    case OperationTemplate::Pre:
+        return operation_kind == OperationKind::PressureReclamation;
+    case OperationTemplate::Sta:
+        return operation_kind == OperationKind::StartupLoad;
+    case OperationTemplate::Rec:
+        return operation_kind == OperationKind::ServiceTermination ||
+               operation_kind == OperationKind::DeadBackendPruning ||
+               operation_kind == OperationKind::SameEpochRecoveryCleanup ||
+               operation_kind == OperationKind::PriorEpochOwnerCleanup ||
+               operation_kind ==
+                   OperationKind::ArtifactScopeRecoveryCleanup;
+    case OperationTemplate::Unl:
+        return operation_kind == OperationKind::ExplicitUnload ||
+               operation_kind == OperationKind::ForceUnload;
+    case OperationTemplate::Pin:
+        return operation_kind == OperationKind::SavedPinMutation ||
+               operation_kind == OperationKind::RuntimePinMutation ||
+               operation_kind == OperationKind::LegacyPinBatch ||
+               operation_kind ==
+                   OperationKind::ResidentStateRecoveryCleanup;
+    }
+    return false;
+}
+
 struct CatalogSelection {
     CatalogSelectionStatus status = CatalogSelectionStatus::Missing;
     std::optional<PromotionUnitId> candidate_promotion_unit_id;

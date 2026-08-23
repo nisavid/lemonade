@@ -1,9 +1,15 @@
 #include "lemon/residency/local_overlay.h"
 
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -13,6 +19,7 @@
 namespace {
 
 using namespace lemon::residency;
+using json = nlohmann::json;
 
 void require(bool condition, std::string_view message) {
     if (!condition) {
@@ -197,6 +204,116 @@ std::string tamper_once(std::string bytes, std::string_view needle,
     return bytes;
 }
 
+std::set<std::string> object_keys(const json &value) {
+    require(value.is_object(), "schema compatibility value is not an object");
+    std::set<std::string> result;
+    for (auto member = value.begin(); member != value.end(); ++member) {
+        result.insert(member.key());
+    }
+    return result;
+}
+
+std::set<std::string> string_set(const json &value) {
+    require(value.is_array(), "schema required set is not an array");
+    std::set<std::string> result;
+    for (const auto &member : value) {
+        require(member.is_string(), "schema required member is not a string");
+        result.insert(member.get<std::string>());
+    }
+    return result;
+}
+
+json load_json(const std::filesystem::path &path) {
+    std::ifstream input(path);
+    require(input.good(), "generated schema could not be opened");
+    json result;
+    input >> result;
+    return result;
+}
+
+void require_document_matches_schema(const json &document,
+                                     const json &schema,
+                                     std::string_view label,
+                                     bool optional_fields_allowed = false) {
+    const auto document_fields = object_keys(document);
+    require(document_fields == string_set(schema.at("required")),
+            std::string(label) +
+                " codec fields differ from generated required fields");
+    const auto schema_fields = object_keys(schema.at("properties"));
+    require(optional_fields_allowed
+                ? std::includes(schema_fields.begin(), schema_fields.end(),
+                                document_fields.begin(),
+                                document_fields.end())
+                : document_fields == schema_fields,
+            std::string(label) +
+                " codec fields differ from generated schema properties");
+}
+
+void require_generated_schema_compatibility(
+    const std::filesystem::path &repository_root) {
+    auto profile = seal_profiling_input(profiling_draft());
+    require(profile.accepted(), "schema fixture profile was rejected");
+    auto overlay = seal_local_overlay(overlay_draft(*profile.candidate));
+    require(overlay.accepted(), "schema fixture overlay was rejected");
+    auto root = seal_overlay_activation_root(root_draft(*overlay.candidate));
+    require(root.accepted(), "schema fixture root was rejected");
+
+    const auto schema_directory =
+        repository_root / "docs/api/schemas/residency";
+    const auto profile_schema = load_json(
+        schema_directory / "profiling_input_envelope.schema.json");
+    const auto overlay_schema = load_json(
+        schema_directory / "deployment_local_overlay_object.schema.json");
+    const auto root_schema = load_json(
+        schema_directory / "overlay_activation_root.schema.json");
+    const auto profile_document =
+        json::parse(profile.candidate->canonical_bytes());
+    const auto overlay_document =
+        json::parse(overlay.candidate->canonical_bytes());
+    const auto root_document = json::parse(root.candidate->canonical_bytes());
+
+    require_document_matches_schema(profile_document, profile_schema,
+                                    "profiling input");
+    require_document_matches_schema(overlay_document, overlay_schema,
+                                    "local overlay");
+    require_document_matches_schema(root_document, root_schema,
+                                    "activation root");
+    require_document_matches_schema(
+        profile_document.at("selector"),
+        profile_schema.at("$defs").at("selector_identity"),
+        "profiling selector");
+    require_document_matches_schema(
+        profile_document.at("generations"),
+        profile_schema.at("$defs").at("source_generations"),
+        "profiling source generations");
+    require_document_matches_schema(
+        overlay_document.at("selector"),
+        overlay_schema.at("$defs").at("selector_identity"),
+        "overlay selector");
+    require_document_matches_schema(
+        overlay_document.at("method"),
+        overlay_schema.at("$defs").at("method_identity"),
+        "overlay method", true);
+}
+
+std::string without_positive_safety_margin(std::string bytes) {
+    const auto field = bytes.find("\"safety_margin_claims\":[");
+    require(field != std::string::npos,
+            "canonical overlay has no safety-margin field");
+    const std::string bounded =
+        "{\"completeness\":\"bounded\",\"entries\":[{\"amount\":256,"
+        "\"constraint_id\":\"gpu/gtt\",\"unit\":\"bytes\"}],"
+        "\"family\":\"consumable_capacity\"}";
+    const std::string known_zero =
+        "{\"completeness\":\"known_zero\",\"entries\":[],"
+        "\"family\":\"consumable_capacity\"}";
+    const auto margin = bytes.find(bounded, field);
+    require(margin != std::string::npos,
+            "canonical overlay has no positive safety-margin entry");
+    bytes.replace(margin, bounded.size(), known_zero);
+    return bytes;
+}
+
 void require_public_shape() {
     static_assert(
         !std::is_default_constructible_v<ParsedProfilingInputEnvelope>);
@@ -310,6 +427,10 @@ void require_overlay_object_codec() {
                          "\"confidence_basis_points\":9800")),
                      OverlayContractStatus::DigestMismatch,
                      "overlay accepted a stale checksum");
+    require_rejected(
+        parse_local_overlay(without_positive_safety_margin(canonical)),
+        OverlayContractStatus::InvalidClaimClosure,
+        "overlay parser accepted a zero safety margin");
 
     auto wrong_operation = overlay_draft(*profile.candidate);
     wrong_operation.method.operation_kind = OperationKind::ExplicitUnload;
@@ -331,11 +452,17 @@ void require_overlay_object_codec() {
         OverlayContractStatus::IncompleteIdentity,
         "overlay accepted an architecture method without its predicate");
 
+    auto zero_slack = overlay_draft(*profile.candidate);
+    zero_slack.safety_margin_claims = claims(0);
+    require_rejected(seal_local_overlay(std::move(zero_slack)),
+                     OverlayContractStatus::InvalidClaimClosure,
+                     "overlay seal accepted a zero safety margin");
+
     auto overflowing_claims = overlay_draft(*profile.candidate);
     overflowing_claims.bound_claims =
         claims(std::numeric_limits<std::uint64_t>::max());
     overflowing_claims.uncertainty_claims = claims(1);
-    overflowing_claims.safety_margin_claims = claims(0);
+    overflowing_claims.safety_margin_claims = claims(1);
     require_rejected(seal_local_overlay(std::move(overflowing_claims)),
                      OverlayContractStatus::ClaimArithmeticOverflow,
                      "overlay accepted overflowing conservative claims");
@@ -419,11 +546,16 @@ void require_activation_root_codec() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    require(argc <= 2, "unexpected local-overlay test argument");
+    const auto repository_root =
+        argc == 2 ? std::filesystem::path(argv[1])
+                  : std::filesystem::current_path();
     require_public_shape();
     require_profiling_input_codec();
     require_overlay_object_codec();
     require_activation_root_codec();
+    require_generated_schema_compatibility(repository_root);
     std::cout << "residency local-overlay contract passed\n";
     return 0;
 }
