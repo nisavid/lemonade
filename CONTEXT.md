@@ -240,7 +240,7 @@ The deterministic checked sum of the current, provisional, retained, and quarant
 _Avoid_: Treating the overlay as mutable authority or adding mutually exclusive alternatives instead of taking their maximum.
 
 **Residency capability level**:
-The evidence-backed status of one exact runtime cell or evidence-only compatibility contract. **Validated** means end-to-end physical tests of the runtime operation; **modeled** means primary-evidence architecture and every applicable signal or contract proof without full physical validation; **fallback-only** means a cataloged concrete fallback or refusal without full capacity automation; **unsupported** means no safe residency behavior. A compatibility contract never gains live authority merely from its level.
+The evidence-backed status recorded by the shared residency capability catalog for one exact runtime cell or evidence-only compatibility contract. **Validated** means end-to-end physical tests of the runtime operation; **modeled** means primary-evidence architecture and every applicable signal or contract proof without full physical validation; **fallback-only** means a cataloged concrete fallback or refusal without full capacity automation; **unsupported** means no safe residency behavior. A compatibility contract never gains live authority merely from its level.
 _Avoid_: Calling design coverage validation, implying that fallback-only behavior provides capacity-aware automation, or treating a modeled pressure-reclamation cell as authority for a destructive automatic action.
 
 **Residency compatibility promotion contract**:
@@ -279,6 +279,22 @@ _Avoid_: Treating accepted design, an upstream-adjacent mechanism, or passing sy
 The collection of per-operation capability levels for a platform and backend, including admission and, where applicable, measured-pressure reclamation; a non-applicable operation remains explicit. A combination-wide label may summarize the profile for display but is not a policy input.
 _Avoid_: Assuming admission and external-pressure handling have the same signal availability or evidence.
 
+**Residency deployment identity**:
+The stable local authority boundary within which deployment-qualified residency methods may be activated and reused. It persists across server restarts but not across a copied overlay store, and it does not identify a client, process, machine, or release.
+_Avoid_: Treating mutable configuration, a cache copy, or a release identity as the deployment identity.
+
+**Deployment-local residency profile overlay**:
+A deployment-scoped, content-addressed qualification derived from one isolated, attributed residency profiling transaction and the bundled residency capability catalog. It may establish or tighten a method only for its closed identity and never changes the shared catalog, its evidence ceiling, capability or delivery labels, or release authority.
+_Avoid_: Confusing it with the conservative claim overlay, generalizing an exact local qualification, treating local calibration as a release revision, or exporting it automatically.
+
+**Residency profiling transaction**:
+An exclusive, server-owned qualification of one exact operation and identity whose workload, baseline, and lifecycle are completely isolated and attributed. Unattributed external demand prevents it from establishing a local overlay.
+_Avoid_: Treating an ordinary concurrent benchmark, global memory sample, or partially attributed run as qualification evidence.
+
+**Deployment-qualified residency method**:
+A local-only method result established for one exact operation and closed residency deployment identity by a complete profiling transaction. It does not change the shared capability level or footprint confidence class and does not apply to another model, device, backend, configuration, workload, or operation family.
+_Avoid_: Treating local qualification as shared release authority or allowing it to bypass protection, ownership, recovery, claim-completeness, or safety constraints.
+
 **Residency completeness manifest**:
 The server-built inventory of every footprint and ordinary constraint-claim family required for one resolved intent, operation, and lifecycle phase, plus every required action lease and ownership/recovery claim. Each footprint or ordinary constraint family is classified as `not_applicable`, `known_zero`, `bounded`, or `unknown` before any side effect. Action leases and ownership/recovery claims must be explicitly present but do not create new ordinary claim-algebra kinds.
 _Avoid_: Treating an unobserved family as absent or letting a complete memory estimate substitute for count, compatibility, ownership, or action-lease completeness.
@@ -304,7 +320,7 @@ A cataloged, operation-scoped composition of fresh capacity, usage, budget, proc
 _Avoid_: Treating every signal as device-wide headroom, blindly adding resident claims to a device-wide usage counter, or claiming another application's demand as Lemonade-owned capacity.
 
 **Effective residency mode**:
-The behavior currently available for one residency operation and affected domain set after taking the conservative meet of configured intent, delivery state, accepted capability level, live signal health, evidence-liveness authority, and recovery readiness: capacity-aware automation, a declared concrete fallback, or refusal.
+The behavior currently available for one residency operation and affected domain set after taking the conservative meet of configured intent, delivery state, the applicable shared catalog cell or deployment-qualified residency method, live signal health, evidence-liveness authority, and recovery readiness: capacity-aware automation, a declared concrete fallback, or refusal.
 _Avoid_: Treating a validated capability level as proof that implementation, sensors, evidence, or recovery are currently available and healthy, or exposing a bare mode named `fallback` instead of the cataloged concrete mode and rule identifier.
 
 **Configured residency intent**:
@@ -314,6 +330,10 @@ _Avoid_: Copying raw configuration keys into explanations or using configured in
 **Residency authority root**:
 The atomically published authority-root candidate that makes one validated residency generation effective through an external compare-and-swap boundary.
 _Avoid_: Treating a candidate, parsed document, or staged file as published authority, or letting a degraded prior root authorize new dependent work.
+
+**Deployment-local overlay activation root**:
+A deployment-scoped residency authority root whose generation identifies the one complete residency profile overlay currently active for that residency deployment. Rollback advances the root to select a compatible earlier overlay without rewriting history or changing shared catalog authority.
+_Avoid_: Treating an overlay object's existence as activation, accepting a root from another deployment, or treating local activation as a second catalog authority.
 
 **Residency authority-root candidate**:
 One canonical, checksummed direct generation over an opaque validated journal-history head. It remains non-authorizing until atomic publication succeeds.
@@ -338,6 +358,10 @@ _Avoid_: Letting a raw digest authorize quarantine or substituting artifact-quar
 **Residency explanation revision**:
 An immutable, bounded projection committed with an authoritative lifecycle transition. It supplies the current operation phase, outcome, reasons, capability, effective mode, evidence, actions, and retention state to APIs and logs.
 _Avoid_: Rebuilding policy in a client, treating an explanation as action authority, or publishing a lifecycle transition without its matching revision.
+
+**Residency method decision trace**:
+The immutable method-selection provenance referenced by a residency explanation revision. It binds applicable methods and rejection reasons to exact input identities, bound components, uncertainty and safety margin, calibration revision, selected method, effective result, and fallback or invalidation reason.
+_Avoid_: Treating raw profiling traces, a client reconstruction, or the trace itself as lifecycle authority.
 
 **Residency status capability**:
 A bounded bearer capability issued independently for one operation, credential principal, caller/request scope, endpoint, and compact-status audience. It expires after 24 hours or the operation's earlier detail expiry, can be revoked by the administrator, principal, or subject lifecycle, and persists only as signed scope metadata plus a hash.
@@ -495,6 +519,7 @@ _Avoid_: Opening upstream-facing artifacts without the user's explicit direction
 - A **residency memory domain** is the capacity and pressure boundary for model residency. Hatchery's **GTT/shared GPU memory** is one such domain; its **host-memory safety floor** constrains the same physical system memory without becoming model-footprint accounting or another capacity pool.
 - A **residency plan** must satisfy every **residency constraint**. Reclaiming one shared allocation may improve both GTT headroom and the host floor without creating two independently reclaimable allocations.
 - A **residency capability profile** records evidence per operation and domain set; the **effective residency mode** for each cell also depends on the current health of that operation's required signals.
+- A **deployment-local residency profile overlay** can establish a **deployment-qualified residency method** without changing the shared **residency capability catalog** or **residency capability level**. Its **deployment-local overlay activation root** is scoped by the **residency deployment identity**, and its **residency method decision trace** supplies the method-specific provenance referenced by the **residency explanation revision**.
 - **Configured residency intent** records requested policy; the **effective residency mode** records the concrete behavior currently authorized. A catalog fallback is a concrete mode plus a stable rule identifier, never a bare mode named `fallback`.
 - A **residency authority root** makes canonical configuration or pin preference effective. Its journals and migrations publish through generation-bound transactions; absent or degraded authority fails closed for dependent work.
 - A **residency completeness manifest** covers every required footprint and ordinary or lifecycle claim. Its **footprint confidence class** comes from reviewed analytic, enforced, or calibration evidence and never replaces whole-claim completeness.
