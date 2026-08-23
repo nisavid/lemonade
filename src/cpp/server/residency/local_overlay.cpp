@@ -323,35 +323,6 @@ json schema_document(SchemaVersion schema) {
     return json{{"major", schema.major}, {"minor", schema.minor}};
 }
 
-bool template_accepts(OperationTemplate operation_template,
-                      OperationKind operation_kind) noexcept {
-    switch (operation_template) {
-    case OperationTemplate::Adm:
-    case OperationTemplate::Lfr:
-    case OperationTemplate::Npc:
-        return operation_kind == OperationKind::Admission;
-    case OperationTemplate::Pre:
-        return operation_kind == OperationKind::PressureReclamation;
-    case OperationTemplate::Sta:
-        return operation_kind == OperationKind::StartupLoad;
-    case OperationTemplate::Rec:
-        return operation_kind == OperationKind::ServiceTermination ||
-               operation_kind == OperationKind::DeadBackendPruning ||
-               operation_kind == OperationKind::SameEpochRecoveryCleanup ||
-               operation_kind == OperationKind::PriorEpochOwnerCleanup ||
-               operation_kind == OperationKind::ArtifactScopeRecoveryCleanup;
-    case OperationTemplate::Unl:
-        return operation_kind == OperationKind::ExplicitUnload ||
-               operation_kind == OperationKind::ForceUnload;
-    case OperationTemplate::Pin:
-        return operation_kind == OperationKind::SavedPinMutation ||
-               operation_kind == OperationKind::RuntimePinMutation ||
-               operation_kind == OperationKind::LegacyPinBatch ||
-               operation_kind == OperationKind::ResidentStateRecoveryCleanup;
-    }
-    return false;
-}
-
 OperationTemplate parse_operation_template_value(std::string_view wire) {
     const auto decoded = decode_operation_template(wire);
     if (!decoded.is_known()) {
@@ -391,8 +362,8 @@ void normalize_catalog_selector(RuntimeCatalogSelector &selector) {
         reject(OverlayContractStatus::UnknownValue,
                "catalog selector contains an unknown closed value");
     }
-    if (!template_accepts(selector.operation_template,
-                          selector.operation_kind)) {
+    if (!operation_template_accepts(selector.operation_template,
+                                    selector.operation_kind)) {
         reject(OverlayContractStatus::InvalidValue,
                "catalog selector operation template and kind are inconsistent");
     }
@@ -1098,6 +1069,22 @@ struct NormalizedOverlayClaims {
     std::vector<ClaimFamilyClosure> conservative;
 };
 
+bool has_positive_bounded_entry(const CheckedClaimSet &claims) {
+    for (std::size_t index = 0; index < claim_family_count; ++index) {
+        const auto family = family_at(index);
+        if (claims.completeness(family) != ClaimCompleteness::Bounded) {
+            continue;
+        }
+        const auto &entries = claims.entries(family);
+        if (std::any_of(
+                entries.begin(), entries.end(),
+                [](const ClaimTotal &entry) { return entry.amount > 0; })) {
+            return true;
+        }
+    }
+    return false;
+}
+
 NormalizedOverlayClaims
 normalize_overlay_claims(LocalOverlayObjectDraft &draft) {
     const auto bound = checked_claims(std::move(draft.bound_claims));
@@ -1105,6 +1092,11 @@ normalize_overlay_claims(LocalOverlayObjectDraft &draft) {
         checked_claims(std::move(draft.uncertainty_claims));
     const auto safety_margin =
         checked_claims(std::move(draft.safety_margin_claims));
+    if (!has_positive_bounded_entry(safety_margin)) {
+        reject(
+            OverlayContractStatus::InvalidClaimClosure,
+            "safety-margin claim closure must contain positive bounded slack");
+    }
     const auto bound_and_uncertainty = added_claims(bound, uncertainty);
     const auto conservative =
         added_claims(bound_and_uncertainty, safety_margin);

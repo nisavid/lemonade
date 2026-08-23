@@ -4597,11 +4597,11 @@
           },
           "qualified_at": {
             "required": true,
-            "type": "rfc3339"
+            "type": "local_overlay_timestamp"
           },
           "safety_margin_claims": {
             "required": true,
-            "type": "local_overlay_claim_closure"
+            "type": "local_overlay_safety_margin_claim_closure"
           },
           "schema": {
             "required": true,
@@ -4780,7 +4780,7 @@
         "fields": {
           "activated_at": {
             "required": true,
-            "type": "rfc3339"
+            "type": "local_overlay_timestamp"
           },
           "authority_status": {
             "required": true,
@@ -4895,7 +4895,7 @@
           },
           "observed_at": {
             "required": true,
-            "type": "rfc3339"
+            "type": "local_overlay_timestamp"
           },
           "predictor_contract_sha256": {
             "required": true,
@@ -7219,6 +7219,6 @@
     }
   ],
   "schema": "residency.profiles/1.0",
-  "selection_registry_sha256": "a9569b5f499e4e8e8d9acff9657f1f4789a379a15fe61fe424c793d91708023d",
+  "selection_registry_sha256": "5bea79a38e9b2c3755dbda82d8a890dd3ce1b7a14360f1720914b4028c6b11ca",
   "source_support_baseline": "a505bbc702cc1fcd44ef73c44defabc98c36d505"
 }

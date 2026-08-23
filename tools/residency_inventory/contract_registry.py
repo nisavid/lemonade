@@ -20,7 +20,7 @@ from .contract import (
 )
 
 EXPECTED_REGISTRY_DIGEST = (
-    "115175ace80c298c19628dc396dcc2f36fc5273a550b847e2a3bb814409c37cc"
+    "6bdeb883210c78455ee493360e4e7f23345ca10417a805d87666612e0f633423"
 )
 EXPECTED_REGISTRY_KEYS = [
     "schema",
@@ -343,9 +343,11 @@ SCHEMA_FIELD_TYPES = {
     "local_overlay_positive_uint64",
     "local_overlay_required_true",
     "local_overlay_root_transition",
+    "local_overlay_safety_margin_claim_closure",
     "local_overlay_schema_version",
     "local_overlay_selector_identity",
     "local_overlay_source_generations",
+    "local_overlay_timestamp",
     "nullable_enum_ref",
     "nullable_opaque",
     "nullable_reason_code",

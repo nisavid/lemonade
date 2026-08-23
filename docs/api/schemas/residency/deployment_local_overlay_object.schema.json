@@ -406,8 +406,7 @@
       "x-max-utf8-bytes": 64
     },
     "expiry": {
-      "format": "date-time",
-      "type": "string"
+      "$ref": "#/$defs/timestamp"
     },
     "method_identity": {
       "additionalProperties": false,
@@ -561,6 +560,27 @@
       "maxLength": 13,
       "minLength": 1,
       "type": "string"
+    },
+    "safety_margin_claim_closure": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/claim_closure"
+        },
+        {
+          "contains": {
+            "properties": {
+              "completeness": {
+                "const": "bounded"
+              }
+            },
+            "required": [
+              "completeness"
+            ],
+            "type": "object"
+          },
+          "minContains": 1
+        }
+      ]
     },
     "schema_version": {
       "additionalProperties": false,
@@ -1088,6 +1108,14 @@
         "workload"
       ],
       "type": "object"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "maxLength": 20,
+      "minLength": 20,
+      "pattern": "^(?:(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[48]|[2468][048]|[13579][26])00)-02-29)T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$",
+      "type": "string",
+      "x-max-utf8-bytes": 20
     }
   },
   "$id": "residency.deployment_local_overlay_object/1.0",
@@ -1129,11 +1157,10 @@
       "x-max-utf8-bytes": 64
     },
     "qualified_at": {
-      "format": "date-time",
-      "type": "string"
+      "$ref": "#/$defs/timestamp"
     },
     "safety_margin_claims": {
-      "$ref": "#/$defs/claim_closure"
+      "$ref": "#/$defs/safety_margin_claim_closure"
     },
     "schema": {
       "$ref": "#/$defs/schema_version"

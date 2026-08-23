@@ -830,63 +830,6 @@ def require_local_overlay_schemas(
         "deployment_local_overlay_object",
         "overlay_activation_root",
     }
-    expected_fields = {
-        "profiling_input_envelope": {
-            "attributed_claims",
-            "attribution_complete",
-            "baseline_observation_sha256",
-            "checksum_sha256",
-            "deployment_id",
-            "external_demand_absent",
-            "fresh_until",
-            "generations",
-            "lifecycle_release_verified",
-            "max_clock_skew_milliseconds",
-            "observation_contract_sha256",
-            "observed_at",
-            "predictor_contract_sha256",
-            "profiling_transaction_id",
-            "release_observation_sha256",
-            "schema",
-            "selector",
-            "sequence",
-            "workload_observation_sha256",
-        },
-        "deployment_local_overlay_object": {
-            "bound_claims",
-            "checksum_sha256",
-            "confidence_basis_points",
-            "decision_trace_sha256",
-            "deployment_id",
-            "expires_at",
-            "method",
-            "profiling_input_sha256",
-            "qualified_at",
-            "safety_margin_claims",
-            "schema",
-            "selector",
-            "sequence",
-            "status",
-            "uncertainty_claims",
-        },
-        "overlay_activation_root": {
-            "activated_at",
-            "authority_status",
-            "checksum_sha256",
-            "decision_trace_sha256",
-            "deployment_id",
-            "expires_at",
-            "generation",
-            "previous_root_sha256",
-            "schema",
-            "selected_method_sha256",
-            "selected_overlay_sequence",
-            "selected_overlay_sha256",
-            "selected_selector_sha256",
-            "sequence_high_water",
-            "transition",
-        },
-    }
     require(names <= set(schemas), "local-overlay schema set is incomplete")
     for name in names:
         schema = schemas[name]
@@ -895,56 +838,9 @@ def require_local_overlay_schemas(
             f"{name} is not a closed document",
         )
         require(
-            set(schema["properties"]) == expected_fields[name],
-            f"{name} drifted from the canonical codec wire",
+            set(schema["properties"]) == set(schema["required"]),
+            f"{name} contains optional top-level wire fields",
         )
-
-    selector = schemas["profiling_input_envelope"]["$defs"]["selector_identity"]
-    require(
-        set(selector["properties"])
-        == {
-            "backend_build_sha256",
-            "canonical_model_id",
-            "catalog",
-            "catalog_sha256",
-            "configuration_sha256",
-            "dependency_set_sha256",
-            "device_identity_sha256",
-            "driver_identity_sha256",
-            "model_artifact_sha256",
-            "operation_contract_sha256",
-            "topology_sha256",
-            "workload_sha256",
-        },
-        "selector schema drifted from the canonical codec wire",
-    )
-    generations = schemas["profiling_input_envelope"]["$defs"]["source_generations"]
-    require(
-        set(generations["properties"])
-        == {
-            "backend",
-            "configuration",
-            "device",
-            "driver",
-            "model",
-            "topology",
-            "workload",
-        },
-        "source-generation schema drifted from the canonical codec wire",
-    )
-    method = schemas["deployment_local_overlay_object"]["$defs"]["method_identity"]
-    require(
-        set(method["properties"])
-        == {
-            "architecture_predicate_sha256",
-            "calibration_revision_sha256",
-            "method_id",
-            "method_revision_sha256",
-            "operation_kind",
-            "scope",
-        },
-        "method schema drifted from the canonical codec wire",
-    )
 
     profiling = contract_validator(
         schemas["profiling_input_envelope"], registry=resources
@@ -953,6 +849,40 @@ def require_local_overlay_schemas(
         schemas["deployment_local_overlay_object"], registry=resources
     )
     root = contract_validator(schemas["overlay_activation_root"], registry=resources)
+
+    timestamp_validators = {
+        "profiling_input_envelope": (
+            profiling,
+            ("observed_at", "fresh_until"),
+        ),
+        "deployment_local_overlay_object": (
+            overlay,
+            ("qualified_at", "expires_at"),
+        ),
+        "overlay_activation_root": (
+            root,
+            ("activated_at", "expires_at"),
+        ),
+    }
+    for schema_name, (validator, fields) in timestamp_validators.items():
+        for field in fields:
+            for invalid_timestamp in (
+                "2026-09-23T10:01:00+00:00",
+                "2026-02-29T10:01:00Z",
+                "2026-04-31T10:01:00Z",
+            ):
+                candidate = copy.deepcopy(examples[schema_name])
+                candidate[field] = invalid_timestamp
+                require(
+                    not validator.is_valid(candidate),
+                    f"{schema_name}.{field} accepted a noncanonical timestamp",
+                )
+            leap_day = copy.deepcopy(examples[schema_name])
+            leap_day[field] = "2028-02-29T23:59:59Z"
+            require(
+                validator.is_valid(leap_day),
+                f"{schema_name}.{field} rejected a canonical leap-day timestamp",
+            )
 
     incomplete = copy.deepcopy(examples["profiling_input_envelope"])
     incomplete["attribution_complete"] = False
@@ -990,6 +920,14 @@ def require_local_overlay_schemas(
     require(
         not overlay.is_valid(wrong_status),
         "overlay schema accepted a status owned by later invalidation work",
+    )
+    zero_safety_margin = copy.deepcopy(examples["deployment_local_overlay_object"])
+    for family in zero_safety_margin["safety_margin_claims"]:
+        family["completeness"] = "known_zero"
+        family["entries"] = []
+    require(
+        not overlay.is_valid(zero_safety_margin),
+        "qualified overlay accepted a zero safety margin",
     )
     exact_with_predicate = copy.deepcopy(examples["deployment_local_overlay_object"])
     exact_with_predicate["method"]["architecture_predicate_sha256"] = "a" * 64

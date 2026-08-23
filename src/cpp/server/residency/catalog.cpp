@@ -268,34 +268,6 @@ FallbackId parse_fallback_id(const json& value, std::string_view label) {
     return *decoded.known_value();
 }
 
-bool template_accepts(OperationTemplate operation_template, OperationKind operation_kind) {
-    switch (operation_template) {
-    case OperationTemplate::Adm:
-    case OperationTemplate::Lfr:
-    case OperationTemplate::Npc:
-        return operation_kind == OperationKind::Admission;
-    case OperationTemplate::Pre:
-        return operation_kind == OperationKind::PressureReclamation;
-    case OperationTemplate::Sta:
-        return operation_kind == OperationKind::StartupLoad;
-    case OperationTemplate::Rec:
-        return operation_kind == OperationKind::ServiceTermination ||
-               operation_kind == OperationKind::DeadBackendPruning ||
-               operation_kind == OperationKind::SameEpochRecoveryCleanup ||
-               operation_kind == OperationKind::PriorEpochOwnerCleanup ||
-               operation_kind == OperationKind::ArtifactScopeRecoveryCleanup;
-    case OperationTemplate::Unl:
-        return operation_kind == OperationKind::ExplicitUnload ||
-               operation_kind == OperationKind::ForceUnload;
-    case OperationTemplate::Pin:
-        return operation_kind == OperationKind::SavedPinMutation ||
-               operation_kind == OperationKind::RuntimePinMutation ||
-               operation_kind == OperationKind::LegacyPinBatch ||
-               operation_kind == OperationKind::ResidentStateRecoveryCleanup;
-    }
-    return false;
-}
-
 std::vector<std::string> parse_string_array(
     const json& value,
     std::string_view label,
@@ -322,7 +294,7 @@ std::vector<OperationKind> parse_operation_kinds(
     result.reserve(value.size());
     for (const auto& member : value) {
         const auto operation_kind = parse_operation_kind(member, label);
-        if (!template_accepts(operation_template, operation_kind)) {
+        if (!operation_template_accepts(operation_template, operation_kind)) {
             reject(
                 CatalogLoadStatus::Malformed,
                 std::string(label) + " is incompatible with its operation template");
@@ -557,7 +529,7 @@ RuntimeUnit parse_exact_cell(
     const auto operation_kind = parse_operation_kind(
         required(contract, "operation_leaf", "exact cell"),
         "exact cell operation_leaf");
-    if (!template_accepts(operation_template, operation_kind)) {
+    if (!operation_template_accepts(operation_template, operation_kind)) {
         reject(CatalogLoadStatus::Malformed, "exact cell operation is incoherent");
     }
 
@@ -771,7 +743,7 @@ CompatibilityUnit parse_compatibility_contract(
         required(contract, "operation_leaf", "compatibility contract"),
         "compatibility operation_leaf");
     if (operation_template != OperationTemplate::Npc ||
-        !template_accepts(operation_template, operation_kind)) {
+        !operation_template_accepts(operation_template, operation_kind)) {
         reject(CatalogLoadStatus::Malformed, "compatibility operation is incoherent");
     }
     require_literal(
@@ -1240,7 +1212,8 @@ CatalogSelection CatalogSnapshot::resolve(const RuntimeCatalogSelector& selector
         selector.backend_channel.empty() || selector.model_type.empty() ||
         selector.recovery.empty() || wire_name(selector.operation_template).empty() ||
         wire_name(selector.operation_kind).empty() ||
-        !template_accepts(selector.operation_template, selector.operation_kind) ||
+        !operation_template_accepts(selector.operation_template,
+                                    selector.operation_kind) ||
         !selector_profiles_valid(selector.material_profiles)) {
         return {};
     }
