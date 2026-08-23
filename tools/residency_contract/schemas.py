@@ -7,6 +7,11 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 from urllib.parse import urldefrag, urljoin
 
+from residency_inventory.contract import (
+    EXPECTED_CONSTRAINT_KINDS,
+    OPERATION_LEAVES_BY_TEMPLATE,
+)
+
 UINT64_MAX = 18_446_744_073_709_551_615
 SCHEMA_KEYS = (
     "artifact_quarantine_record",
@@ -33,38 +38,11 @@ LOCAL_OVERLAY_SCHEMA_KEYS = frozenset(
     }
 )
 LOCAL_OVERLAY_TEMPLATE_OPERATIONS = {
-    "ADM": ("admission",),
-    "LFR": ("admission",),
-    "PRE": ("pressure_reclamation",),
-    "STA": ("startup_load",),
-    "REC": (
-        "service_termination",
-        "dead_backend_pruning",
-        "same_epoch_recovery_cleanup",
-        "prior_epoch_owner_cleanup",
-        "artifact_scope_recovery_cleanup",
-    ),
-    "UNL": ("explicit_unload", "force_unload"),
-    "PIN": (
-        "saved_pin_mutation",
-        "runtime_pin_mutation",
-        "legacy_pin_batch",
-        "resident_state_recovery_cleanup",
-    ),
-    "NPC": ("admission",),
+    template: tuple(sorted(operations))
+    for template, operations in sorted(OPERATION_LEAVES_BY_TEMPLATE.items())
 }
 LOCAL_OVERLAY_OPERATION_TEMPLATES = tuple(LOCAL_OVERLAY_TEMPLATE_OPERATIONS)
-LOCAL_OVERLAY_CONSTRAINT_KINDS = (
-    "flm_type_slot",
-    "gpu_provider_resolved_capacity",
-    "gpu_shared_residency",
-    "host_effects_provider_resolved",
-    "host_memavailable_floor",
-    "model_type_pool",
-    "npu_cross_family",
-    "npu_exclusive",
-    "ownership",
-)
+LOCAL_OVERLAY_CONSTRAINT_KINDS = tuple(sorted(EXPECTED_CONSTRAINT_KINDS))
 LOCAL_OVERLAY_UTC_SECOND_PATTERN = (
     r"^(?:(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|"
     r"[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|"

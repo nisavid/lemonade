@@ -249,6 +249,7 @@ public:
     void replace_fixed_child_file(FixedAuthorityChild child,
                                   std::string bytes);
     void remove_fixed_child_file(FixedAuthorityChild child);
+    void rename_and_replace_authority_directory();
 
     void arm_fault(FaultOperation operation, FaultPosition position,
                    FaultAction action);

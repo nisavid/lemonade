@@ -296,6 +296,38 @@ void require_generated_schema_compatibility(
         "overlay method", true);
 }
 
+void emit_schema_validation_corpus() {
+    auto profile = seal_profiling_input(profiling_draft());
+    require(profile.accepted(), "schema corpus profile was rejected");
+
+    auto maximum_confidence_draft = overlay_draft(*profile.candidate);
+    maximum_confidence_draft.confidence_basis_points = 10000;
+    auto overlay = seal_local_overlay(std::move(maximum_confidence_draft));
+    require(overlay.accepted(), "maximum overlay confidence was rejected");
+
+    auto excessive_confidence_draft = overlay_draft(*profile.candidate);
+    excessive_confidence_draft.confidence_basis_points = 10001;
+    require_rejected(
+        seal_local_overlay(std::move(excessive_confidence_draft)),
+        OverlayContractStatus::InvalidValue,
+        "overlay accepted confidence above 10000 basis points");
+
+    auto root = seal_overlay_activation_root(root_draft(*overlay.candidate));
+    require(root.accepted(), "schema corpus activation root was rejected");
+
+    const json corpus = {
+        {"accepted_documents",
+         {{"deployment_local_overlay_object",
+           overlay.candidate->canonical_bytes()},
+          {"overlay_activation_root", root.candidate->canonical_bytes()},
+          {"profiling_input_envelope",
+           profile.candidate->canonical_bytes()}}},
+        {"confidence_basis_points_boundary",
+         {{"maximum_accepted", 10000}, {"first_rejected", 10001}}},
+    };
+    std::cout << corpus.dump() << '\n';
+}
+
 std::string without_positive_safety_margin(std::string bytes) {
     const auto field = bytes.find("\"safety_margin_claims\":[");
     require(field != std::string::npos,
@@ -547,6 +579,11 @@ void require_activation_root_codec() {
 } // namespace
 
 int main(int argc, char **argv) {
+    if (argc == 2 &&
+        std::string_view(argv[1]) == "--emit-schema-validation-corpus") {
+        emit_schema_validation_corpus();
+        return 0;
+    }
     require(argc <= 2, "unexpected local-overlay test argument");
     const auto repository_root =
         argc == 2 ? std::filesystem::path(argv[1])

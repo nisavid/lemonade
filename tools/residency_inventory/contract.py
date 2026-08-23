@@ -47,6 +47,17 @@ OPERATION_LEAVES_BY_TEMPLATE = {
     },
     "NPC": {"admission"},
 }
+EXPECTED_CONSTRAINT_KINDS = {
+    "flm_type_slot",
+    "gpu_provider_resolved_capacity",
+    "gpu_shared_residency",
+    "host_effects_provider_resolved",
+    "host_memavailable_floor",
+    "model_type_pool",
+    "npu_cross_family",
+    "npu_exclusive",
+    "ownership",
+}
 CAPABILITY_RANK = {
     "unsupported": 0,
     "fallback_only": 1,

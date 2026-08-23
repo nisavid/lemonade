@@ -1,11 +1,13 @@
 #include "journal_persistence_test_support.h"
 #include "lemon/residency/durable_local_overlay.h"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -32,11 +34,56 @@ void require(bool condition, std::string_view message) {
 
 std::string digest(char value) { return std::string(64, value); }
 
-std::vector<ClaimFamilyClosure> claims(std::uint64_t bytes) {
+struct ObservationBundle {
+    std::string baseline;
+    std::string baseline_sha256;
+    std::string workload;
+    std::string workload_sha256;
+    std::string release;
+    std::string release_sha256;
+};
+
+ObservationBundle observations_for(std::uint64_t sequence) {
+    switch (sequence) {
+    case 1:
+        return {
+            "baseline-observation-1",
+            "9cc5353f01512b2022f25a41c1c17d459f5792d2404da3bd0394742340a17f4f",
+            "workload-observation-1",
+            "d078259f9ad940c0064336039b9ae8255ca86c650183754d97fe2f5dc8409464",
+            "release-observation-1",
+            "7335bd0c9fc732f38073ec3270d38eab1faaf46a88d9f2a7a8ad531ac338a34a",
+        };
+    case 2:
+        return {
+            "baseline-observation-2",
+            "513a2a17fb2967bfb80cec18319105c37732e158c440fc3d3cc00013190e120d",
+            "workload-observation-2",
+            "740a6fe0be06c97e9512ab7f1bd07df3ad624de741911b4fcdee30b585caa326",
+            "release-observation-2",
+            "309b080a2292179e562f391869e46e85979db39d6a0765269fd5e2e8c26134d0",
+        };
+    case 3:
+        return {
+            "baseline-observation-3",
+            "b3887a0d5c69ae495fd7c87514858e45e826566fa1404f89778b7128f5cbab90",
+            "workload-observation-3",
+            "ade37778557fe9ee679cc90e8f06841c12380cd2a67d3e2daa2513938d4e85de",
+            "release-observation-3",
+            "53112473662268029766049344a8c0338ab8c8c3010f652e61781f1839e4958f",
+        };
+    default:
+        require(false, "observation fixture sequence is unsupported");
+        std::abort();
+    }
+}
+
+std::vector<ClaimFamilyClosure> claims_for(std::string constraint_id,
+                                           std::uint64_t bytes) {
     std::vector<ClaimAmount> capacity;
     if (bytes != 0) {
         capacity.push_back(
-            ClaimAmount{"gpu/gtt", ClaimUnit::Bytes, bytes});
+            ClaimAmount{std::move(constraint_id), ClaimUnit::Bytes, bytes});
     }
     return {
         ClaimFamilyClosure{
@@ -51,6 +98,10 @@ std::vector<ClaimFamilyClosure> claims(std::uint64_t bytes) {
         ClaimFamilyClosure{ClaimFamily::CompatibilityExclusivity,
                            ClaimCompleteness::NotApplicable, {}},
     };
+}
+
+std::vector<ClaimFamilyClosure> claims(std::uint64_t bytes) {
+    return claims_for("gpu/gtt", bytes);
 }
 
 LocalOverlaySelectorIdentity selector() {
@@ -82,7 +133,8 @@ LocalOverlaySelectorIdentity selector() {
 }
 
 ParsedProfilingInputEnvelope profile_for(std::string deployment_id,
-                                         std::uint64_t sequence) {
+                                         std::uint64_t sequence,
+                                         const ObservationBundle &observations) {
     ProfilingInputEnvelopeDraft draft;
     draft.deployment_id = std::move(deployment_id);
     draft.sequence = sequence;
@@ -91,9 +143,9 @@ ParsedProfilingInputEnvelope profile_for(std::string deployment_id,
     draft.selector = selector();
     draft.generations = OverlaySourceGenerations{1, 2, 3, 4, 5, 6, 7};
     draft.attributed_claims = claims(4096);
-    draft.baseline_observation_sha256 = digest('b');
-    draft.workload_observation_sha256 = digest('c');
-    draft.release_observation_sha256 = digest('d');
+    draft.baseline_observation_sha256 = observations.baseline_sha256;
+    draft.workload_observation_sha256 = observations.workload_sha256;
+    draft.release_observation_sha256 = observations.release_sha256;
     draft.observation_contract_sha256 = digest('e');
     draft.predictor_contract_sha256 = digest('f');
     draft.observed_at = "2026-08-23T10:00:00Z";
@@ -107,8 +159,11 @@ ParsedProfilingInputEnvelope profile_for(std::string deployment_id,
     return std::move(*sealed.candidate);
 }
 
-ParsedLocalOverlayObject overlay_for(
-    const ParsedProfilingInputEnvelope &profile) {
+ParsedLocalOverlayObject overlay_for_claims(
+    const ParsedProfilingInputEnvelope &profile,
+    std::vector<ClaimFamilyClosure> bound_claims,
+    std::vector<ClaimFamilyClosure> uncertainty_claims,
+    std::vector<ClaimFamilyClosure> safety_margin_claims) {
     LocalOverlayObjectDraft draft;
     draft.deployment_id = std::string(profile.deployment_id());
     draft.sequence = profile.sequence();
@@ -118,15 +173,45 @@ ParsedLocalOverlayObject overlay_for(
         "method/exact-profile", digest('1'),
         LocalOverlayMethodScope::DeploymentExact, OperationKind::Admission,
         std::nullopt, digest('2')};
-    draft.bound_claims = claims(4096);
-    draft.uncertainty_claims = claims(512);
-    draft.safety_margin_claims = claims(256);
+    draft.bound_claims = std::move(bound_claims);
+    draft.uncertainty_claims = std::move(uncertainty_claims);
+    draft.safety_margin_claims = std::move(safety_margin_claims);
     draft.confidence_basis_points = 9900;
     draft.qualified_at = "2026-08-23T10:01:00Z";
     draft.expires_at = "2026-09-23T10:01:00Z";
     draft.status = LocalOverlayObjectStatus::Qualified;
     draft.decision_trace_sha256 = digest('3');
     auto sealed = seal_local_overlay(std::move(draft));
+    require(sealed.accepted(), sealed.diagnostic);
+    return std::move(*sealed.candidate);
+}
+
+ParsedLocalOverlayObject overlay_for(
+    const ParsedProfilingInputEnvelope &profile) {
+    return overlay_for_claims(profile, claims(4096), claims(512), claims(256));
+}
+
+ParsedOverlayActivationRoot root_for(
+    std::string deployment_id, std::uint64_t generation,
+    std::optional<std::string> previous_root_sha256,
+    const ParsedLocalOverlayObject &overlay, std::uint64_t high_water,
+    char decision_trace, std::string activated_at) {
+    OverlayActivationRootDraft draft;
+    draft.deployment_id = std::move(deployment_id);
+    draft.generation = generation;
+    draft.previous_root_sha256 = std::move(previous_root_sha256);
+    draft.transition = OverlayRootTransition::Qualification;
+    draft.selected_overlay_sha256 =
+        std::string(overlay.checksum_sha256());
+    draft.selected_overlay_sequence = overlay.sequence();
+    draft.sequence_high_water = high_water;
+    draft.selected_selector_sha256 =
+        std::string(overlay.selector_sha256());
+    draft.selected_method_sha256 = std::string(overlay.method_sha256());
+    draft.decision_trace_sha256 = digest(decision_trace);
+    draft.activated_at = std::move(activated_at);
+    draft.expires_at = std::string(overlay.expires_at());
+    auto sealed = seal_overlay_activation_root(std::move(draft));
     require(sealed.accepted(), sealed.diagnostic);
     return std::move(*sealed.candidate);
 }
@@ -160,17 +245,33 @@ LocalOverlayStoreLimits generous_limits() {
 }
 
 LocalOverlayStoreResult
+activate_qualification(LocalOverlayStore &store,
+                       PublishedLocalOverlay &&expected,
+                       ParsedProfilingInputEnvelope profile,
+                       ParsedLocalOverlayObject overlay,
+                       ObservationBundle observations, char decision_trace,
+                       std::string activated_at) {
+    return store.activate(
+        std::move(expected),
+        LocalOverlayActivation::qualification(
+            std::move(profile), std::move(overlay),
+            std::move(observations.baseline),
+            std::move(observations.workload),
+            std::move(observations.release), digest(decision_trace),
+            std::move(activated_at)));
+}
+
+LocalOverlayStoreResult
 qualify(LocalOverlayStore &store, PublishedLocalOverlay &&expected,
         std::uint64_t sequence, char decision_trace,
         std::string activated_at) {
     const auto deployment_id = std::string(expected.deployment_id());
-    auto profile = profile_for(deployment_id, sequence);
+    auto observations = observations_for(sequence);
+    auto profile = profile_for(deployment_id, sequence, observations);
     auto overlay = overlay_for(profile);
-    return store.activate(
-        std::move(expected),
-        LocalOverlayActivation::qualification(
-            std::move(profile), std::move(overlay), digest(decision_trace),
-            std::move(activated_at)));
+    return activate_qualification(
+        store, std::move(expected), std::move(profile), std::move(overlay),
+        std::move(observations), decision_trace, std::move(activated_at));
 }
 
 struct PublishedFixture {
@@ -180,6 +281,7 @@ struct PublishedFixture {
     std::string overlay_sha256;
     std::string overlay_bytes;
     std::string deployment_id;
+    ObservationBundle observations;
 };
 
 PublishedFixture
@@ -204,6 +306,7 @@ published_fixture(PlatformContract platform = PlatformContract::Linux) {
             activated.authority->active_overlay()->checksum_sha256()),
         std::string(activated.authority->active_overlay()->canonical_bytes()),
         std::string(activated.authority->deployment_id()),
+        observations_for(1),
     };
 }
 
@@ -217,11 +320,13 @@ void require_empty_activate_and_same_deployment_visibility() {
 
     const auto deployment_id =
         std::string(empty.authority->deployment_id());
-    auto profile = profile_for(deployment_id, 1);
+    auto observations = observations_for(1);
+    auto profile = profile_for(deployment_id, 1, observations);
     auto overlay = overlay_for(profile);
     const auto overlay_sha256 = std::string(overlay.checksum_sha256());
     auto activation = LocalOverlayActivation::qualification(
-        std::move(profile), std::move(overlay), digest('4'),
+        std::move(profile), std::move(overlay), observations.baseline,
+        observations.workload, observations.release, digest('4'),
         "2026-08-23T10:02:00Z");
     auto activated = store.activate(std::move(*empty.authority),
                                     std::move(activation));
@@ -233,6 +338,12 @@ void require_empty_activate_and_same_deployment_visibility() {
                 activated.authority->sequence_high_water() == 1 &&
                 activated.authority->active_overlay() != nullptr &&
                 activated.authority->active_profiling_input() != nullptr &&
+                activated.authority->active_baseline_observation_bytes() ==
+                    observations.baseline &&
+                activated.authority->active_workload_observation_bytes() ==
+                    observations.workload &&
+                activated.authority->active_release_observation_bytes() ==
+                    observations.release &&
                 activated.authority->active_overlay()->checksum_sha256() ==
                     overlay_sha256,
             "published overlay snapshot was incomplete");
@@ -246,8 +357,121 @@ void require_empty_activate_and_same_deployment_visibility() {
                 visible.authority->root_bytes() == root &&
                 visible.authority->deployment_id() == deployment_id &&
                 visible.authority->active_overlay() != nullptr &&
-                visible.authority->active_profiling_input() != nullptr,
+                visible.authority->active_profiling_input() != nullptr &&
+                visible.authority->active_baseline_observation_bytes() ==
+                    observations.baseline &&
+                visible.authority->active_workload_observation_bytes() ==
+                    observations.workload &&
+                visible.authority->active_release_observation_bytes() ==
+                    observations.release,
             "same-deployment reader did not observe one complete snapshot");
+}
+
+void require_fake_fixed_namespace_replacement_fails_closed() {
+    for (const auto platform : {PlatformContract::Linux,
+                                PlatformContract::MacOS}) {
+        auto storage = JournalTestStorage::fresh(platform);
+        {
+            auto stale_store = storage.make_overlay_store(generous_limits());
+            auto initial = stale_store.snapshot(
+                TrustedLocalOverlayReplayFloor::uninitialized());
+            require(initial.status == LocalOverlayStoreStatus::Empty &&
+                        initial.authority.has_value(),
+                    "fake fixed namespace did not start empty");
+            const auto stale_deployment_id =
+                std::string(initial.authority->deployment_id());
+
+            std::optional<LocalOverlayStoreResult> stale;
+            storage.pause_after(FaultOperation::AuthorityIdentityRead);
+            std::thread stale_reader([&] {
+                stale.emplace(stale_store.snapshot(
+                    TrustedLocalOverlayReplayFloor::uninitialized()));
+            });
+            require(storage.wait_until_paused(5000),
+                    "fake stale reader did not pause with authority locked");
+            storage.rename_and_replace_authority_directory();
+            storage.release_pause();
+            stale_reader.join();
+            require(stale.has_value() &&
+                        stale->status ==
+                            LocalOverlayStoreStatus::RecoveryRequired &&
+                        !stale->authority.has_value(),
+                    "fake stale namespace binding retained authority after "
+                    "replacement");
+
+            auto replacement_store =
+                storage.make_overlay_store(generous_limits());
+            auto replacement = replacement_store.snapshot(
+                TrustedLocalOverlayReplayFloor::uninitialized());
+            require(replacement.status == LocalOverlayStoreStatus::Empty &&
+                        replacement.authority.has_value() &&
+                        replacement.authority->deployment_id() !=
+                            stale_deployment_id,
+                    "fake replacement namespace did not establish new "
+                    "authority");
+        }
+        require(storage.snapshot().open_handles.empty(),
+                "fake namespace replacement leaked adapter handles");
+    }
+}
+
+void require_native_fixed_namespace_lifetime_binding() {
+#ifdef __linux__
+    TemporaryCache cache;
+    const auto original_parent = cache.path() / "cache-original";
+    const auto renamed_parent = cache.path() / "cache-renamed";
+    std::filesystem::create_directory(original_parent);
+    const auto open_descriptor_count = [] {
+        return static_cast<std::size_t>(std::distance(
+            std::filesystem::directory_iterator("/proc/self/fd"),
+            std::filesystem::directory_iterator{}));
+    };
+    const auto descriptors_before = open_descriptor_count();
+    {
+        auto stale_store =
+            LocalOverlayStore::native(original_parent, generous_limits());
+        auto initial = stale_store.snapshot(
+            TrustedLocalOverlayReplayFloor::uninitialized());
+        require(initial.status == LocalOverlayStoreStatus::Empty &&
+                    initial.authority.has_value(),
+                "native fixed namespace did not start empty");
+        const auto deployment_id =
+            std::string(initial.authority->deployment_id());
+
+        std::filesystem::rename(original_parent, renamed_parent);
+        auto after_parent_rename = stale_store.snapshot(
+            TrustedLocalOverlayReplayFloor::uninitialized());
+        require(after_parent_rename.status == LocalOverlayStoreStatus::Empty &&
+                    after_parent_rename.authority.has_value() &&
+                    after_parent_rename.authority->deployment_id() ==
+                        deployment_id,
+                "renaming the bound parent changed deployment authority");
+
+        const auto child = LocalOverlayStore::namespace_path(renamed_parent);
+        const auto retired_child = renamed_parent / "retired-local-overlay";
+        std::filesystem::rename(child, retired_child);
+        std::filesystem::create_directory(child);
+
+        auto replacement_store =
+            LocalOverlayStore::native(renamed_parent, generous_limits());
+        auto replacement = replacement_store.snapshot(
+            TrustedLocalOverlayReplayFloor::uninitialized());
+        require(replacement.status == LocalOverlayStoreStatus::Empty &&
+                    replacement.authority.has_value() &&
+                    replacement.authority->deployment_id() != deployment_id,
+                "replacement namespace did not establish independent "
+                "authority");
+
+        auto stale = stale_store.snapshot(
+            TrustedLocalOverlayReplayFloor::uninitialized());
+        require(stale.status == LocalOverlayStoreStatus::UnsupportedStorage &&
+                    !stale.authority.has_value(),
+                "stale native namespace binding retained authority after "
+                "replacement");
+    }
+    require(open_descriptor_count() == descriptors_before,
+            "native fixed namespace adapters leaked directory handles");
+#endif
 }
 
 void require_stale_cas_conflicts_before_object_writes() {
@@ -282,6 +506,236 @@ void require_stale_cas_conflicts_before_object_writes() {
             "stale CAS did not conflict before immutable-object writes");
 }
 
+void require_full_history_rejects_qualification_before_writes() {
+    auto storage = JournalTestStorage::fresh();
+    const LocalOverlayStoreLimits limits{64 * 1024, 1};
+    auto store = storage.make_overlay_store(limits);
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "history-limit fixture did not start empty");
+
+    auto first = qualify(store, std::move(*empty.authority), 1, '4',
+                         "2026-08-23T10:02:00Z");
+    require(first.status == LocalOverlayStoreStatus::Activated &&
+                first.authority.has_value(),
+            "history-limit fixture did not publish its only root");
+    const auto first_root = std::string(first.authority->root_bytes());
+
+    storage.reset_observations();
+    auto rejected = qualify(store, std::move(*first.authority), 2, '5',
+                            "2026-08-23T10:04:00Z");
+    const auto after = storage.snapshot();
+    require(rejected.status == LocalOverlayStoreStatus::LimitExceeded &&
+                !rejected.authority.has_value() &&
+                after.authority_root_bytes == first_root &&
+                !after.authority_mutation_attempted,
+            "full history admitted a qualification before rejecting it");
+
+    auto reader = storage.make_overlay_store(limits);
+    auto replayed = reader.snapshot(
+        TrustedLocalOverlayReplayFloor::exact_root(first_root));
+    require(replayed.status == LocalOverlayStoreStatus::Ready &&
+                replayed.authority.has_value() &&
+                replayed.authority->generation() == 1,
+            "rejected qualification made the full history unreadable");
+}
+
+void require_full_history_rejects_rollback_before_writes() {
+    auto storage = JournalTestStorage::fresh();
+    const LocalOverlayStoreLimits limits{64 * 1024, 2};
+    auto store = storage.make_overlay_store(limits);
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "rollback history-limit fixture did not start empty");
+
+    auto first = qualify(store, std::move(*empty.authority), 1, '4',
+                         "2026-08-23T10:02:00Z");
+    require(first.status == LocalOverlayStoreStatus::Activated &&
+                first.authority.has_value(),
+            "rollback history-limit fixture did not publish sequence one");
+    const auto first_root = std::string(first.authority->root_bytes());
+    const auto first_overlay =
+        std::string(first.authority->active_overlay()->checksum_sha256());
+    auto second = qualify(store, std::move(*first.authority), 2, '5',
+                          "2026-08-23T10:04:00Z");
+    require(second.status == LocalOverlayStoreStatus::Activated &&
+                second.authority.has_value(),
+            "rollback history-limit fixture did not fill its history");
+    const auto second_root = std::string(second.authority->root_bytes());
+
+    storage.reset_observations();
+    auto rejected = store.activate(
+        std::move(*second.authority),
+        LocalOverlayActivation::rollback(first_overlay, digest('6'),
+                                         "2026-08-23T10:05:00Z"));
+    const auto after = storage.snapshot();
+    require(rejected.status == LocalOverlayStoreStatus::LimitExceeded &&
+                !rejected.authority.has_value() &&
+                after.authority_root_bytes == second_root &&
+                !after.authority_mutation_attempted,
+            "full history admitted a rollback before rejecting it");
+
+    auto reader = storage.make_overlay_store(limits);
+    auto replayed = reader.snapshot(
+        TrustedLocalOverlayReplayFloor::exact_root(first_root));
+    require(replayed.status == LocalOverlayStoreStatus::Ready &&
+                replayed.authority.has_value() &&
+                replayed.authority->root_bytes() == second_root &&
+                replayed.authority->generation() == 2,
+            "rejected rollback made the full history unreadable");
+}
+
+void require_observation_admission_fails_before_writes() {
+    for (const auto failure : {LocalOverlayStoreStatus::MissingObject,
+                               LocalOverlayStoreStatus::DigestMismatch,
+                               LocalOverlayStoreStatus::LimitExceeded}) {
+        for (const auto observation_index : {0, 1, 2}) {
+            auto storage = JournalTestStorage::fresh();
+            auto store = storage.make_overlay_store(generous_limits());
+            auto empty = store.snapshot(
+                TrustedLocalOverlayReplayFloor::uninitialized());
+            require(empty.status == LocalOverlayStoreStatus::Empty &&
+                        empty.authority.has_value(),
+                    "observation admission fixture did not start empty");
+
+            auto observations = observations_for(1);
+            auto profile = profile_for(
+                std::string(empty.authority->deployment_id()), 1,
+                observations);
+            auto overlay = overlay_for(profile);
+            const std::array<std::string *, 3> supplied_bytes{
+                &observations.baseline,
+                &observations.workload,
+                &observations.release,
+            };
+            if (failure == LocalOverlayStoreStatus::MissingObject) {
+                supplied_bytes[observation_index]->clear();
+            } else if (failure == LocalOverlayStoreStatus::DigestMismatch) {
+                *supplied_bytes[observation_index] += "-wrong";
+            } else {
+                supplied_bytes[observation_index]->assign(
+                    generous_limits().max_object_bytes + 1, 'x');
+            }
+
+            storage.reset_observations();
+            auto rejected = activate_qualification(
+                store, std::move(*empty.authority), std::move(profile),
+                std::move(overlay), std::move(observations), '4',
+                "2026-08-23T10:02:00Z");
+            const auto after = storage.snapshot();
+            require(rejected.status == failure &&
+                        !rejected.authority.has_value() &&
+                        after.authority_root_bytes.empty() &&
+                        !after.authority_mutation_attempted,
+                    "invalid observation bytes caused an object or root "
+                    "write");
+        }
+    }
+}
+
+void require_claim_admission_fails_before_writes() {
+    for (const bool unrelated_safety_margin : {false, true}) {
+        auto storage = JournalTestStorage::fresh();
+        auto store = storage.make_overlay_store(generous_limits());
+        auto empty =
+            store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+        require(empty.status == LocalOverlayStoreStatus::Empty &&
+                    empty.authority.has_value(),
+                "claim admission fixture did not start empty");
+
+        auto observations = observations_for(1);
+        auto profile = profile_for(
+            std::string(empty.authority->deployment_id()), 1, observations);
+        auto overlay = unrelated_safety_margin
+                           ? overlay_for_claims(
+                                 profile, claims(4096), claims(512),
+                                 claims_for("host/ram", 256))
+                           : overlay_for_claims(
+                                 profile, claims(3000), claims(400),
+                                 claims(200));
+
+        storage.reset_observations();
+        auto rejected = activate_qualification(
+            store, std::move(*empty.authority), std::move(profile),
+            std::move(overlay), std::move(observations), '4',
+            "2026-08-23T10:02:00Z");
+        const auto after = storage.snapshot();
+        require(rejected.status ==
+                        LocalOverlayStoreStatus::CorruptOrRollback &&
+                    !rejected.authority.has_value() &&
+                    after.authority_root_bytes.empty() &&
+                    !after.authority_mutation_attempted,
+                "unsafe claim envelope caused an object or root write");
+    }
+
+    auto storage = JournalTestStorage::fresh();
+    auto store = storage.make_overlay_store(generous_limits());
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "claim completeness fixture did not start empty");
+    auto observations = observations_for(1);
+    auto profile = profile_for(
+        std::string(empty.authority->deployment_id()), 1, observations);
+    auto bound = claims(4096);
+    auto uncertainty = claims(512);
+    auto safety_margin = claims(256);
+    for (auto *closure : {&bound, &uncertainty, &safety_margin}) {
+        (*closure)[1].completeness = ClaimCompleteness::NotApplicable;
+    }
+    auto overlay = overlay_for_claims(
+        profile, std::move(bound), std::move(uncertainty),
+        std::move(safety_margin));
+    storage.reset_observations();
+    auto rejected = activate_qualification(
+        store, std::move(*empty.authority), std::move(profile),
+        std::move(overlay), std::move(observations), '4',
+        "2026-08-23T10:02:00Z");
+    const auto after = storage.snapshot();
+    require(rejected.status == LocalOverlayStoreStatus::CorruptOrRollback &&
+                !rejected.authority.has_value() &&
+                !after.authority_mutation_attempted,
+            "not-applicable conservative claims covered an applicable "
+            "attributed family");
+}
+
+void require_same_observation_digest_is_deduplicated() {
+    auto storage = JournalTestStorage::fresh();
+    auto store = storage.make_overlay_store(generous_limits());
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "observation deduplication fixture did not start empty");
+
+    ObservationBundle observations{
+        "shared-observation",
+        "35566907aa5c6cce8e1c57026f44acdbe3944b18149430be57d257dd78e495e7",
+        "shared-observation",
+        "35566907aa5c6cce8e1c57026f44acdbe3944b18149430be57d257dd78e495e7",
+        "shared-observation",
+        "35566907aa5c6cce8e1c57026f44acdbe3944b18149430be57d257dd78e495e7",
+    };
+    auto profile = profile_for(
+        std::string(empty.authority->deployment_id()), 1, observations);
+    auto overlay = overlay_for(profile);
+    storage.reset_observations();
+    auto activated = activate_qualification(
+        store, std::move(*empty.authority), std::move(profile),
+        std::move(overlay), observations, '4', "2026-08-23T10:02:00Z");
+    require(activated.status == LocalOverlayStoreStatus::Activated &&
+                activated.authority.has_value() &&
+                activated.authority->active_baseline_observation_bytes() ==
+                    "shared-observation" &&
+                activated.authority->active_workload_observation_bytes() ==
+                    "shared-observation" &&
+                activated.authority->active_release_observation_bytes() ==
+                    "shared-observation" &&
+                storage.attempt_count(FaultOperation::ObjectPublish) == 4,
+            "equal observation digests did not reuse one immutable object");
+}
+
 void require_rollback_advances_generation_and_preserves_history() {
     auto storage = JournalTestStorage::fresh();
     auto store = storage.make_overlay_store(generous_limits());
@@ -298,6 +752,7 @@ void require_rollback_advances_generation_and_preserves_history() {
     const auto first_root = std::string(first.authority->root_bytes());
     const auto first_overlay =
         std::string(first.authority->active_overlay()->checksum_sha256());
+    const auto first_observations = observations_for(1);
 
     auto second = qualify(store, std::move(*first.authority), 2, '5',
                           "2026-08-23T10:04:00Z");
@@ -324,7 +779,15 @@ void require_rollback_advances_generation_and_preserves_history() {
                         ->previous_root_sha256() ==
                     std::optional<std::string>{second_root_sha256} &&
                 rolled_back.authority->active_overlay() != nullptr &&
-                rolled_back.authority->active_overlay()->sequence() == 1,
+                rolled_back.authority->active_overlay()->sequence() == 1 &&
+                rolled_back.authority
+                        ->active_baseline_observation_bytes() ==
+                    first_observations.baseline &&
+                rolled_back.authority
+                        ->active_workload_observation_bytes() ==
+                    first_observations.workload &&
+                rolled_back.authority->active_release_observation_bytes() ==
+                    first_observations.release,
             "rollback rewrote history or changed the sequence high-water");
 
     const auto rollback_root =
@@ -460,6 +923,40 @@ void require_copied_store_and_object_corruption_fail_closed() {
                 "same-address overlay corruption was not distinguished");
     }
 
+    for (const auto missing_observation : {0, 1, 2}) {
+        auto fixture = published_fixture();
+        const std::array<std::string, 3> observation_sha256{
+            fixture.observations.baseline_sha256,
+            fixture.observations.workload_sha256,
+            fixture.observations.release_sha256,
+        };
+        fixture.storage.remove_immutable_object(
+            observation_sha256[missing_observation]);
+        auto store = fixture.storage.make_overlay_store(generous_limits());
+        auto result = store.snapshot(
+            TrustedLocalOverlayReplayFloor::exact_root(fixture.root_bytes));
+        require(result.status == LocalOverlayStoreStatus::MissingObject &&
+                    !result.authority.has_value(),
+                "missing observation did not fail closed");
+    }
+
+    for (const auto corrupt_observation : {0, 1, 2}) {
+        auto fixture = published_fixture();
+        const std::array<std::string, 3> observation_sha256{
+            fixture.observations.baseline_sha256,
+            fixture.observations.workload_sha256,
+            fixture.observations.release_sha256,
+        };
+        fixture.storage.overwrite_immutable_object(
+            observation_sha256[corrupt_observation], "corrupt-observation");
+        auto store = fixture.storage.make_overlay_store(generous_limits());
+        auto result = store.snapshot(
+            TrustedLocalOverlayReplayFloor::exact_root(fixture.root_bytes));
+        require(result.status == LocalOverlayStoreStatus::DigestMismatch &&
+                    !result.authority.has_value(),
+                "same-address observation corruption was not distinguished");
+    }
+
     {
         auto fixture = published_fixture();
         fixture.storage.remove_immutable_object(fixture.root_sha256);
@@ -482,6 +979,106 @@ void require_copied_store_and_object_corruption_fail_closed() {
                     !result.authority.has_value(),
                 "malformed active root did not fail closed");
     }
+}
+
+void require_historic_observation_corruption_fails_closed() {
+    for (const bool remove_observation : {false, true}) {
+        auto storage = JournalTestStorage::fresh();
+        auto store = storage.make_overlay_store(generous_limits());
+        auto empty =
+            store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+        require(empty.status == LocalOverlayStoreStatus::Empty &&
+                    empty.authority.has_value(),
+                "historic observation fixture did not start empty");
+        auto first = qualify(store, std::move(*empty.authority), 1, '4',
+                             "2026-08-23T10:02:00Z");
+        require(first.status == LocalOverlayStoreStatus::Activated &&
+                    first.authority.has_value(),
+                "historic observation fixture did not publish generation one");
+        const auto first_root = std::string(first.authority->root_bytes());
+        auto second = qualify(store, std::move(*first.authority), 2, '5',
+                              "2026-08-23T10:04:00Z");
+        require(second.status == LocalOverlayStoreStatus::Activated &&
+                    second.authority.has_value() &&
+                    second.authority->generation() == 2,
+                "historic observation fixture did not publish generation two");
+
+        const auto generation_one = observations_for(1);
+        if (remove_observation) {
+            storage.remove_immutable_object(
+                generation_one.baseline_sha256);
+        } else {
+            storage.overwrite_immutable_object(
+                generation_one.baseline_sha256, "corrupt-historic-observation");
+        }
+        auto reader = storage.make_overlay_store(generous_limits());
+        auto replayed = reader.snapshot(
+            TrustedLocalOverlayReplayFloor::exact_root(first_root));
+        require(replayed.status ==
+                        (remove_observation
+                             ? LocalOverlayStoreStatus::MissingObject
+                             : LocalOverlayStoreStatus::DigestMismatch) &&
+                    !replayed.authority.has_value(),
+                "generation two replay ignored a corrupt generation-one "
+                "observation");
+    }
+}
+
+void require_historic_under_bound_overlay_fails_closed() {
+    auto storage = JournalTestStorage::fresh();
+    auto store = storage.make_overlay_store(generous_limits());
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "historic claim fixture did not start empty");
+    const auto deployment_id = std::string(empty.authority->deployment_id());
+
+    const auto first_observations = observations_for(1);
+    auto first_input = profile_for(deployment_id, 1, first_observations);
+    auto first_overlay = overlay_for_claims(
+        first_input, claims(3000), claims(400), claims(200));
+    auto first_root = root_for(deployment_id, 1, std::nullopt, first_overlay, 1,
+                               '4', "2026-08-23T10:02:00Z");
+
+    const auto second_observations = observations_for(2);
+    auto second_input = profile_for(deployment_id, 2, second_observations);
+    auto second_overlay = overlay_for(second_input);
+    auto second_root = root_for(
+        deployment_id, 2, std::string(first_root.checksum_sha256()),
+        second_overlay, 2, '5', "2026-08-23T10:04:00Z");
+
+    auto persist_node = [&](const ObservationBundle &observations,
+                            const ParsedProfilingInputEnvelope &input,
+                            const ParsedLocalOverlayObject &overlay,
+                            const ParsedOverlayActivationRoot &root) {
+        storage.overwrite_immutable_object(observations.baseline_sha256,
+                                           observations.baseline);
+        storage.overwrite_immutable_object(observations.workload_sha256,
+                                           observations.workload);
+        storage.overwrite_immutable_object(observations.release_sha256,
+                                           observations.release);
+        storage.overwrite_immutable_object(
+            std::string(input.checksum_sha256()),
+            std::string(input.canonical_bytes()));
+        storage.overwrite_immutable_object(
+            std::string(overlay.checksum_sha256()),
+            std::string(overlay.canonical_bytes()));
+        storage.overwrite_immutable_object(
+            std::string(root.checksum_sha256()),
+            std::string(root.canonical_bytes()));
+    };
+    persist_node(first_observations, first_input, first_overlay, first_root);
+    persist_node(second_observations, second_input, second_overlay, second_root);
+    storage.overwrite_fixed_child_bytes(
+        FixedAuthorityChild::Root,
+        std::string(second_root.canonical_bytes()));
+
+    auto reader = storage.make_overlay_store(generous_limits());
+    auto replayed = reader.snapshot(TrustedLocalOverlayReplayFloor::exact_root(
+        std::string(first_root.canonical_bytes())));
+    require(replayed.status == LocalOverlayStoreStatus::CorruptOrRollback &&
+                !replayed.authority.has_value(),
+            "generation two replay accepted a historic under-bound overlay");
 }
 
 void require_generation_replay_is_rejected() {
@@ -572,7 +1169,14 @@ void require_concurrent_activators_share_one_owner_lock() {
             "concurrent activators did not serialize to one CAS winner");
 }
 
-enum class CrashObjectTarget { ProfilingInput, Overlay, Root };
+enum class CrashObjectTarget {
+    BaselineObservation,
+    WorkloadObservation,
+    ReleaseObservation,
+    ProfilingInput,
+    Overlay,
+    Root,
+};
 
 void require_recoverable_snapshot(JournalTestStorage &storage,
                                   std::string_view trusted_root) {
@@ -588,6 +1192,15 @@ void require_recoverable_snapshot(JournalTestStorage &storage,
                 recovered.authority->active_root() != nullptr &&
                 recovered.authority->active_overlay() != nullptr &&
                 recovered.authority->active_profiling_input() != nullptr &&
+                !recovered.authority
+                     ->active_baseline_observation_bytes()
+                     .empty() &&
+                !recovered.authority
+                     ->active_workload_observation_bytes()
+                     .empty() &&
+                !recovered.authority
+                     ->active_release_observation_bytes()
+                     .empty() &&
                 (recovered.authority->generation() == 1 ||
                  recovered.authority->generation() == 2) &&
                 recovered.authority->sequence_high_water() ==
@@ -612,10 +1225,17 @@ void require_object_publication_crash_boundaries() {
     for (const auto platform : {PlatformContract::Linux,
                                 PlatformContract::MacOS,
                                 PlatformContract::Windows}) {
-        for (const auto target : {CrashObjectTarget::ProfilingInput,
+        for (const auto target : {CrashObjectTarget::BaselineObservation,
+                                  CrashObjectTarget::WorkloadObservation,
+                                  CrashObjectTarget::ReleaseObservation,
+                                  CrashObjectTarget::ProfilingInput,
                                   CrashObjectTarget::Overlay,
                                   CrashObjectTarget::Root}) {
             for (const auto operation : operations) {
+                if (platform == PlatformContract::Windows &&
+                    operation == FaultOperation::ObjectStageCleanup) {
+                    continue;
+                }
                 for (const auto position : {FaultPosition::Before,
                                             FaultPosition::After}) {
                     auto fixture = published_fixture(platform);
@@ -628,10 +1248,31 @@ void require_object_publication_crash_boundaries() {
                                 expected.authority.has_value(),
                             "crash fixture did not recover its expected root");
 
+                    auto observations = observations_for(2);
                     auto input = profile_for(
-                        std::string(expected.authority->deployment_id()), 2);
+                        std::string(expected.authority->deployment_id()), 2,
+                        observations);
                     auto overlay = overlay_for(input);
-                    if (target != CrashObjectTarget::ProfilingInput) {
+                    if (target != CrashObjectTarget::BaselineObservation) {
+                        fixture.storage.overwrite_immutable_object(
+                            observations.baseline_sha256,
+                            observations.baseline);
+                    }
+                    if (target != CrashObjectTarget::BaselineObservation &&
+                        target != CrashObjectTarget::WorkloadObservation) {
+                        fixture.storage.overwrite_immutable_object(
+                            observations.workload_sha256,
+                            observations.workload);
+                    }
+                    if (target == CrashObjectTarget::ProfilingInput ||
+                        target == CrashObjectTarget::Overlay ||
+                        target == CrashObjectTarget::Root) {
+                        fixture.storage.overwrite_immutable_object(
+                            observations.release_sha256,
+                            observations.release);
+                    }
+                    if (target == CrashObjectTarget::Overlay ||
+                        target == CrashObjectTarget::Root) {
                         fixture.storage.overwrite_immutable_object(
                             std::string(input.checksum_sha256()),
                             std::string(input.canonical_bytes()));
@@ -642,7 +1283,10 @@ void require_object_publication_crash_boundaries() {
                             std::string(overlay.canonical_bytes()));
                     }
                     auto activation = LocalOverlayActivation::qualification(
-                        std::move(input), std::move(overlay), digest('5'),
+                        std::move(input), std::move(overlay),
+                        std::move(observations.baseline),
+                        std::move(observations.workload),
+                        std::move(observations.release), digest('5'),
                         "2026-08-23T10:03:00Z");
                     fixture.storage.reset_observations();
                     fixture.storage.arm_fault(operation, position,
@@ -650,6 +1294,9 @@ void require_object_publication_crash_boundaries() {
                     static_cast<void>(store.activate(
                         std::move(*expected.authority),
                         std::move(activation)));
+                    require(fixture.storage.attempt_count(operation) != 0,
+                            "requested object-publication crash point was not "
+                            "observed");
                     require_recoverable_snapshot(fixture.storage,
                                                  fixture.root_bytes);
                 }
@@ -683,17 +1330,25 @@ void require_pointer_publication_crash_boundaries() {
                             expected.authority.has_value(),
                         "pointer crash fixture did not recover its expected "
                         "root");
+                auto observations = observations_for(2);
                 auto input = profile_for(
-                    std::string(expected.authority->deployment_id()), 2);
+                    std::string(expected.authority->deployment_id()), 2,
+                    observations);
                 auto overlay = overlay_for(input);
                 auto activation = LocalOverlayActivation::qualification(
-                    std::move(input), std::move(overlay), digest('5'),
+                    std::move(input), std::move(overlay),
+                    std::move(observations.baseline),
+                    std::move(observations.workload),
+                    std::move(observations.release), digest('5'),
                     "2026-08-23T10:03:00Z");
                 fixture.storage.reset_observations();
                 fixture.storage.arm_fault(operation, position,
                                           FaultAction::Crash);
                 static_cast<void>(store.activate(
                     std::move(*expected.authority), std::move(activation)));
+                require(fixture.storage.attempt_count(operation) != 0,
+                        "requested pointer-publication crash point was not "
+                        "observed");
                 require_recoverable_snapshot(fixture.storage,
                                              fixture.root_bytes);
             }
@@ -705,11 +1360,20 @@ void require_pointer_publication_crash_boundaries() {
 
 int main() {
     require_empty_activate_and_same_deployment_visibility();
+    require_fake_fixed_namespace_replacement_fails_closed();
+    require_native_fixed_namespace_lifetime_binding();
     require_stale_cas_conflicts_before_object_writes();
+    require_full_history_rejects_qualification_before_writes();
+    require_full_history_rejects_rollback_before_writes();
+    require_observation_admission_fails_before_writes();
+    require_claim_admission_fails_before_writes();
+    require_same_observation_digest_is_deduplicated();
     require_rollback_advances_generation_and_preserves_history();
     require_rollback_can_select_another_prior_overlay();
     require_unlock_failure_withholds_authority();
     require_copied_store_and_object_corruption_fail_closed();
+    require_historic_observation_corruption_fails_closed();
+    require_historic_under_bound_overlay_fails_closed();
     require_generation_replay_is_rejected();
     require_concurrent_activators_share_one_owner_lock();
     require_object_publication_crash_boundaries();

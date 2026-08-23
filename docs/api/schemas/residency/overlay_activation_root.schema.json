@@ -676,6 +676,63 @@
               "if": {
                 "properties": {
                   "operation_template": {
+                    "const": "NPC"
+                  }
+                },
+                "required": [
+                  "operation_template"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "operation_kind": {
+                    "enum": [
+                      "admission"
+                    ],
+                    "maxLength": 9,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_kind"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "operation_template": {
+                    "const": "PIN"
+                  }
+                },
+                "required": [
+                  "operation_template"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "operation_kind": {
+                    "enum": [
+                      "legacy_pin_batch",
+                      "resident_state_recovery_cleanup",
+                      "runtime_pin_mutation",
+                      "saved_pin_mutation"
+                    ],
+                    "maxLength": 31,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_kind"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "operation_template": {
                     "const": "PRE"
                   }
                 },
@@ -690,6 +747,37 @@
                       "pressure_reclamation"
                     ],
                     "maxLength": 20,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_kind"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "operation_template": {
+                    "const": "REC"
+                  }
+                },
+                "required": [
+                  "operation_template"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "operation_kind": {
+                    "enum": [
+                      "artifact_scope_recovery_cleanup",
+                      "dead_backend_pruning",
+                      "prior_epoch_owner_cleanup",
+                      "same_epoch_recovery_cleanup",
+                      "service_termination"
+                    ],
+                    "maxLength": 31,
                     "minLength": 1,
                     "type": "string"
                   }
@@ -730,37 +818,6 @@
               "if": {
                 "properties": {
                   "operation_template": {
-                    "const": "REC"
-                  }
-                },
-                "required": [
-                  "operation_template"
-                ]
-              },
-              "then": {
-                "properties": {
-                  "operation_kind": {
-                    "enum": [
-                      "service_termination",
-                      "dead_backend_pruning",
-                      "same_epoch_recovery_cleanup",
-                      "prior_epoch_owner_cleanup",
-                      "artifact_scope_recovery_cleanup"
-                    ],
-                    "maxLength": 31,
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation_kind"
-                ]
-              }
-            },
-            {
-              "if": {
-                "properties": {
-                  "operation_template": {
                     "const": "UNL"
                   }
                 },
@@ -776,63 +833,6 @@
                       "force_unload"
                     ],
                     "maxLength": 15,
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation_kind"
-                ]
-              }
-            },
-            {
-              "if": {
-                "properties": {
-                  "operation_template": {
-                    "const": "PIN"
-                  }
-                },
-                "required": [
-                  "operation_template"
-                ]
-              },
-              "then": {
-                "properties": {
-                  "operation_kind": {
-                    "enum": [
-                      "saved_pin_mutation",
-                      "runtime_pin_mutation",
-                      "legacy_pin_batch",
-                      "resident_state_recovery_cleanup"
-                    ],
-                    "maxLength": 31,
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation_kind"
-                ]
-              }
-            },
-            {
-              "if": {
-                "properties": {
-                  "operation_template": {
-                    "const": "NPC"
-                  }
-                },
-                "required": [
-                  "operation_template"
-                ]
-              },
-              "then": {
-                "properties": {
-                  "operation_kind": {
-                    "enum": [
-                      "admission"
-                    ],
-                    "maxLength": 9,
                     "minLength": 1,
                     "type": "string"
                   }
@@ -932,12 +932,12 @@
               "enum": [
                 "ADM",
                 "LFR",
-                "PRE",
-                "STA",
-                "REC",
-                "UNL",
+                "NPC",
                 "PIN",
-                "NPC"
+                "PRE",
+                "REC",
+                "STA",
+                "UNL"
               ],
               "maxLength": 3,
               "minLength": 1,
