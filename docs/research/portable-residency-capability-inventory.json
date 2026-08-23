@@ -4630,7 +4630,14 @@
             "required": true
           }
         },
-        "conditionals": []
+        "conditionals": [
+          {
+            "assert": {
+              "field": "method.operation_kind",
+              "equals_path": "selector.catalog.operation_kind"
+            }
+          }
+        ]
       },
       "operation_revision": {
         "version": {
@@ -4824,6 +4831,8 @@
               "previous_root_sha256"
             ],
             "require_values": {
+              "selected_overlay_sequence": 1,
+              "sequence_high_water": 1,
               "transition": "qualification"
             }
           },
@@ -4834,7 +4843,11 @@
             },
             "require_nonnull": [
               "previous_root_sha256"
-            ]
+            ],
+            "assert": {
+              "field": "selected_overlay_sequence",
+              "less_than_path": "sequence_high_water"
+            }
           },
           {
             "if": {
@@ -4844,6 +4857,22 @@
             "require_nonnull": [
               "previous_root_sha256"
             ]
+          },
+          {
+            "assert": {
+              "field": "selected_overlay_sequence",
+              "less_than_or_equal_path": "sequence_high_water"
+            }
+          },
+          {
+            "if": {
+              "field": "transition",
+              "equals": "qualification"
+            },
+            "assert": {
+              "field": "selected_overlay_sequence",
+              "equals_path": "sequence_high_water"
+            }
           }
         ]
       },

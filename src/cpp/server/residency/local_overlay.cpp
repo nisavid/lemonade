@@ -1328,6 +1328,12 @@ void normalize_root_draft(OverlayActivationRootDraft &draft) {
         reject(OverlayContractStatus::InvalidSequence,
                "activation root has an invalid overlay sequence");
     }
+    if (draft.generation == 1 &&
+        (draft.selected_overlay_sequence != 1 ||
+         draft.sequence_high_water != 1)) {
+        reject(OverlayContractStatus::InvalidSequence,
+               "activation-root genesis must select overlay sequence one");
+    }
     if (draft.transition == OverlayRootTransition::Qualification &&
         draft.selected_overlay_sequence != draft.sequence_high_water) {
         reject(OverlayContractStatus::InvalidSequence,

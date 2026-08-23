@@ -4561,7 +4561,14 @@
         }
       },
       "deployment_local_overlay_object": {
-        "conditionals": [],
+        "conditionals": [
+          {
+            "assert": {
+              "equals_path": "selector.catalog.operation_kind",
+              "field": "method.operation_kind"
+            }
+          }
+        ],
         "fields": {
           "bound_claims": {
             "required": true,
@@ -4755,10 +4762,16 @@
               "previous_root_sha256"
             ],
             "require_values": {
+              "selected_overlay_sequence": 1,
+              "sequence_high_water": 1,
               "transition": "qualification"
             }
           },
           {
+            "assert": {
+              "field": "selected_overlay_sequence",
+              "less_than_path": "sequence_high_water"
+            },
             "if": {
               "field": "generation",
               "not_equals": 1
@@ -4775,6 +4788,22 @@
             "require_nonnull": [
               "previous_root_sha256"
             ]
+          },
+          {
+            "assert": {
+              "field": "selected_overlay_sequence",
+              "less_than_or_equal_path": "sequence_high_water"
+            }
+          },
+          {
+            "assert": {
+              "equals_path": "sequence_high_water",
+              "field": "selected_overlay_sequence"
+            },
+            "if": {
+              "equals": "qualification",
+              "field": "transition"
+            }
           }
         ],
         "fields": {
@@ -7219,6 +7248,6 @@
     }
   ],
   "schema": "residency.profiles/1.0",
-  "selection_registry_sha256": "5bea79a38e9b2c3755dbda82d8a890dd3ce1b7a14360f1720914b4028c6b11ca",
+  "selection_registry_sha256": "939528245fc5a43862c6a9963cc5dbcd31084f8b9409eafd8155a4e0b22975de",
   "source_support_baseline": "a505bbc702cc1fcd44ef73c44defabc98c36d505"
 }

@@ -1122,6 +1122,12 @@ def require_local_overlay_schemas(
         not overlay.is_valid(architecture_without_predicate),
         "architecture method accepted a missing predicate",
     )
+    wrong_method_operation = copy.deepcopy(examples["deployment_local_overlay_object"])
+    wrong_method_operation["method"]["operation_kind"] = "pressure_reclamation"
+    require(
+        not overlay.is_valid(wrong_method_operation),
+        "overlay method operation diverged from its selector operation",
+    )
 
     fallback = copy.deepcopy(examples["overlay_activation_root"])
     fallback["transition"] = "fallback"
@@ -1141,6 +1147,13 @@ def require_local_overlay_schemas(
         not root.is_valid(genesis_with_predecessor),
         "generation-one root accepted a predecessor",
     )
+    skipped_genesis_sequence = copy.deepcopy(examples["overlay_activation_root"])
+    skipped_genesis_sequence["selected_overlay_sequence"] = 2
+    skipped_genesis_sequence["sequence_high_water"] = 2
+    require(
+        not root.is_valid(skipped_genesis_sequence),
+        "generation-one root accepted a skipped overlay sequence",
+    )
     rollback_without_predecessor = copy.deepcopy(examples["overlay_activation_root"])
     rollback_without_predecessor["generation"] = 2
     rollback_without_predecessor["transition"] = "rollback"
@@ -1153,6 +1166,35 @@ def require_local_overlay_schemas(
     require(
         not root.is_valid(successor_without_predecessor),
         "activation-root successor accepted a missing predecessor",
+    )
+    sequence_above_high_water = copy.deepcopy(examples["overlay_activation_root"])
+    sequence_above_high_water["generation"] = 2
+    sequence_above_high_water["previous_root_sha256"] = "b" * 64
+    sequence_above_high_water["transition"] = "rollback"
+    sequence_above_high_water["selected_overlay_sequence"] = 3
+    sequence_above_high_water["sequence_high_water"] = 2
+    require(
+        not root.is_valid(sequence_above_high_water),
+        "activation root accepted a selected sequence above its high-water",
+    )
+    qualification_below_high_water = copy.deepcopy(examples["overlay_activation_root"])
+    qualification_below_high_water["generation"] = 2
+    qualification_below_high_water["previous_root_sha256"] = "b" * 64
+    qualification_below_high_water["selected_overlay_sequence"] = 1
+    qualification_below_high_water["sequence_high_water"] = 2
+    require(
+        not root.is_valid(qualification_below_high_water),
+        "qualification root selected an overlay below its high-water",
+    )
+    rollback_at_high_water = copy.deepcopy(examples["overlay_activation_root"])
+    rollback_at_high_water["generation"] = 2
+    rollback_at_high_water["previous_root_sha256"] = "b" * 64
+    rollback_at_high_water["transition"] = "rollback"
+    rollback_at_high_water["selected_overlay_sequence"] = 2
+    rollback_at_high_water["sequence_high_water"] = 2
+    require(
+        not root.is_valid(rollback_at_high_water),
+        "rollback root selected the current sequence high-water",
     )
 
 

@@ -1049,6 +1049,14 @@ def _predicate(raw: Mapping[str, Any], label: str) -> dict[str, Any]:
 
 def _consequence(conditional: Mapping[str, Any], label: str) -> dict[str, Any] | None:
     parts: list[dict[str, Any]] = []
+    if "assert" in conditional:
+        assertion = copy.deepcopy(_mapping(conditional["assert"], f"{label}.assert"))
+        keyword = (
+            "x-residency-derived-by"
+            if "selected_by" in assertion
+            else "x-residency-assert"
+        )
+        parts.append({keyword: assertion})
     if "require" in conditional:
         parts.append({"required": conditional["require"]})
     if "forbid" in conditional:
@@ -1092,12 +1100,16 @@ def _conditionals(raw_value: Any) -> list[dict[str, Any]]:
     for index, raw_conditional in enumerate(_list(raw_value, "schema conditionals")):
         conditional = _mapping(raw_conditional, f"schema conditionals[{index}]")
         label = f"schema conditionals[{index}]"
-        predicate_modes = set(conditional) & {"if", "unless", "assert"}
-        if len(predicate_modes) != 1:
-            raise SchemaRenderError(f"{label} must contain exactly one predicate mode")
-        if "assert" in conditional:
+        predicate_modes = set(conditional) & {"if", "unless"}
+        if not predicate_modes:
             if set(conditional) != {"assert"}:
-                raise SchemaRenderError(f"{label}.assert cannot include consequences")
+                if "assert" in conditional:
+                    raise SchemaRenderError(
+                        f"{label}.assert cannot include consequences"
+                    )
+                raise SchemaRenderError(
+                    f"{label} must contain exactly one predicate mode"
+                )
             assertion = copy.deepcopy(
                 _mapping(
                     conditional["assert"],
@@ -1111,6 +1123,8 @@ def _conditionals(raw_value: Any) -> list[dict[str, Any]]:
             )
             result.append({keyword: assertion})
             continue
+        if len(predicate_modes) != 1:
+            raise SchemaRenderError(f"{label} must contain exactly one predicate mode")
         key = "if" if "if" in conditional else "unless"
         raw_predicate = _mapping(conditional.get(key), f"schema conditional {key}")
         predicate = _predicate(raw_predicate, label)
