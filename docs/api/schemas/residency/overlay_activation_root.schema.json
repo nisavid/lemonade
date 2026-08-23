@@ -1180,6 +1180,30 @@
         ]
       },
       "then": {
+        "properties": {
+          "previous_root_sha256": {
+            "not": {
+              "type": "null"
+            }
+          }
+        },
+        "required": [
+          "previous_root_sha256"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "transition": {
+            "const": "rollback"
+          }
+        },
+        "required": [
+          "transition"
+        ]
+      },
+      "then": {
         "allOf": [
           {
             "x-residency-assert": {
@@ -1199,30 +1223,6 @@
               "previous_root_sha256"
             ]
           }
-        ]
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "transition": {
-            "const": "rollback"
-          }
-        },
-        "required": [
-          "transition"
-        ]
-      },
-      "then": {
-        "properties": {
-          "previous_root_sha256": {
-            "not": {
-              "type": "null"
-            }
-          }
-        },
-        "required": [
-          "previous_root_sha256"
         ]
       }
     },

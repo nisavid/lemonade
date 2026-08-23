@@ -4843,11 +4843,7 @@
             },
             "require_nonnull": [
               "previous_root_sha256"
-            ],
-            "assert": {
-              "field": "selected_overlay_sequence",
-              "less_than_path": "sequence_high_water"
-            }
+            ]
           },
           {
             "if": {
@@ -4856,7 +4852,11 @@
             },
             "require_nonnull": [
               "previous_root_sha256"
-            ]
+            ],
+            "assert": {
+              "field": "selected_overlay_sequence",
+              "less_than_path": "sequence_high_water"
+            }
           },
           {
             "assert": {

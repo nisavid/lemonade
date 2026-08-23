@@ -4768,10 +4768,6 @@
             }
           },
           {
-            "assert": {
-              "field": "selected_overlay_sequence",
-              "less_than_path": "sequence_high_water"
-            },
             "if": {
               "field": "generation",
               "not_equals": 1
@@ -4781,6 +4777,10 @@
             ]
           },
           {
+            "assert": {
+              "field": "selected_overlay_sequence",
+              "less_than_path": "sequence_high_water"
+            },
             "if": {
               "equals": "rollback",
               "field": "transition"
@@ -7248,6 +7248,6 @@
     }
   ],
   "schema": "residency.profiles/1.0",
-  "selection_registry_sha256": "939528245fc5a43862c6a9963cc5dbcd31084f8b9409eafd8155a4e0b22975de",
+  "selection_registry_sha256": "5b505272f6f30209ad141ca4fa20da565a9d2f6d5d5720a2d3dd16c2aebe2d19",
   "source_support_baseline": "a505bbc702cc1fcd44ef73c44defabc98c36d505"
 }

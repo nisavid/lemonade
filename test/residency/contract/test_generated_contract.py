@@ -1154,6 +1154,15 @@ def require_local_overlay_schemas(
         not root.is_valid(skipped_genesis_sequence),
         "generation-one root accepted a skipped overlay sequence",
     )
+    successor_qualification = copy.deepcopy(examples["overlay_activation_root"])
+    successor_qualification["generation"] = 2
+    successor_qualification["previous_root_sha256"] = "b" * 64
+    successor_qualification["selected_overlay_sequence"] = 2
+    successor_qualification["sequence_high_water"] = 2
+    require(
+        root.is_valid(successor_qualification),
+        "activation-root schema rejected a successor qualification",
+    )
     rollback_without_predecessor = copy.deepcopy(examples["overlay_activation_root"])
     rollback_without_predecessor["generation"] = 2
     rollback_without_predecessor["transition"] = "rollback"
