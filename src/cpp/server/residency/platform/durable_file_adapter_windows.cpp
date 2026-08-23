@@ -1746,8 +1746,10 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
             if (cleaned == WindowsStageCleanupStatus::Clean) {
                 return publish(bound_child);
             }
-            if (cleaned == WindowsStageCleanupStatus::Unsafe ||
-                !close_windows_directory(bound_child)) {
+            if (cleaned == WindowsStageCleanupStatus::Unsafe) {
+                return reject(&bound_child);
+            }
+            if (!close_windows_directory(bound_child)) {
                 return reject();
             }
             yield_fixed_namespace_convergence();
