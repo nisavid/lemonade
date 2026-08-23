@@ -1058,10 +1058,66 @@ def require_local_overlay_schemas(
                 )
             leap_day = copy.deepcopy(examples[schema_name])
             leap_day[field] = "2028-02-29T23:59:59Z"
+            companion = fields[1] if field == fields[0] else fields[0]
+            leap_day[companion] = (
+                "2028-03-01T00:00:00Z" if field == fields[0] else "2028-02-29T23:59:58Z"
+            )
             require(
                 validator.is_valid(leap_day),
                 f"{schema_name}.{field} rejected a canonical leap-day timestamp",
             )
+        start_field, end_field = fields
+        advancing = copy.deepcopy(examples[schema_name])
+        advancing[start_field] = "2026-09-23T10:01:00Z"
+        advancing[end_field] = "2026-09-23T10:01:01Z"
+        require(
+            validator.is_valid(advancing),
+            f"{schema_name} rejected an advancing timestamp interval",
+        )
+        reverse = copy.deepcopy(advancing)
+        reverse[start_field], reverse[end_field] = (
+            reverse[end_field],
+            reverse[start_field],
+        )
+        require(
+            not validator.is_valid(reverse),
+            f"{schema_name} accepted a reverse timestamp interval",
+        )
+        equal = copy.deepcopy(advancing)
+        equal[end_field] = equal[start_field]
+        require(
+            not validator.is_valid(equal),
+            f"{schema_name} accepted an equal timestamp interval",
+        )
+
+    ordered_values = contract_validator(
+        {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "urn:lemonade:test:residency-ordered-values",
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"left": {}, "right": {}},
+            "required": ["left", "right"],
+            "x-residency-assert": {
+                "field": "left",
+                "less_than_path": "right",
+            },
+            "x-residency-required-keywords": ["x-residency-assert"],
+        }
+    )
+    require(
+        ordered_values.is_valid({"left": 1, "right": 2}),
+        "ordered assertion rejected comparable numeric values",
+    )
+    for incomparable in (
+        {"left": "1", "right": 2},
+        {"left": 1, "right": "2"},
+        {"left": {}, "right": []},
+    ):
+        require(
+            not ordered_values.is_valid(incomparable),
+            "ordered assertion accepted incomparable values",
+        )
 
     incomplete = copy.deepcopy(examples["profiling_input_envelope"])
     incomplete["attribution_complete"] = False

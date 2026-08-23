@@ -1123,6 +1123,12 @@
   "additionalProperties": false,
   "allOf": [
     {
+      "x-residency-assert": {
+        "field": "activated_at",
+        "less_than_path": "expires_at"
+      }
+    },
+    {
       "if": {
         "properties": {
           "generation": {

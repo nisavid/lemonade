@@ -124,16 +124,16 @@ def _validate_residency_assert(
         if actual_is_null != expected_is_null or actual != expected:
             yield from _validation_error(f"{field} must equal the value at {path}")
         return
-    if (
-        actual_is_null
-        or expected_is_null
-        or isinstance(actual, bool)
-        or isinstance(expected, bool)
-        or not isinstance(actual, (int, float))
-        or not isinstance(expected, (int, float))
-    ):
+    numeric_values = (
+        not isinstance(actual, bool)
+        and not isinstance(expected, bool)
+        and isinstance(actual, (int, float))
+        and isinstance(expected, (int, float))
+    )
+    string_values = isinstance(actual, str) and isinstance(expected, str)
+    if actual_is_null or expected_is_null or not (numeric_values or string_values):
         yield from _validation_error(
-            f"{field} and {path} must be numbers for ordered comparison"
+            f"{field} and {path} must be comparable numbers or strings for ordered comparison"
         )
         return
     valid = actual < expected if comparison == "less_than_path" else actual <= expected

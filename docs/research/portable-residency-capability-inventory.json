@@ -4633,6 +4633,12 @@
         "conditionals": [
           {
             "assert": {
+              "field": "qualified_at",
+              "less_than_path": "expires_at"
+            }
+          },
+          {
+            "assert": {
               "field": "method.operation_kind",
               "equals_path": "selector.catalog.operation_kind"
             }
@@ -4823,6 +4829,12 @@
         },
         "conditionals": [
           {
+            "assert": {
+              "field": "activated_at",
+              "less_than_path": "expires_at"
+            }
+          },
+          {
             "if": {
               "field": "generation",
               "equals": 1
@@ -4962,7 +4974,14 @@
             "required": true
           }
         },
-        "conditionals": []
+        "conditionals": [
+          {
+            "assert": {
+              "field": "observed_at",
+              "less_than_path": "fresh_until"
+            }
+          }
+        ]
       },
       "reason": {
         "version": {
