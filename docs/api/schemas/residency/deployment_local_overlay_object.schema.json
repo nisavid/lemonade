@@ -1121,6 +1121,14 @@
   "$id": "residency.deployment_local_overlay_object/1.0",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "x-residency-assert": {
+        "equals_path": "selector.catalog.operation_kind",
+        "field": "method.operation_kind"
+      }
+    }
+  ],
   "properties": {
     "bound_claims": {
       "$ref": "#/$defs/claim_closure"
@@ -1200,6 +1208,7 @@
   "title": "Deployment Local Overlay Object",
   "type": "object",
   "x-residency-required-keywords": [
-    "x-max-utf8-bytes"
+    "x-max-utf8-bytes",
+    "x-residency-assert"
   ]
 }

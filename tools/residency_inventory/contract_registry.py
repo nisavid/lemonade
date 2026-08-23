@@ -20,7 +20,7 @@ from .contract import (
 )
 
 EXPECTED_REGISTRY_DIGEST = (
-    "6bdeb883210c78455ee493360e4e7f23345ca10417a805d87666612e0f633423"
+    "35bdaa0e6cf4cff0c54cb6d4f7560b1686f45335f79b0da5195d5c05f8d9f17f"
 )
 EXPECTED_REGISTRY_KEYS = [
     "schema",
@@ -1147,6 +1147,8 @@ def _validate_schema_predicate(
     fields: dict[str, Any],
     registry: dict[str, Any],
     label: str,
+    *,
+    allow_field_path: bool = False,
 ) -> None:
     allowed = {
         "cause",
@@ -1156,6 +1158,8 @@ def _validate_schema_predicate(
         "equals_path",
         "field",
         "in",
+        "less_than_or_equal_path",
+        "less_than_path",
         "not_equals",
         "not_in",
         "publish_disposition",
@@ -1169,7 +1173,19 @@ def _validate_schema_predicate(
         fail(f"{label} has unknown predicate fields: {sorted(unknown)}")
     if "field" in predicate:
         field_name = require_string(predicate["field"], f"{label}.field")
-        if field_name not in fields and field_name != "detail_schema_id":
+        field_root = field_name
+        if allow_field_path:
+            if (
+                re.fullmatch(
+                    r"[A-Za-z_][A-Za-z0-9_]*(?:\[(?:0|[1-9][0-9]*)\])*"
+                    r"(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[(?:0|[1-9][0-9]*)\])*)*",
+                    field_name,
+                )
+                is None
+            ):
+                fail(f"{label}.field is not a valid schema path")
+            field_root = field_name.split(".", maxsplit=1)[0].split("[", maxsplit=1)[0]
+        if field_root not in fields and field_root != "detail_schema_id":
             fail(f"{label}.field references unknown schema field {field_name}")
     if "selected_by" in predicate:
         _validate_conditional_fields(
@@ -1189,8 +1205,9 @@ def _validate_schema_predicate(
     for key in ("in", "not_in", "result_not_in"):
         if key in predicate:
             require_string_list(predicate[key], f"{label}.{key}")
-    if "equals_path" in predicate:
-        require_string(predicate["equals_path"], f"{label}.equals_path")
+    for key in ("equals_path", "less_than_path", "less_than_or_equal_path"):
+        if key in predicate:
+            require_string(predicate[key], f"{label}.{key}")
 
 
 def _schema_predicate_is_translatable(predicate: dict[str, Any]) -> bool:
@@ -1229,16 +1246,26 @@ def _validate_schema_conditional(
     unknown = set(conditional) - allowed
     if unknown:
         fail(f"{label} has unknown fields: {sorted(unknown)}")
-    predicate_modes = set(conditional) & {"if", "unless", "assert"}
-    if len(predicate_modes) != 1:
+    predicate_modes = set(conditional) & {"if", "unless"}
+    if not predicate_modes and set(conditional) != {"assert"}:
+        if "assert" in conditional:
+            fail(f"{label}.assert cannot include consequences")
         fail(f"{label} must contain exactly one predicate mode")
-    if "assert" in predicate_modes and set(conditional) != {"assert"}:
-        fail(f"{label}.assert cannot include consequences")
+    if len(predicate_modes) > 1:
+        fail(f"{label} must contain exactly one predicate mode")
     for key in ("if", "unless", "assert"):
         if key in conditional:
             predicate = require_mapping(conditional[key], f"{label}.{key}")
-            _validate_schema_predicate(predicate, fields, registry, f"{label}.{key}")
-            if key != "assert" and not _schema_predicate_is_translatable(predicate):
+            _validate_schema_predicate(
+                predicate,
+                fields,
+                registry,
+                f"{label}.{key}",
+                allow_field_path=key == "assert",
+            )
+            if key in {"if", "unless"} and not _schema_predicate_is_translatable(
+                predicate
+            ):
                 fail(f"{label}.{key} predicate is not translatable")
     for key in (
         "allow_empty",

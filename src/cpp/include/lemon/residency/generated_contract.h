@@ -9,7 +9,7 @@
 
 namespace lemon::residency {
 
-inline constexpr std::string_view packaged_catalog_sha256 = "8c09d12881e4e93b34d685bee8645187b3eb9867a39b312d6a386c4391f3a2d1";
+inline constexpr std::string_view packaged_catalog_sha256 = "ee895498bc81b1cc4c022a0ba2698c84f8b1ebc5a9563895bb977cc33f4d2117";
 inline constexpr std::string_view explanation_schema_id = "residency.explanation/1.0";
 inline constexpr SchemaVersion explanation_schema_version{1, 0};
 inline constexpr std::size_t max_explanation_reasons = 16;

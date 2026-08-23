@@ -98,17 +98,48 @@ def _validate_residency_assert(
     if not isinstance(instance, Mapping) or not isinstance(assertion, Mapping):
         return
     field = assertion.get("field")
-    equals_path = assertion.get("equals_path")
-    if not isinstance(field, str) or not isinstance(equals_path, str):
+    comparisons = {
+        key: assertion.get(key)
+        for key in (
+            "equals_path",
+            "less_than_path",
+            "less_than_or_equal_path",
+        )
+        if key in assertion
+    }
+    if (
+        not isinstance(field, str)
+        or len(comparisons) != 1
+        or not all(isinstance(path, str) for path in comparisons.values())
+    ):
         return
-    actual = instance.get(field, _MISSING)
-    expected = _resolve_path(instance, equals_path)
+    comparison, path = next(iter(comparisons.items()))
+    actual = _resolve_path(instance, field)
+    expected = _resolve_path(instance, path)
     actual_is_null = actual is _MISSING or actual is None
     expected_is_null = expected is _MISSING or expected is None
-    if actual_is_null and expected_is_null:
+    if comparison == "equals_path":
+        if actual_is_null and expected_is_null:
+            return
+        if actual_is_null != expected_is_null or actual != expected:
+            yield from _validation_error(f"{field} must equal the value at {path}")
         return
-    if actual_is_null != expected_is_null or actual != expected:
-        yield from _validation_error(f"{field} must equal the value at {equals_path}")
+    if (
+        actual_is_null
+        or expected_is_null
+        or isinstance(actual, bool)
+        or isinstance(expected, bool)
+        or not isinstance(actual, (int, float))
+        or not isinstance(expected, (int, float))
+    ):
+        yield from _validation_error(
+            f"{field} and {path} must be numbers for ordered comparison"
+        )
+        return
+    valid = actual < expected if comparison == "less_than_path" else actual <= expected
+    if not valid:
+        relation = "less than" if comparison == "less_than_path" else "at most"
+        yield from _validation_error(f"{field} must be {relation} the value at {path}")
 
 
 ResidencyDraft202012Validator = validators.extend(
@@ -154,18 +185,24 @@ def _declared_keywords(schema: Mapping[str, Any]) -> set[str]:
 
 
 def _validate_assertion(value: Any) -> None:
-    if not isinstance(value, Mapping) or set(value) != {"field", "equals_path"}:
-        _schema_error("x-residency-assert supports only field/equals_path assertions")
+    if not isinstance(value, Mapping):
+        _schema_error("x-residency-assert must be an object")
+    comparisons = set(value) & {
+        "equals_path",
+        "less_than_path",
+        "less_than_or_equal_path",
+    }
+    if len(comparisons) != 1 or set(value) != {"field", *comparisons}:
+        _schema_error(
+            "x-residency-assert requires field and exactly one path comparison"
+        )
     field = value["field"]
-    path = value["equals_path"]
-    if (
-        not isinstance(field, str)
-        or _PATH_SEGMENT.fullmatch(field) is None
-        or "[" in field
-    ):
-        _schema_error("x-residency-assert field must be a root field name")
+    comparison = next(iter(comparisons))
+    path = value[comparison]
+    if not isinstance(field, str) or _path_tokens(field) is None:
+        _schema_error("x-residency-assert field path is invalid")
     if not isinstance(path, str) or _path_tokens(path) is None:
-        _schema_error("x-residency-assert equals_path is invalid")
+        _schema_error(f"x-residency-assert {comparison} is invalid")
 
 
 def _used_keywords(schema: Mapping[str, Any]) -> set[str]:

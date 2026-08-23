@@ -1147,11 +1147,19 @@
           },
           {
             "properties": {
+              "selected_overlay_sequence": {
+                "const": 1
+              },
+              "sequence_high_water": {
+                "const": 1
+              },
               "transition": {
                 "const": "qualification"
               }
             },
             "required": [
+              "selected_overlay_sequence",
+              "sequence_high_water",
               "transition"
             ]
           }
@@ -1172,15 +1180,25 @@
         ]
       },
       "then": {
-        "properties": {
-          "previous_root_sha256": {
-            "not": {
-              "type": "null"
+        "allOf": [
+          {
+            "x-residency-assert": {
+              "field": "selected_overlay_sequence",
+              "less_than_path": "sequence_high_water"
             }
+          },
+          {
+            "properties": {
+              "previous_root_sha256": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "previous_root_sha256"
+            ]
           }
-        },
-        "required": [
-          "previous_root_sha256"
         ]
       }
     },
@@ -1206,6 +1224,30 @@
         "required": [
           "previous_root_sha256"
         ]
+      }
+    },
+    {
+      "x-residency-assert": {
+        "field": "selected_overlay_sequence",
+        "less_than_or_equal_path": "sequence_high_water"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "transition": {
+            "const": "qualification"
+          }
+        },
+        "required": [
+          "transition"
+        ]
+      },
+      "then": {
+        "x-residency-assert": {
+          "equals_path": "sequence_high_water",
+          "field": "selected_overlay_sequence"
+        }
       }
     }
   ],
@@ -1298,6 +1340,7 @@
   "title": "Overlay Activation Root",
   "type": "object",
   "x-residency-required-keywords": [
-    "x-max-utf8-bytes"
+    "x-max-utf8-bytes",
+    "x-residency-assert"
   ]
 }

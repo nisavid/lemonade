@@ -538,6 +538,15 @@ void require_activation_root_codec() {
             tamper_once(canonical, "\"generation\":1", "\"generation\":2")),
         OverlayContractStatus::InvalidSequence,
         "activation root accepted a generation without a predecessor");
+
+    auto skipped_genesis_sequence = root_draft(*overlay.candidate);
+    skipped_genesis_sequence.selected_overlay_sequence = 2;
+    skipped_genesis_sequence.sequence_high_water = 2;
+    require_rejected(
+        seal_overlay_activation_root(std::move(skipped_genesis_sequence)),
+        OverlayContractStatus::InvalidSequence,
+        "activation-root genesis accepted a skipped overlay sequence");
+
     require_rejected(parse_overlay_activation_root(tamper_once(
                          canonical, "\"authority_status\":\"active\",", "")),
                      OverlayContractStatus::InvalidValue,
