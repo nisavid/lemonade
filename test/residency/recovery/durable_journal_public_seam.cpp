@@ -5773,6 +5773,70 @@ void require_native_fixed_namespace_factory() {
                 read_bytes(stage) == "caller-owned-stage" &&
                 !std::filesystem::exists(staged_parent.path() / child_name),
             "native fixed-namespace factory changed an unsafe stage");
+
+    NativeDirectory lifetime_root("task119-fixed-namespace-lifetime");
+    const auto original_lineage = lifetime_root.path() / "original-lineage";
+    const auto moved_lineage = lifetime_root.path() / "moved-lineage";
+    const auto original_parent = original_lineage / "cache";
+    std::filesystem::create_directories(original_parent);
+    auto retained = make_platform_durable_file_adapter_in_fixed_namespace(
+        original_parent, child_name);
+    require(retained->lock_authority().succeeded(),
+            "Windows fixed namespace did not acquire its initial authority");
+    const auto retained_identity = retained->authority_identity();
+    require(retained_identity.result.succeeded() &&
+                retained->unlock_authority().succeeded(),
+            "Windows fixed namespace did not expose its initial authority");
+
+    std::error_code rename_error;
+    std::filesystem::rename(original_lineage, moved_lineage, rename_error);
+    require(rename_error && std::filesystem::is_directory(original_lineage) &&
+                !std::filesystem::exists(moved_lineage),
+            "Windows live descendant handle did not pin its ancestor");
+    require(retained->lock_authority().succeeded(),
+            "Windows fixed namespace lost authority after rejected rename");
+    const auto unchanged_identity = retained->authority_identity();
+    require(unchanged_identity.result.succeeded() &&
+                unchanged_identity.identity == retained_identity.identity &&
+                retained->unlock_authority().succeeded(),
+            "Windows rejected rename changed the fixed namespace lineage");
+
+    NativeDirectory missing_child_stage_parent(
+        "task119-fixed-namespace-stage-handle-missing-child");
+    const auto missing_child_stage =
+        missing_child_stage_parent.path() /
+        ".residency-local-overlay.directory-stage";
+    std::filesystem::create_directory(missing_child_stage);
+    write_bytes(missing_child_stage / "caller-owned", "sentinel");
+
+    NativeDirectory existing_child_stage_parent(
+        "task119-fixed-namespace-stage-handle-existing-child");
+    std::filesystem::create_directory(existing_child_stage_parent.path() /
+                                      child_name);
+    const auto existing_child_stage =
+        existing_child_stage_parent.path() /
+        ".residency-local-overlay.directory-stage";
+    std::filesystem::create_directory(existing_child_stage);
+    write_bytes(existing_child_stage / "caller-owned", "sentinel");
+
+    DWORD handles_before = 0;
+    DWORD handles_after = 0;
+    require(::GetProcessHandleCount(::GetCurrentProcess(), &handles_before) != 0,
+            "Windows process handle count was unavailable");
+    for (int attempt = 0; attempt < 32; ++attempt) {
+        auto missing_child_rejected =
+            make_platform_durable_file_adapter_in_fixed_namespace(
+                missing_child_stage_parent.path(), child_name);
+        auto existing_child_rejected =
+            make_platform_durable_file_adapter_in_fixed_namespace(
+                existing_child_stage_parent.path(), child_name);
+        require(!missing_child_rejected->lock_authority().succeeded() &&
+                    !existing_child_rejected->lock_authority().succeeded(),
+                "Windows fixed namespace accepted a nonempty stage");
+    }
+    require(::GetProcessHandleCount(::GetCurrentProcess(), &handles_after) != 0 &&
+                handles_after == handles_before,
+            "Windows rejected stage directories leaked bound handles");
 #endif
 }
 
