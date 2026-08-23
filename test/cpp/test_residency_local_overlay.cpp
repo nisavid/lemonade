@@ -60,6 +60,28 @@ std::vector<ClaimFamilyClosure> claims(std::uint64_t bytes) {
     };
 }
 
+std::vector<ClaimFamilyClosure> compatibility_claims(bool claimed) {
+    std::vector<ClaimAmount> compatibility;
+    if (claimed) {
+        compatibility.push_back(
+            ClaimAmount{"npu/exclusive", ClaimUnit::Count, 1});
+    }
+    return {
+        ClaimFamilyClosure{ClaimFamily::ConsumableCapacity,
+                           ClaimCompleteness::KnownZero, {}},
+        ClaimFamilyClosure{ClaimFamily::SafetyFloor,
+                           ClaimCompleteness::KnownZero, {}},
+        ClaimFamilyClosure{ClaimFamily::CardinalityPool,
+                           ClaimCompleteness::KnownZero, {}},
+        ClaimFamilyClosure{
+            ClaimFamily::CompatibilityExclusivity,
+            claimed ? ClaimCompleteness::Bounded
+                    : ClaimCompleteness::KnownZero,
+            std::move(compatibility),
+        },
+    };
+}
+
 LocalOverlaySelectorIdentity selector() {
     RuntimeCatalogSelector catalog;
     catalog.source_support_baseline = std::string(40, 'a');
@@ -489,6 +511,18 @@ void require_overlay_object_codec() {
     require_rejected(seal_local_overlay(std::move(zero_slack)),
                      OverlayContractStatus::InvalidClaimClosure,
                      "overlay seal accepted a zero safety margin");
+
+    auto unreclosable_conservative = overlay_draft(*profile.candidate);
+    unreclosable_conservative.bound_claims = compatibility_claims(true);
+    unreclosable_conservative.uncertainty_claims =
+        compatibility_claims(false);
+    unreclosable_conservative.safety_margin_claims =
+        compatibility_claims(true);
+    require_rejected(
+        seal_local_overlay(std::move(unreclosable_conservative)),
+        OverlayContractStatus::InvalidClaimClosure,
+        "overlay sealed a conservative compatibility claim that cannot be "
+        "reclosed");
 
     auto overflowing_claims = overlay_draft(*profile.candidate);
     overflowing_claims.bound_claims =

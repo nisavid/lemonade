@@ -1100,11 +1100,17 @@ normalize_overlay_claims(LocalOverlayObjectDraft &draft) {
     const auto bound_and_uncertainty = added_claims(bound, uncertainty);
     const auto conservative =
         added_claims(bound_and_uncertainty, safety_margin);
+    auto conservative_closure = claim_closure(conservative);
+    const auto rechecked_conservative =
+        check_claim_closure(conservative_closure);
+    if (!rechecked_conservative.accepted()) {
+        reject_claims(rechecked_conservative);
+    }
     NormalizedOverlayClaims result{
         claim_closure(bound),
         claim_closure(uncertainty),
         claim_closure(safety_margin),
-        claim_closure(conservative),
+        std::move(conservative_closure),
     };
     draft.bound_claims = result.bound;
     draft.uncertainty_claims = result.uncertainty;
