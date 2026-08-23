@@ -20,7 +20,7 @@ from .contract import (
 )
 
 EXPECTED_REGISTRY_DIGEST = (
-    "3109bd5d1d424a4b81782d4ebe3854aba0053cfa3045856ec2dcea135d003d1d"
+    "115175ace80c298c19628dc396dcc2f36fc5273a550b847e2a3bb814409c37cc"
 )
 EXPECTED_REGISTRY_KEYS = [
     "schema",
@@ -66,7 +66,10 @@ EXPECTED_SCHEMA_KEYS = [
     "artifact_writer_request_result",
     "authority_transaction_result",
     "coordinator_step_result",
+    "deployment_local_overlay_object",
     "operation_revision",
+    "overlay_activation_root",
+    "profiling_input_envelope",
     "reason",
     "request_error",
     "residency_profiles",
@@ -328,6 +331,21 @@ SCHEMA_FIELD_TYPES = {
     "http_status",
     "identity_scope_array",
     "literal",
+    "local_overlay_authority_status",
+    "local_overlay_claim_closure",
+    "local_overlay_confidence_basis_points",
+    "local_overlay_decision_trace_reference",
+    "local_overlay_deployment_identity",
+    "local_overlay_expiry",
+    "local_overlay_method_identity",
+    "local_overlay_object_status",
+    "local_overlay_previous_root_reference",
+    "local_overlay_positive_uint64",
+    "local_overlay_required_true",
+    "local_overlay_root_transition",
+    "local_overlay_schema_version",
+    "local_overlay_selector_identity",
+    "local_overlay_source_generations",
     "nullable_enum_ref",
     "nullable_opaque",
     "nullable_reason_code",

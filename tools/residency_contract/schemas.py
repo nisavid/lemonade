@@ -14,13 +14,56 @@ SCHEMA_KEYS = (
     "artifact_writer_request_result",
     "authority_transaction_result",
     "coordinator_step_result",
+    "deployment_local_overlay_object",
     "operation_revision",
+    "overlay_activation_root",
+    "profiling_input_envelope",
     "reason",
     "request_error",
     "residency_profiles",
     "resource_diagnostic",
     "response_diagnostic",
     "staged_import_session_record",
+)
+LOCAL_OVERLAY_SCHEMA_KEYS = frozenset(
+    {
+        "deployment_local_overlay_object",
+        "overlay_activation_root",
+        "profiling_input_envelope",
+    }
+)
+LOCAL_OVERLAY_TEMPLATE_OPERATIONS = {
+    "ADM": ("admission",),
+    "LFR": ("admission",),
+    "PRE": ("pressure_reclamation",),
+    "STA": ("startup_load",),
+    "REC": (
+        "service_termination",
+        "dead_backend_pruning",
+        "same_epoch_recovery_cleanup",
+        "prior_epoch_owner_cleanup",
+        "artifact_scope_recovery_cleanup",
+    ),
+    "UNL": ("explicit_unload", "force_unload"),
+    "PIN": (
+        "saved_pin_mutation",
+        "runtime_pin_mutation",
+        "legacy_pin_batch",
+        "resident_state_recovery_cleanup",
+    ),
+    "NPC": ("admission",),
+}
+LOCAL_OVERLAY_OPERATION_TEMPLATES = tuple(LOCAL_OVERLAY_TEMPLATE_OPERATIONS)
+LOCAL_OVERLAY_CONSTRAINT_KINDS = (
+    "flm_type_slot",
+    "gpu_provider_resolved_capacity",
+    "gpu_shared_residency",
+    "host_effects_provider_resolved",
+    "host_memavailable_floor",
+    "model_type_pool",
+    "npu_cross_family",
+    "npu_exclusive",
+    "ownership",
 )
 REQUIRED_SCHEMA_KEYWORDS = (
     "x-max-utf8-bytes",
@@ -112,6 +155,295 @@ def _registry_values(registry: Mapping[str, Any], reference: str) -> list[str]:
 def _enum_ref(registry: Mapping[str, Any], reference: str) -> dict[str, Any]:
     values = _registry_values(registry, reference)
     return _string_schema(values=values, max_length=max(map(len, values)))
+
+
+def _local_overlay_claim_family(
+    family: str, unit: str, *, compatibility: bool = False
+) -> dict[str, Any]:
+    amount = {"type": "integer", "minimum": 1, "maximum": UINT64_MAX}
+    if compatibility:
+        amount = {"const": 1, "type": "integer"}
+    entry = _object(
+        {
+            "amount": amount,
+            "constraint_id": _opaque(),
+            "unit": {"const": unit},
+        },
+        ("amount", "constraint_id", "unit"),
+    )
+    bounded = _object(
+        {
+            "completeness": {"const": "bounded"},
+            "entries": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 256,
+                "items": entry,
+                "x-canonical-order": True,
+            },
+            "family": {"const": family},
+        },
+        ("completeness", "entries", "family"),
+    )
+    empty = [
+        _object(
+            {
+                "completeness": {"const": completeness},
+                "entries": {"type": "array", "maxItems": 0},
+                "family": {"const": family},
+            },
+            ("completeness", "entries", "family"),
+        )
+        for completeness in ("known_zero", "not_applicable")
+    ]
+    return {"oneOf": [bounded, *empty]}
+
+
+def _local_overlay_claim_closure() -> dict[str, Any]:
+    families = (
+        _local_overlay_claim_family("consumable_capacity", "bytes"),
+        _local_overlay_claim_family("safety_floor", "bytes"),
+        _local_overlay_claim_family("cardinality_pool", "count"),
+        _local_overlay_claim_family(
+            "compatibility_exclusivity", "count", compatibility=True
+        ),
+    )
+    return {
+        "type": "array",
+        "minItems": len(families),
+        "maxItems": len(families),
+        "prefixItems": list(families),
+        "items": False,
+        "x-canonical-order": True,
+    }
+
+
+def _local_overlay_catalog_selector(registry: Mapping[str, Any]) -> dict[str, Any]:
+    operation_kinds = _registry_values(
+        registry, "operation_registry.aliases.all_operations"
+    )
+    result = _object(
+        {
+            "backend_channel": _opaque(),
+            "base_variant": _opaque(),
+            "constraints": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": len(LOCAL_OVERLAY_CONSTRAINT_KINDS),
+                "uniqueItems": True,
+                "items": _string_schema(
+                    values=LOCAL_OVERLAY_CONSTRAINT_KINDS,
+                    max_length=max(map(len, LOCAL_OVERLAY_CONSTRAINT_KINDS)),
+                ),
+                "x-canonical-order": True,
+            },
+            "material_profiles": {
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 32,
+                "propertyNames": _opaque(),
+                "additionalProperties": _opaque(),
+            },
+            "model_type": _opaque(),
+            "operation_kind": _string_schema(
+                values=operation_kinds, max_length=max(map(len, operation_kinds))
+            ),
+            "operation_template": _string_schema(
+                values=LOCAL_OVERLAY_OPERATION_TEMPLATES,
+                max_length=max(map(len, LOCAL_OVERLAY_OPERATION_TEMPLATES)),
+            ),
+            "platform": _opaque(),
+            "recovery": _opaque(),
+            "source_support_baseline": _fixed_lower_hex(40),
+        },
+        (
+            "backend_channel",
+            "base_variant",
+            "constraints",
+            "material_profiles",
+            "model_type",
+            "operation_kind",
+            "operation_template",
+            "platform",
+            "recovery",
+            "source_support_baseline",
+        ),
+    )
+    result["allOf"] = [
+        {
+            "if": {
+                "properties": {"operation_template": {"const": template}},
+                "required": ["operation_template"],
+            },
+            "then": {
+                "properties": {
+                    "operation_kind": _string_schema(
+                        values=operations,
+                        max_length=max(map(len, operations)),
+                    )
+                },
+                "required": ["operation_kind"],
+            },
+        }
+        for template, operations in LOCAL_OVERLAY_TEMPLATE_OPERATIONS.items()
+    ]
+    return result
+
+
+def _local_overlay_selector_identity(registry: Mapping[str, Any]) -> dict[str, Any]:
+    return _object(
+        {
+            "backend_build_sha256": _fixed_lower_hex(64),
+            "canonical_model_id": _opaque(),
+            "catalog": _local_overlay_catalog_selector(registry),
+            "catalog_sha256": _fixed_lower_hex(64),
+            "configuration_sha256": _fixed_lower_hex(64),
+            "dependency_set_sha256": _fixed_lower_hex(64),
+            "device_identity_sha256": _fixed_lower_hex(64),
+            "driver_identity_sha256": _fixed_lower_hex(64),
+            "model_artifact_sha256": _fixed_lower_hex(64),
+            "operation_contract_sha256": _fixed_lower_hex(64),
+            "topology_sha256": _fixed_lower_hex(64),
+            "workload_sha256": _fixed_lower_hex(64),
+        },
+        (
+            "backend_build_sha256",
+            "canonical_model_id",
+            "catalog",
+            "catalog_sha256",
+            "configuration_sha256",
+            "dependency_set_sha256",
+            "device_identity_sha256",
+            "driver_identity_sha256",
+            "model_artifact_sha256",
+            "operation_contract_sha256",
+            "topology_sha256",
+            "workload_sha256",
+        ),
+    )
+
+
+def _local_overlay_source_generations() -> dict[str, Any]:
+    generation = {"type": "integer", "minimum": 1, "maximum": UINT64_MAX}
+    fields = (
+        "backend",
+        "configuration",
+        "device",
+        "driver",
+        "model",
+        "topology",
+        "workload",
+    )
+    return _object({field: generation for field in fields}, fields)
+
+
+def _local_overlay_method_identity(registry: Mapping[str, Any]) -> dict[str, Any]:
+    operation_kinds = _registry_values(
+        registry, "operation_registry.aliases.all_operations"
+    )
+    result = _object(
+        {
+            "architecture_predicate_sha256": {
+                "oneOf": [{"type": "null"}, _fixed_lower_hex(64)]
+            },
+            "calibration_revision_sha256": _fixed_lower_hex(64),
+            "method_id": _opaque(),
+            "method_revision_sha256": _fixed_lower_hex(64),
+            "operation_kind": _string_schema(
+                values=operation_kinds, max_length=max(map(len, operation_kinds))
+            ),
+            "scope": _string_schema(
+                values=("architecture_predicate", "deployment_exact"),
+                max_length=len("architecture_predicate"),
+            ),
+        },
+        (
+            "architecture_predicate_sha256",
+            "calibration_revision_sha256",
+            "method_id",
+            "method_revision_sha256",
+            "operation_kind",
+            "scope",
+        ),
+    )
+    result["allOf"] = [
+        {
+            "if": {
+                "properties": {"scope": {"const": "architecture_predicate"}},
+                "required": ["scope"],
+            },
+            "then": {
+                "properties": {
+                    "architecture_predicate_sha256": {"not": {"type": "null"}}
+                },
+                "required": ["architecture_predicate_sha256"],
+            },
+        },
+        {
+            "if": {
+                "properties": {"scope": {"const": "deployment_exact"}},
+                "required": ["scope"],
+            },
+            "then": {
+                "properties": {"architecture_predicate_sha256": {"type": "null"}},
+                "required": ["architecture_predicate_sha256"],
+            },
+        },
+    ]
+    return result
+
+
+def _local_overlay_definitions(registry: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "authority_status": {"const": "active"},
+        "claim_closure": _local_overlay_claim_closure(),
+        "decision_trace_reference": _fixed_lower_hex(64),
+        "deployment_identity": _fixed_lower_hex(64),
+        "expiry": {"type": "string", "format": "date-time"},
+        "method_identity": _local_overlay_method_identity(registry),
+        "object_status": {"const": "qualified"},
+        "previous_root_reference": {"oneOf": [{"type": "null"}, _fixed_lower_hex(64)]},
+        "root_transition": _string_schema(
+            values=("qualification", "rollback"), max_length=len("qualification")
+        ),
+        "schema_version": _object(
+            {"major": {"const": 1}, "minor": {"const": 0}},
+            ("major", "minor"),
+        ),
+        "selector_identity": _local_overlay_selector_identity(registry),
+        "source_generations": _local_overlay_source_generations(),
+    }
+
+
+def _local_overlay_field_schema(
+    name: str,
+    spec: Mapping[str, Any],
+    registry: Mapping[str, Any],
+    catalog: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    del name, registry, catalog
+    if spec["type"] == "local_overlay_positive_uint64":
+        return {"type": "integer", "minimum": 1, "maximum": UINT64_MAX}
+    if spec["type"] == "local_overlay_confidence_basis_points":
+        return {"type": "integer", "minimum": 1, "maximum": 10000}
+    if spec["type"] == "local_overlay_required_true":
+        return {"const": True}
+    definitions = {
+        "local_overlay_authority_status": "authority_status",
+        "local_overlay_claim_closure": "claim_closure",
+        "local_overlay_decision_trace_reference": "decision_trace_reference",
+        "local_overlay_deployment_identity": "deployment_identity",
+        "local_overlay_expiry": "expiry",
+        "local_overlay_method_identity": "method_identity",
+        "local_overlay_object_status": "object_status",
+        "local_overlay_previous_root_reference": "previous_root_reference",
+        "local_overlay_root_transition": "root_transition",
+        "local_overlay_schema_version": "schema_version",
+        "local_overlay_selector_identity": "selector_identity",
+        "local_overlay_source_generations": "source_generations",
+    }
+    definition = definitions.get(spec["type"])
+    return None if definition is None else {"$ref": f"#/$defs/{definition}"}
 
 
 def _identity_scope(registry: Mapping[str, Any]) -> dict[str, Any]:
@@ -433,6 +765,7 @@ def _field_schema(
     if not isinstance(field_type, str):
         raise SchemaRenderError(f"schema field {name}.type is invalid")
     for renderer in (
+        _local_overlay_field_schema,
         _text_field_schema,
         _scalar_field_schema,
         _reason_field_schema,
@@ -883,6 +1216,8 @@ def _schema_document(
         document_definitions = (
             {"reason": _reason_reference(registry, key)} if uses_reason else {}
         )
+        if key in LOCAL_OVERLAY_SCHEMA_KEYS:
+            document_definitions.update(_local_overlay_definitions(registry))
         if key == "request_error":
             root.setdefault("allOf", []).extend(
                 _request_error_http_conditionals(registry, reason_rows)
@@ -958,6 +1293,10 @@ def _simple_field_example(
     field_type = spec["type"]
     if field_type in {"schema_literal", "literal"}:
         return True, spec["value"]
+    if field_type == "git_commit_sha1":
+        return True, "0" * 40
+    if field_type == "sha256":
+        return True, "0" * 64
     if field_type in {"opaque", "utf8"}:
         return True, f"{name}-1"
     if field_type in {"nullable_opaque", "nullable_enum_ref", "nullable_rfc3339"}:
@@ -973,6 +1312,107 @@ def _simple_field_example(
     if field_type == "rfc3339":
         return True, "2026-01-01T00:00:00Z"
     return False, None
+
+
+def _local_overlay_claim_example() -> list[dict[str, Any]]:
+    return [
+        {
+            "completeness": "bounded",
+            "entries": [{"amount": 4096, "constraint_id": "gpu/gtt", "unit": "bytes"}],
+            "family": "consumable_capacity",
+        },
+        {"completeness": "known_zero", "entries": [], "family": "safety_floor"},
+        {
+            "completeness": "known_zero",
+            "entries": [],
+            "family": "cardinality_pool",
+        },
+        {
+            "completeness": "not_applicable",
+            "entries": [],
+            "family": "compatibility_exclusivity",
+        },
+    ]
+
+
+def _local_overlay_selector_example() -> dict[str, Any]:
+    return {
+        "backend_build_sha256": "2" * 64,
+        "canonical_model_id": "model/alpha",
+        "catalog": {
+            "backend_channel": "stable",
+            "base_variant": "llamacpp-rocm",
+            "constraints": ["gpu_shared_residency"],
+            "material_profiles": {
+                "configuration_profile": "profile-free-residency-estimation-v1-text-only",
+                "hardware_profile": "hatchery-gfx1151-shared-gtt-v1",
+                "workload_profile": "hatchery-text-generation-campaign-v1",
+            },
+            "model_type": "llm",
+            "operation_kind": "admission",
+            "operation_template": "ADM",
+            "platform": "linux-amd-rocm-llamacpp",
+            "recovery": "native_subprocess_tree",
+            "source_support_baseline": "a" * 40,
+        },
+        "catalog_sha256": "1" * 64,
+        "configuration_sha256": "8" * 64,
+        "dependency_set_sha256": "5" * 64,
+        "device_identity_sha256": "3" * 64,
+        "driver_identity_sha256": "6" * 64,
+        "model_artifact_sha256": "9" * 64,
+        "operation_contract_sha256": "0" * 64,
+        "topology_sha256": "4" * 64,
+        "workload_sha256": "7" * 64,
+    }
+
+
+def _local_overlay_field_example(
+    name: str,
+    spec: Mapping[str, Any],
+    registry: Mapping[str, Any],
+    reason_rows: list[dict[str, Any]],
+) -> tuple[bool, Any]:
+    del name, registry, reason_rows
+    field_type = spec["type"]
+    if field_type == "local_overlay_positive_uint64":
+        return True, 1
+    if field_type == "local_overlay_confidence_basis_points":
+        return True, 9900
+    if field_type == "local_overlay_required_true":
+        return True, True
+    examples: dict[str, Any] = {
+        "local_overlay_authority_status": "active",
+        "local_overlay_claim_closure": _local_overlay_claim_example(),
+        "local_overlay_decision_trace_reference": "d" * 64,
+        "local_overlay_deployment_identity": "b" * 64,
+        "local_overlay_expiry": "2026-09-23T10:01:00Z",
+        "local_overlay_method_identity": {
+            "architecture_predicate_sha256": None,
+            "calibration_revision_sha256": "2" * 64,
+            "method_id": "method/exact-profile",
+            "method_revision_sha256": "1" * 64,
+            "operation_kind": "admission",
+            "scope": "deployment_exact",
+        },
+        "local_overlay_object_status": "qualified",
+        "local_overlay_previous_root_reference": None,
+        "local_overlay_root_transition": "qualification",
+        "local_overlay_schema_version": {"major": 1, "minor": 0},
+        "local_overlay_selector_identity": _local_overlay_selector_example(),
+        "local_overlay_source_generations": {
+            "backend": 2,
+            "configuration": 6,
+            "device": 3,
+            "driver": 5,
+            "model": 1,
+            "topology": 4,
+            "workload": 7,
+        },
+    }
+    if field_type not in examples:
+        return False, None
+    return True, copy.deepcopy(examples[field_type])
 
 
 def _registry_field_example(
@@ -1054,6 +1494,7 @@ def _field_example(
     spec = _mapping(raw_spec, f"example field {name}")
     field_type = spec["type"]
     for renderer in (
+        _local_overlay_field_example,
         _simple_field_example,
         _registry_field_example,
         _resource_field_example,

@@ -24,7 +24,10 @@ GENERATED_PATHS = {
     "docs/api/schemas/residency/artifact_writer_request_result.schema.json",
     "docs/api/schemas/residency/authority_transaction_result.schema.json",
     "docs/api/schemas/residency/coordinator_step_result.schema.json",
+    "docs/api/schemas/residency/deployment_local_overlay_object.schema.json",
     "docs/api/schemas/residency/operation_revision.schema.json",
+    "docs/api/schemas/residency/overlay_activation_root.schema.json",
+    "docs/api/schemas/residency/profiling_input_envelope.schema.json",
     "docs/api/schemas/residency/reason.schema.json",
     "docs/api/schemas/residency/request_error.schema.json",
     "docs/api/schemas/residency/residency_profiles.schema.json",
@@ -136,7 +139,7 @@ def require_catalog_contract(files: dict[str, bytes]) -> None:
         "reason_envelope_registry": 8,
         "reason_registry": 87,
         "request_context_registry": 37,
-        "schema_registry": 12,
+        "schema_registry": 15,
     }
     for key, expected in expected_counts.items():
         require(len(registry[key]) == expected, f"{key} count drifted")
@@ -816,6 +819,226 @@ def require_closed_schema_conditionals(
     )
 
 
+def require_local_overlay_schemas(
+    schemas: dict[str, Any],
+    resources: Registry,
+    contract_validator: Any,
+    examples: dict[str, Any],
+) -> None:
+    names = {
+        "profiling_input_envelope",
+        "deployment_local_overlay_object",
+        "overlay_activation_root",
+    }
+    expected_fields = {
+        "profiling_input_envelope": {
+            "attributed_claims",
+            "attribution_complete",
+            "baseline_observation_sha256",
+            "checksum_sha256",
+            "deployment_id",
+            "external_demand_absent",
+            "fresh_until",
+            "generations",
+            "lifecycle_release_verified",
+            "max_clock_skew_milliseconds",
+            "observation_contract_sha256",
+            "observed_at",
+            "predictor_contract_sha256",
+            "profiling_transaction_id",
+            "release_observation_sha256",
+            "schema",
+            "selector",
+            "sequence",
+            "workload_observation_sha256",
+        },
+        "deployment_local_overlay_object": {
+            "bound_claims",
+            "checksum_sha256",
+            "confidence_basis_points",
+            "decision_trace_sha256",
+            "deployment_id",
+            "expires_at",
+            "method",
+            "profiling_input_sha256",
+            "qualified_at",
+            "safety_margin_claims",
+            "schema",
+            "selector",
+            "sequence",
+            "status",
+            "uncertainty_claims",
+        },
+        "overlay_activation_root": {
+            "activated_at",
+            "authority_status",
+            "checksum_sha256",
+            "decision_trace_sha256",
+            "deployment_id",
+            "expires_at",
+            "generation",
+            "previous_root_sha256",
+            "schema",
+            "selected_method_sha256",
+            "selected_overlay_sequence",
+            "selected_overlay_sha256",
+            "selected_selector_sha256",
+            "sequence_high_water",
+            "transition",
+        },
+    }
+    require(names <= set(schemas), "local-overlay schema set is incomplete")
+    for name in names:
+        schema = schemas[name]
+        require(
+            schema.get("additionalProperties") is False,
+            f"{name} is not a closed document",
+        )
+        require(
+            set(schema["properties"]) == expected_fields[name],
+            f"{name} drifted from the canonical codec wire",
+        )
+
+    selector = schemas["profiling_input_envelope"]["$defs"]["selector_identity"]
+    require(
+        set(selector["properties"])
+        == {
+            "backend_build_sha256",
+            "canonical_model_id",
+            "catalog",
+            "catalog_sha256",
+            "configuration_sha256",
+            "dependency_set_sha256",
+            "device_identity_sha256",
+            "driver_identity_sha256",
+            "model_artifact_sha256",
+            "operation_contract_sha256",
+            "topology_sha256",
+            "workload_sha256",
+        },
+        "selector schema drifted from the canonical codec wire",
+    )
+    generations = schemas["profiling_input_envelope"]["$defs"]["source_generations"]
+    require(
+        set(generations["properties"])
+        == {
+            "backend",
+            "configuration",
+            "device",
+            "driver",
+            "model",
+            "topology",
+            "workload",
+        },
+        "source-generation schema drifted from the canonical codec wire",
+    )
+    method = schemas["deployment_local_overlay_object"]["$defs"]["method_identity"]
+    require(
+        set(method["properties"])
+        == {
+            "architecture_predicate_sha256",
+            "calibration_revision_sha256",
+            "method_id",
+            "method_revision_sha256",
+            "operation_kind",
+            "scope",
+        },
+        "method schema drifted from the canonical codec wire",
+    )
+
+    profiling = contract_validator(
+        schemas["profiling_input_envelope"], registry=resources
+    )
+    overlay = contract_validator(
+        schemas["deployment_local_overlay_object"], registry=resources
+    )
+    root = contract_validator(schemas["overlay_activation_root"], registry=resources)
+
+    incomplete = copy.deepcopy(examples["profiling_input_envelope"])
+    incomplete["attribution_complete"] = False
+    require(
+        not profiling.is_valid(incomplete),
+        "profiling schema accepted incomplete attribution",
+    )
+    zero_clock_skew = copy.deepcopy(examples["profiling_input_envelope"])
+    zero_clock_skew["max_clock_skew_milliseconds"] = 0
+    require(
+        not profiling.is_valid(zero_clock_skew),
+        "profiling schema accepted zero maximum clock skew",
+    )
+    unknown_selector = copy.deepcopy(examples["profiling_input_envelope"])
+    unknown_selector["selector"]["future"] = True
+    require(
+        not profiling.is_valid(unknown_selector),
+        "profiling schema accepted an open selector identity",
+    )
+    mismatched_template = copy.deepcopy(examples["profiling_input_envelope"])
+    mismatched_template["selector"]["catalog"]["operation_template"] = "UNL"
+    require(
+        not profiling.is_valid(mismatched_template),
+        "profiling schema accepted a mismatched operation template and kind",
+    )
+    unknown_claim = copy.deepcopy(examples["profiling_input_envelope"])
+    unknown_claim["attributed_claims"][0]["completeness"] = "unknown"
+    require(
+        not profiling.is_valid(unknown_claim),
+        "profiling schema accepted an incomplete claim closure",
+    )
+
+    wrong_status = copy.deepcopy(examples["deployment_local_overlay_object"])
+    wrong_status["status"] = "stale"
+    require(
+        not overlay.is_valid(wrong_status),
+        "overlay schema accepted a status owned by later invalidation work",
+    )
+    exact_with_predicate = copy.deepcopy(examples["deployment_local_overlay_object"])
+    exact_with_predicate["method"]["architecture_predicate_sha256"] = "a" * 64
+    require(
+        not overlay.is_valid(exact_with_predicate),
+        "deployment-exact method accepted an architecture predicate",
+    )
+    architecture_without_predicate = copy.deepcopy(
+        examples["deployment_local_overlay_object"]
+    )
+    architecture_without_predicate["method"]["scope"] = "architecture_predicate"
+    require(
+        not overlay.is_valid(architecture_without_predicate),
+        "architecture method accepted a missing predicate",
+    )
+
+    fallback = copy.deepcopy(examples["overlay_activation_root"])
+    fallback["transition"] = "fallback"
+    require(
+        not root.is_valid(fallback),
+        "activation root accepted a fallback transition",
+    )
+    wrong_authority = copy.deepcopy(examples["overlay_activation_root"])
+    wrong_authority["authority_status"] = "fallback"
+    require(
+        not root.is_valid(wrong_authority),
+        "activation root accepted non-active authority",
+    )
+    genesis_with_predecessor = copy.deepcopy(examples["overlay_activation_root"])
+    genesis_with_predecessor["previous_root_sha256"] = "b" * 64
+    require(
+        not root.is_valid(genesis_with_predecessor),
+        "generation-one root accepted a predecessor",
+    )
+    rollback_without_predecessor = copy.deepcopy(examples["overlay_activation_root"])
+    rollback_without_predecessor["generation"] = 2
+    rollback_without_predecessor["transition"] = "rollback"
+    require(
+        not root.is_valid(rollback_without_predecessor),
+        "rollback root accepted a missing predecessor",
+    )
+    successor_without_predecessor = copy.deepcopy(examples["overlay_activation_root"])
+    successor_without_predecessor["generation"] = 2
+    require(
+        not root.is_valid(successor_without_predecessor),
+        "activation-root successor accepted a missing predecessor",
+    )
+
+
 def require_schema_translation_mutations_rejected(files: dict[str, bytes]) -> None:
     tools_root = str(REPO_ROOT / "tools")
     if tools_root not in sys.path:
@@ -933,6 +1156,7 @@ def require_schemas_and_examples(files: dict[str, bytes]) -> None:
     require_quarantine_provenance(schemas)
     require_reason_boundaries(schemas, resources, contract_validator, examples)
     require_closed_schema_conditionals(schemas, resources, contract_validator, examples)
+    require_local_overlay_schemas(schemas, resources, contract_validator, examples)
     require_schema_translation_mutations_rejected(files)
 
 

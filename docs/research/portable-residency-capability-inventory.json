@@ -4561,6 +4561,77 @@
           }
         ]
       },
+      "deployment_local_overlay_object": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/deployment_local_overlay_object.schema.json",
+        "schema_type": "residency.deployment_local_overlay_object/1.0",
+        "fields": {
+          "schema": {
+            "type": "local_overlay_schema_version",
+            "required": true
+          },
+          "deployment_id": {
+            "type": "local_overlay_deployment_identity",
+            "required": true
+          },
+          "sequence": {
+            "type": "local_overlay_positive_uint64",
+            "required": true
+          },
+          "profiling_input_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "selector": {
+            "type": "local_overlay_selector_identity",
+            "required": true
+          },
+          "method": {
+            "type": "local_overlay_method_identity",
+            "required": true
+          },
+          "bound_claims": {
+            "type": "local_overlay_claim_closure",
+            "required": true
+          },
+          "uncertainty_claims": {
+            "type": "local_overlay_claim_closure",
+            "required": true
+          },
+          "safety_margin_claims": {
+            "type": "local_overlay_claim_closure",
+            "required": true
+          },
+          "confidence_basis_points": {
+            "type": "local_overlay_confidence_basis_points",
+            "required": true
+          },
+          "qualified_at": {
+            "type": "rfc3339",
+            "required": true
+          },
+          "expires_at": {
+            "type": "local_overlay_expiry",
+            "required": true
+          },
+          "status": {
+            "type": "local_overlay_object_status",
+            "required": true
+          },
+          "decision_trace_sha256": {
+            "type": "local_overlay_decision_trace_reference",
+            "required": true
+          },
+          "checksum_sha256": {
+            "type": "sha256",
+            "required": true
+          }
+        },
+        "conditionals": []
+      },
       "operation_revision": {
         "version": {
           "major": 1,
@@ -4673,6 +4744,196 @@
             }
           }
         ]
+      },
+      "overlay_activation_root": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/overlay_activation_root.schema.json",
+        "schema_type": "residency.overlay_activation_root/1.0",
+        "fields": {
+          "schema": {
+            "type": "local_overlay_schema_version",
+            "required": true
+          },
+          "deployment_id": {
+            "type": "local_overlay_deployment_identity",
+            "required": true
+          },
+          "generation": {
+            "type": "local_overlay_positive_uint64",
+            "required": true
+          },
+          "previous_root_sha256": {
+            "type": "local_overlay_previous_root_reference",
+            "required": true
+          },
+          "transition": {
+            "type": "local_overlay_root_transition",
+            "required": true
+          },
+          "authority_status": {
+            "type": "local_overlay_authority_status",
+            "required": true
+          },
+          "selected_overlay_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "selected_overlay_sequence": {
+            "type": "local_overlay_positive_uint64",
+            "required": true
+          },
+          "sequence_high_water": {
+            "type": "local_overlay_positive_uint64",
+            "required": true
+          },
+          "selected_selector_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "selected_method_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "decision_trace_sha256": {
+            "type": "local_overlay_decision_trace_reference",
+            "required": true
+          },
+          "activated_at": {
+            "type": "rfc3339",
+            "required": true
+          },
+          "expires_at": {
+            "type": "local_overlay_expiry",
+            "required": true
+          },
+          "checksum_sha256": {
+            "type": "sha256",
+            "required": true
+          }
+        },
+        "conditionals": [
+          {
+            "if": {
+              "field": "generation",
+              "equals": 1
+            },
+            "require_null": [
+              "previous_root_sha256"
+            ],
+            "require_values": {
+              "transition": "qualification"
+            }
+          },
+          {
+            "if": {
+              "field": "generation",
+              "not_equals": 1
+            },
+            "require_nonnull": [
+              "previous_root_sha256"
+            ]
+          },
+          {
+            "if": {
+              "field": "transition",
+              "equals": "rollback"
+            },
+            "require_nonnull": [
+              "previous_root_sha256"
+            ]
+          }
+        ]
+      },
+      "profiling_input_envelope": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/profiling_input_envelope.schema.json",
+        "schema_type": "residency.profiling_input_envelope/1.0",
+        "fields": {
+          "schema": {
+            "type": "local_overlay_schema_version",
+            "required": true
+          },
+          "deployment_id": {
+            "type": "local_overlay_deployment_identity",
+            "required": true
+          },
+          "sequence": {
+            "type": "local_overlay_positive_uint64",
+            "required": true
+          },
+          "profiling_transaction_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "selector": {
+            "type": "local_overlay_selector_identity",
+            "required": true
+          },
+          "generations": {
+            "type": "local_overlay_source_generations",
+            "required": true
+          },
+          "attributed_claims": {
+            "type": "local_overlay_claim_closure",
+            "required": true
+          },
+          "baseline_observation_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "workload_observation_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "release_observation_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "observation_contract_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "predictor_contract_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "observed_at": {
+            "type": "rfc3339",
+            "required": true
+          },
+          "fresh_until": {
+            "type": "local_overlay_expiry",
+            "required": true
+          },
+          "max_clock_skew_milliseconds": {
+            "type": "local_overlay_positive_uint64",
+            "required": true
+          },
+          "attribution_complete": {
+            "type": "local_overlay_required_true",
+            "required": true
+          },
+          "external_demand_absent": {
+            "type": "local_overlay_required_true",
+            "required": true
+          },
+          "lifecycle_release_verified": {
+            "type": "local_overlay_required_true",
+            "required": true
+          },
+          "checksum_sha256": {
+            "type": "sha256",
+            "required": true
+          }
+        },
+        "conditionals": []
       },
       "reason": {
         "version": {

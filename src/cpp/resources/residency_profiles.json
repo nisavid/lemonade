@@ -4560,6 +4560,77 @@
           "minor": 0
         }
       },
+      "deployment_local_overlay_object": {
+        "conditionals": [],
+        "fields": {
+          "bound_claims": {
+            "required": true,
+            "type": "local_overlay_claim_closure"
+          },
+          "checksum_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "confidence_basis_points": {
+            "required": true,
+            "type": "local_overlay_confidence_basis_points"
+          },
+          "decision_trace_sha256": {
+            "required": true,
+            "type": "local_overlay_decision_trace_reference"
+          },
+          "deployment_id": {
+            "required": true,
+            "type": "local_overlay_deployment_identity"
+          },
+          "expires_at": {
+            "required": true,
+            "type": "local_overlay_expiry"
+          },
+          "method": {
+            "required": true,
+            "type": "local_overlay_method_identity"
+          },
+          "profiling_input_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "qualified_at": {
+            "required": true,
+            "type": "rfc3339"
+          },
+          "safety_margin_claims": {
+            "required": true,
+            "type": "local_overlay_claim_closure"
+          },
+          "schema": {
+            "required": true,
+            "type": "local_overlay_schema_version"
+          },
+          "selector": {
+            "required": true,
+            "type": "local_overlay_selector_identity"
+          },
+          "sequence": {
+            "required": true,
+            "type": "local_overlay_positive_uint64"
+          },
+          "status": {
+            "required": true,
+            "type": "local_overlay_object_status"
+          },
+          "uncertainty_claims": {
+            "required": true,
+            "type": "local_overlay_claim_closure"
+          }
+        },
+        "output": "docs/api/schemas/residency/deployment_local_overlay_object.schema.json",
+        "schema_type": "residency.deployment_local_overlay_object/1.0",
+        "version": {
+          "major": 1,
+          "minor": 0
+        }
+      },
       "operation_revision": {
         "conditionals": [
           {
@@ -4668,6 +4739,196 @@
         },
         "output": "docs/api/schemas/residency/operation_revision.schema.json",
         "schema_type": "residency.operation_revision/1.0",
+        "version": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "overlay_activation_root": {
+        "conditionals": [
+          {
+            "if": {
+              "equals": 1,
+              "field": "generation"
+            },
+            "require_null": [
+              "previous_root_sha256"
+            ],
+            "require_values": {
+              "transition": "qualification"
+            }
+          },
+          {
+            "if": {
+              "field": "generation",
+              "not_equals": 1
+            },
+            "require_nonnull": [
+              "previous_root_sha256"
+            ]
+          },
+          {
+            "if": {
+              "equals": "rollback",
+              "field": "transition"
+            },
+            "require_nonnull": [
+              "previous_root_sha256"
+            ]
+          }
+        ],
+        "fields": {
+          "activated_at": {
+            "required": true,
+            "type": "rfc3339"
+          },
+          "authority_status": {
+            "required": true,
+            "type": "local_overlay_authority_status"
+          },
+          "checksum_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "decision_trace_sha256": {
+            "required": true,
+            "type": "local_overlay_decision_trace_reference"
+          },
+          "deployment_id": {
+            "required": true,
+            "type": "local_overlay_deployment_identity"
+          },
+          "expires_at": {
+            "required": true,
+            "type": "local_overlay_expiry"
+          },
+          "generation": {
+            "required": true,
+            "type": "local_overlay_positive_uint64"
+          },
+          "previous_root_sha256": {
+            "required": true,
+            "type": "local_overlay_previous_root_reference"
+          },
+          "schema": {
+            "required": true,
+            "type": "local_overlay_schema_version"
+          },
+          "selected_method_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "selected_overlay_sequence": {
+            "required": true,
+            "type": "local_overlay_positive_uint64"
+          },
+          "selected_overlay_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "selected_selector_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "sequence_high_water": {
+            "required": true,
+            "type": "local_overlay_positive_uint64"
+          },
+          "transition": {
+            "required": true,
+            "type": "local_overlay_root_transition"
+          }
+        },
+        "output": "docs/api/schemas/residency/overlay_activation_root.schema.json",
+        "schema_type": "residency.overlay_activation_root/1.0",
+        "version": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "profiling_input_envelope": {
+        "conditionals": [],
+        "fields": {
+          "attributed_claims": {
+            "required": true,
+            "type": "local_overlay_claim_closure"
+          },
+          "attribution_complete": {
+            "required": true,
+            "type": "local_overlay_required_true"
+          },
+          "baseline_observation_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "checksum_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "deployment_id": {
+            "required": true,
+            "type": "local_overlay_deployment_identity"
+          },
+          "external_demand_absent": {
+            "required": true,
+            "type": "local_overlay_required_true"
+          },
+          "fresh_until": {
+            "required": true,
+            "type": "local_overlay_expiry"
+          },
+          "generations": {
+            "required": true,
+            "type": "local_overlay_source_generations"
+          },
+          "lifecycle_release_verified": {
+            "required": true,
+            "type": "local_overlay_required_true"
+          },
+          "max_clock_skew_milliseconds": {
+            "required": true,
+            "type": "local_overlay_positive_uint64"
+          },
+          "observation_contract_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "observed_at": {
+            "required": true,
+            "type": "rfc3339"
+          },
+          "predictor_contract_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "profiling_transaction_id": {
+            "max_bytes": 128,
+            "required": true,
+            "type": "opaque"
+          },
+          "release_observation_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "schema": {
+            "required": true,
+            "type": "local_overlay_schema_version"
+          },
+          "selector": {
+            "required": true,
+            "type": "local_overlay_selector_identity"
+          },
+          "sequence": {
+            "required": true,
+            "type": "local_overlay_positive_uint64"
+          },
+          "workload_observation_sha256": {
+            "required": true,
+            "type": "sha256"
+          }
+        },
+        "output": "docs/api/schemas/residency/profiling_input_envelope.schema.json",
+        "schema_type": "residency.profiling_input_envelope/1.0",
         "version": {
           "major": 1,
           "minor": 0
@@ -6958,6 +7219,6 @@
     }
   ],
   "schema": "residency.profiles/1.0",
-  "selection_registry_sha256": "3985ff529d728d54afb8e048f0d55a73efd02b5bc9628ea596ccbf29e841aa1a",
+  "selection_registry_sha256": "a9569b5f499e4e8e8d9acff9657f1f4789a379a15fe61fe424c793d91708023d",
   "source_support_baseline": "a505bbc702cc1fcd44ef73c44defabc98c36d505"
 }
