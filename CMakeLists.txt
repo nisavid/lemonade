@@ -971,8 +971,12 @@ set(SOURCES_CORE
     src/cpp/server/model_registry.cpp
     src/cpp/server/hf_variants.cpp
     src/cpp/server/residency/catalog.cpp
+    src/cpp/server/residency/claims.cpp
+    src/cpp/server/residency/durable_file_adapter_common.cpp
+    src/cpp/server/residency/durable_local_overlay.cpp
     src/cpp/server/residency/explanations.cpp
     src/cpp/server/residency/generated_contract.cpp
+    src/cpp/server/residency/local_overlay.cpp
     src/cpp/server/wrapped_server.cpp
     src/cpp/server/streaming_proxy.cpp
     src/cpp/server/system_info.cpp
@@ -1013,6 +1017,7 @@ set(SOURCES_CORE
 
 # Add platform-specific source files to core
 if(WIN32)
+    list(APPEND SOURCES_CORE src/cpp/server/residency/platform/durable_file_adapter_windows.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/path_windows.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/platform/metrics_windows.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/platform/suspend_stub.cpp)
@@ -1020,6 +1025,7 @@ if(WIN32)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/process_windows.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/network_windows.cpp)
 elseif(APPLE)
+    list(APPEND SOURCES_CORE src/cpp/server/residency/platform/durable_file_adapter_macos.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/macos_system_info.mm)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/path_macos.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/platform/metrics_macos.cpp)
@@ -1029,6 +1035,7 @@ elseif(APPLE)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/network_unix.cpp)
     set_source_files_properties(src/cpp/server/macos_system_info.mm PROPERTIES LANGUAGE OBJCXX)
 elseif(UNIX)
+    list(APPEND SOURCES_CORE src/cpp/server/residency/platform/durable_file_adapter_posix.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/path_linux.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/platform/metrics_linux.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/platform/suspend_linux.cpp)
@@ -1101,6 +1108,9 @@ list(APPEND SOURCES_CORE ${LEMON_BACKEND_DESCRIPTOR_SOURCES} ${LEMON_BACKEND_FAC
 # Server core OBJECT library (shared by lemond and Lemonade.exe)
 # ============================================================
 add_library(lemonade-server-core OBJECT ${SOURCES_CORE})
+target_include_directories(lemonade-server-core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/residency
+)
 
 # ============================================================
 # lemond executable
@@ -2308,6 +2318,29 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_CLAIM_FAMILY_LIMIT_TEST_SRC}")
     add_cpp_ci_test(ResidencyClaimFamilyLimit CI ON COMMAND test_residency_claim_family_limit)
 endif()
 
+set(_RESIDENCY_LOCAL_OVERLAY_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_local_overlay.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_LOCAL_OVERLAY_TEST_SRC}")
+    add_executable(test_residency_local_overlay
+        ${_RESIDENCY_LOCAL_OVERLAY_TEST_SRC}
+        src/cpp/server/residency/claims.cpp
+        src/cpp/server/residency/local_overlay.cpp
+    )
+    target_include_directories(test_residency_local_overlay PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+    )
+    target_link_libraries(test_residency_local_overlay PRIVATE
+        lemonade-digest-crypto
+        nlohmann_json::nlohmann_json
+    )
+    add_cpp_ci_test(
+        ResidencyLocalOverlay
+        CI ON
+        COMMAND test_residency_local_overlay ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+endif()
+
 set(_RESIDENCY_CONTRACT_CATALOG_TEST_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_contract_catalog.cpp"
 )
@@ -2456,9 +2489,12 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/residency/recovery
     add_executable(test_durable_residency_journal
         test/residency/recovery/durable_journal_public_seam.cpp
         test/residency/recovery/journal_persistence_test_support.cpp
+        src/cpp/server/residency/claims.cpp
         src/cpp/server/residency/durable_journal.cpp
+        src/cpp/server/residency/durable_local_overlay.cpp
         src/cpp/server/residency/durable_file_adapter_common.cpp
         src/cpp/server/residency/journal.cpp
+        src/cpp/server/residency/local_overlay.cpp
         ${_TASK020_PLATFORM_SOURCE}
     )
     add_library(test_durable_residency_private_authority_gate OBJECT
@@ -2493,6 +2529,38 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/residency/recovery
     set_tests_properties(ResidencyDurableJournal PROPERTIES
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
+
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_durable_local_overlay.cpp")
+        add_executable(test_durable_local_overlay
+            test/cpp/test_durable_local_overlay.cpp
+            test/residency/recovery/journal_persistence_test_support.cpp
+            src/cpp/server/residency/claims.cpp
+            src/cpp/server/residency/durable_file_adapter_common.cpp
+            src/cpp/server/residency/durable_journal.cpp
+            src/cpp/server/residency/durable_local_overlay.cpp
+            src/cpp/server/residency/journal.cpp
+            src/cpp/server/residency/local_overlay.cpp
+            ${_TASK020_PLATFORM_SOURCE}
+        )
+        target_include_directories(test_durable_local_overlay PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/residency
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/residency/recovery
+        )
+        target_link_libraries(test_durable_local_overlay PRIVATE
+            lemonade-digest-crypto
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+        )
+        target_compile_definitions(test_durable_local_overlay PRIVATE
+            LEMONADE_RESIDENCY_DURABLE_TESTING
+        )
+        add_cpp_ci_test(
+            ResidencyDurableLocalOverlay
+            CI ON
+            COMMAND test_durable_local_overlay
+        )
+    endif()
 endif()
 
 # ProcessManager zombie detection and non-mutating reap contract.

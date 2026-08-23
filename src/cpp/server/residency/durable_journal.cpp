@@ -1,16 +1,15 @@
 #include "lemon/residency/durable_journal.h"
 
+#include "authority_fence.h"
 #include "platform/durable_file_adapter.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -18,13 +17,12 @@ namespace lemon::residency {
 
 namespace {
 
-std::mutex fenced_identities_mutex;
-
-struct IdentityFenceEpoch {};
-
-using IdentityFenceToken = std::shared_ptr<const IdentityFenceEpoch>;
-
-std::unordered_map<std::string, IdentityFenceToken> fenced_identities;
+using detail::IdentityFenceToken;
+using detail::clear_identity_fence;
+using detail::fence_identity;
+using detail::identity_fence;
+using detail::identity_is_fenced;
+using detail::same_directory_identity;
 
 DurableJournalResult journal_result(DurableJournalStatus status) {
     return {status, std::nullopt};
@@ -62,57 +60,9 @@ bool limits_are_usable(const JournalLimits &limits,
            journal_read_limit < std::numeric_limits<std::size_t>::max();
 }
 
-std::string_view directory_identity(std::string_view identity) noexcept {
-    const auto delimiter = identity.rfind("/lock:");
-    if (delimiter == std::string_view::npos) {
-        return identity;
-    }
-    return identity.substr(0, delimiter);
-}
-
-bool same_directory_identity(std::string_view left,
-                             std::string_view right) noexcept {
-    return directory_identity(left) == directory_identity(right);
-}
-
 bool authority_root_matches(const AuthorityRootCandidate &root,
                             std::string_view bytes) noexcept {
     return root.canonical_bytes() == bytes;
-}
-
-IdentityFenceToken fence_identity(std::string_view identity) {
-    if (identity.empty()) {
-        return nullptr;
-    }
-    auto token = std::make_shared<IdentityFenceEpoch>();
-    std::lock_guard lock(fenced_identities_mutex);
-    fenced_identities.insert_or_assign(
-        std::string(directory_identity(identity)), token);
-    return token;
-}
-
-IdentityFenceToken identity_fence(std::string_view identity) {
-    std::lock_guard lock(fenced_identities_mutex);
-    const auto found =
-        fenced_identities.find(std::string(directory_identity(identity)));
-    return found == fenced_identities.end() ? nullptr : found->second;
-}
-
-void clear_identity_fence(std::string_view identity,
-                          const IdentityFenceToken &observed) {
-    if (!observed) {
-        return;
-    }
-    std::lock_guard lock(fenced_identities_mutex);
-    const auto found =
-        fenced_identities.find(std::string(directory_identity(identity)));
-    if (found != fenced_identities.end() && found->second == observed) {
-        fenced_identities.erase(found);
-    }
-}
-
-bool identity_is_fenced(std::string_view identity) {
-    return static_cast<bool>(identity_fence(identity));
 }
 
 } // namespace

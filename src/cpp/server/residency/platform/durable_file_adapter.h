@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -99,6 +100,12 @@ DurableFileResult truncate_flush_close(DurableFileChannel &channel,
                                        std::size_t bytes);
 DurableReadResult read_bounded_close(DurableReadChannel &channel,
                                      std::size_t max_bytes);
+std::optional<std::string>
+durable_immutable_object_filename(std::string_view sha256);
+std::optional<std::string>
+durable_immutable_object_stage_filename(std::string_view sha256);
+bool durable_fixed_namespace_name_is_valid(
+    std::string_view name) noexcept;
 
 class DurableFileAdapter {
 public:
@@ -110,6 +117,12 @@ public:
     virtual DurableFixedNamespaceResult inspect_fixed_namespace() = 0;
     virtual DurableReadResult read_root(std::size_t max_bytes) = 0;
     virtual DurableReadResult read_journal(std::size_t max_bytes) = 0;
+    virtual DurableReadResult
+    read_immutable_object(std::string_view sha256,
+                          std::size_t max_bytes) = 0;
+    virtual DurableFileResult
+    create_immutable_object(std::string_view sha256,
+                            std::string_view bytes) = 0;
     virtual DurableFileResult create_journal(std::string_view bytes) = 0;
     virtual DurableFileResult append_journal(std::string_view bytes) = 0;
     virtual DurableFileResult truncate_journal(std::size_t bytes) = 0;
@@ -120,6 +133,10 @@ public:
 
 std::unique_ptr<DurableFileAdapter>
 make_platform_durable_file_adapter(const std::filesystem::path &directory);
+std::unique_ptr<DurableFileAdapter>
+make_platform_durable_file_adapter_in_fixed_namespace(
+    const std::filesystem::path &parent_directory,
+    std::string_view child_namespace);
 
 #ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
 enum class DurablePreflightTestFault {

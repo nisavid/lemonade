@@ -2541,6 +2541,24 @@ void require_fake_adapter_destructor_closes_open_lock() {
             "restart retained a simulated-crash lock handle");
 }
 
+void require_fake_immutable_object_link_count_parity() {
+    for (const auto platform :
+         {PlatformContract::Linux, PlatformContract::MacOS}) {
+        const auto probe =
+            JournalTestStorage::probe_immutable_object_linked_publish_read(
+                platform);
+        require(probe.creation_result ==
+                        HelperResultKind::EffectMayHaveOccurred &&
+                    probe.linked_names_survived_restart,
+                "fake immutable-object linked-publish fixture did not survive "
+                "restart");
+        require(!probe.read_succeeded && probe.read_was_unsupported &&
+                    probe.authority_released,
+                "fake immutable-object read accepted a two-link publish "
+                "residue");
+    }
+}
+
 void require_final_under_lock_revalidation() {
     const auto chain = make_chain();
     const auto genesis_journal = frame(chain.genesis);
@@ -5524,13 +5542,20 @@ void require_native_unbound_adapter_preserves_working_directory() {
         const auto inspected = adapter->inspect_fixed_namespace();
         const auto root = adapter->read_root(1024);
         const auto journal = adapter->read_journal(1024);
+        const std::string object_digest(64, 'a');
+        const auto object =
+            adapter->read_immutable_object(object_digest, 1024);
+        const auto created_object =
+            adapter->create_immutable_object(object_digest, "object");
         const auto created = adapter->create_journal("created");
         const auto appended = adapter->append_journal("appended");
         const auto truncated = adapter->truncate_journal(0);
         const auto replaced_journal = adapter->replace_journal("replacement");
         const auto replaced_root = adapter->replace_root("replacement");
         require(!inspected.result.succeeded() && !root.result.succeeded() &&
-                    !journal.result.succeeded() && !created.succeeded() &&
+                    !journal.result.succeeded() &&
+                    !object.result.succeeded() &&
+                    !created_object.succeeded() && !created.succeeded() &&
                     !appended.succeeded() && !truncated.succeeded() &&
                     !replaced_journal.succeeded() &&
                     !replaced_root.succeeded(),
@@ -5538,6 +5563,217 @@ void require_native_unbound_adapter_preserves_working_directory() {
     }
     require(snapshot_regular_files(working_directory) == before,
             "unbound native adapter changed the working directory");
+}
+
+void require_native_immutable_objects() {
+    using lemon::residency::detail::DurableFileStatus;
+    using lemon::residency::detail::durable_immutable_object_filename;
+    using lemon::residency::detail::durable_immutable_object_stage_filename;
+    using lemon::residency::detail::make_platform_durable_file_adapter;
+
+    NativeDirectory directory("task119-native-immutable-objects");
+    auto adapter = make_platform_durable_file_adapter(directory.path());
+    require(adapter->lock_authority().succeeded(),
+            "native immutable-object authority lock failed");
+    require(adapter->preflight_capabilities().succeeded(),
+            "native immutable-object durability preflight failed");
+
+    const std::string digest(64, 'a');
+    const std::string bytes = R"({"overlay":"alpha"})";
+    require(adapter->create_immutable_object(digest, bytes).succeeded(),
+            "native immutable-object create failed");
+    const auto exact = adapter->read_immutable_object(digest, bytes.size());
+    require(exact.result.succeeded() && exact.bytes == bytes &&
+                !exact.truncated,
+            "native immutable-object exact read failed");
+    const auto bounded =
+        adapter->read_immutable_object(digest, bytes.size() - 1);
+    require(bounded.result.succeeded() && bounded.truncated &&
+                bounded.bytes.size() == bytes.size() - 1,
+            "native immutable-object bounded read failed");
+    require(adapter->create_immutable_object(digest, "different").status ==
+                DurableFileStatus::AlreadyExists,
+            "native immutable-object create replaced an existing digest");
+    auto slash_digest = std::string(64, 'a');
+    slash_digest[7] = '/';
+    auto backslash_digest = std::string(64, 'a');
+    backslash_digest[7] = '\\';
+    auto colon_digest = std::string(64, 'a');
+    colon_digest[7] = ':';
+    auto nul_digest = std::string(64, 'a');
+    nul_digest[7] = '\0';
+    for (const auto &invalid_digest :
+         {std::string(64, 'A'), slash_digest, backslash_digest, colon_digest,
+          nul_digest, std::string(63, 'a'), std::string(65, 'a')}) {
+        require(adapter->create_immutable_object(invalid_digest, bytes)
+                    .status == DurableFileStatus::Unsupported,
+                "native immutable-object create accepted a noncanonical "
+                "digest");
+        require(adapter->read_immutable_object(invalid_digest, 1024)
+                    .result.status == DurableFileStatus::Unsupported,
+                "native immutable-object read accepted a noncanonical "
+                "digest");
+    }
+    require(adapter->read_immutable_object(std::string(64, 'd'), 1024)
+                .result.status == DurableFileStatus::NotFound,
+            "native immutable-object missing read was not classified");
+
+    const std::string abandoned_digest(64, 'b');
+    const auto abandoned_name =
+        durable_immutable_object_filename(abandoned_digest);
+    const auto abandoned_stage_name =
+        durable_immutable_object_stage_filename(abandoned_digest);
+    require(abandoned_name.has_value() && abandoned_stage_name.has_value(),
+            "native immutable-object fixture digest was rejected");
+    write_bytes(directory.path() / *abandoned_stage_name, "partial");
+    const std::string recovered_bytes = R"({"overlay":"recovered"})";
+    require(adapter
+                ->create_immutable_object(abandoned_digest, recovered_bytes)
+                .succeeded(),
+            "native immutable-object abandoned stage was not recovered");
+    require(!std::filesystem::exists(directory.path() /
+                                     *abandoned_stage_name) &&
+                read_bytes(directory.path() / *abandoned_name) ==
+                    recovered_bytes,
+            "native immutable-object recovery exposed partial stage bytes");
+
+#ifndef _WIN32
+    const std::string linked_digest(64, 'c');
+    const auto linked_name = durable_immutable_object_filename(linked_digest);
+    const auto linked_stage_name =
+        durable_immutable_object_stage_filename(linked_digest);
+    require(linked_name.has_value() && linked_stage_name.has_value(),
+            "native linked-object fixture digest was rejected");
+    const std::string linked_bytes = R"({"overlay":"linked"})";
+    write_bytes(directory.path() / *linked_stage_name, linked_bytes);
+    std::error_code link_error;
+    std::filesystem::create_hard_link(directory.path() / *linked_stage_name,
+                                      directory.path() / *linked_name,
+                                      link_error);
+    require(!link_error,
+            "native immutable-object linked-stage fixture failed");
+    require(adapter->create_immutable_object(linked_digest, linked_bytes)
+                .succeeded(),
+            "native immutable-object linked publish was not recovered");
+    require(!std::filesystem::exists(directory.path() / *linked_stage_name) &&
+                read_bytes(directory.path() / *linked_name) == linked_bytes,
+            "native immutable-object linked recovery changed object bytes");
+#endif
+
+    require(adapter->unlock_authority().succeeded(),
+            "native immutable-object authority unlock failed");
+}
+
+void require_native_fixed_namespace_factory() {
+    using lemon::residency::detail::make_platform_durable_file_adapter_in_fixed_namespace;
+
+    constexpr std::string_view child_name = "residency-local-overlay";
+    NativeDirectory parent("task119-fixed-namespace");
+    const auto child = parent.path() / child_name;
+
+    auto created = make_platform_durable_file_adapter_in_fixed_namespace(
+        parent.path(), child_name);
+    require(std::filesystem::is_directory(child),
+            "native fixed-namespace factory did not create its child");
+    require(created->lock_authority().succeeded() &&
+                created->preflight_capabilities().succeeded(),
+            "native fixed-namespace factory did not bind its created child");
+    const auto created_identity = created->authority_identity();
+    require(created_identity.result.succeeded(),
+            "native created child did not expose its bound identity");
+    require(created->unlock_authority().succeeded(),
+            "native created-child authority unlock failed");
+
+    auto reused = make_platform_durable_file_adapter_in_fixed_namespace(
+        parent.path(), child_name);
+    require(reused->lock_authority().succeeded() &&
+                reused->preflight_capabilities().succeeded(),
+            "native fixed-namespace factory did not reuse its child");
+    const auto reused_identity = reused->authority_identity();
+    require(reused_identity.result.succeeded() &&
+                reused_identity.identity == created_identity.identity,
+            "native fixed-namespace reuse rebound a different authority");
+    require(reused->unlock_authority().succeeded(),
+            "native reused-child authority unlock failed");
+
+    NativeDirectory concurrent_parent("task119-fixed-namespace-race");
+    std::vector<std::unique_ptr<
+        lemon::residency::detail::DurableFileAdapter>>
+        concurrent_adapters(8);
+    std::vector<std::thread> creators;
+    for (std::size_t index = 0; index < concurrent_adapters.size(); ++index) {
+        creators.emplace_back([&, index] {
+            concurrent_adapters[index] =
+                make_platform_durable_file_adapter_in_fixed_namespace(
+                    concurrent_parent.path(), child_name);
+        });
+    }
+    for (auto &creator : creators) {
+        creator.join();
+    }
+    std::optional<std::string> concurrent_identity;
+    for (auto &adapter : concurrent_adapters) {
+        require(adapter->lock_authority().succeeded() &&
+                    adapter->preflight_capabilities().succeeded(),
+                "concurrent native fixed-namespace creator was not bound");
+        const auto identity = adapter->authority_identity();
+        require(identity.result.succeeded(),
+                "concurrent native fixed namespace had no identity");
+        if (!concurrent_identity.has_value()) {
+            concurrent_identity = identity.identity;
+        }
+        require(identity.identity == *concurrent_identity,
+                "concurrent native fixed-namespace creators diverged");
+        require(adapter->unlock_authority().succeeded(),
+                "concurrent native fixed-namespace unlock failed");
+    }
+
+    for (const auto invalid : {std::string_view{}, std::string_view{"."},
+                               std::string_view{".."},
+                               std::string_view{"nested/child"},
+                               std::string_view{"Nested"}}) {
+        auto rejected = make_platform_durable_file_adapter_in_fixed_namespace(
+            parent.path(), invalid);
+        require(!rejected->lock_authority().succeeded(),
+                "native fixed-namespace factory accepted an unsafe name");
+    }
+
+    NativeDirectory poisoned_parent("task119-fixed-namespace-poison");
+    const auto poisoned_child = poisoned_parent.path() / child_name;
+    write_bytes(poisoned_child, "caller-owned");
+    auto poisoned = make_platform_durable_file_adapter_in_fixed_namespace(
+        poisoned_parent.path(), child_name);
+    require(!poisoned->lock_authority().succeeded() &&
+                read_bytes(poisoned_child) == "caller-owned",
+            "native fixed-namespace factory changed an unsafe child");
+
+#ifndef _WIN32
+    NativeDirectory linked_parent("task119-fixed-namespace-link");
+    NativeDirectory outside("task119-fixed-namespace-outside");
+    const auto linked_child = linked_parent.path() / child_name;
+    std::error_code link_error;
+    std::filesystem::create_directory_symlink(outside.path(), linked_child,
+                                              link_error);
+    require(!link_error,
+            "native fixed-namespace symlink fixture could not be created");
+    auto linked = make_platform_durable_file_adapter_in_fixed_namespace(
+        linked_parent.path(), child_name);
+    require(!linked->lock_authority().succeeded() &&
+                std::filesystem::is_symlink(
+                    std::filesystem::symlink_status(linked_child)),
+            "native fixed-namespace factory followed or replaced a symlink");
+#else
+    NativeDirectory staged_parent("task119-fixed-namespace-stage");
+    const auto stage = staged_parent.path() /
+                       ".residency-local-overlay.directory-stage";
+    write_bytes(stage, "caller-owned-stage");
+    auto staged = make_platform_durable_file_adapter_in_fixed_namespace(
+        staged_parent.path(), child_name);
+    require(!staged->lock_authority().succeeded() &&
+                read_bytes(stage) == "caller-owned-stage" &&
+                !std::filesystem::exists(staged_parent.path() / child_name),
+            "native fixed-namespace factory changed an unsafe stage");
+#endif
 }
 
 void require_native_bounded_read_boundaries() {
@@ -6213,6 +6449,7 @@ int main(int argc, char **argv) {
     require_paused_read_holds_authority_lock();
     require_paused_write_observes_completed_effect();
     require_fake_adapter_destructor_closes_open_lock();
+    require_fake_immutable_object_link_count_parity();
     require_final_under_lock_revalidation();
     require_preflight_and_bounded_read_trace();
     require_create_faults();
@@ -6239,6 +6476,8 @@ int main(int argc, char **argv) {
     require_native_preflight_stage_collision_exhaustion_is_fenced();
     require_native_relative_directory_binding();
     require_native_unbound_adapter_preserves_working_directory();
+    require_native_immutable_objects();
+    require_native_fixed_namespace_factory();
     require_native_bounded_read_boundaries();
     require_native_literal_children();
     require_native_fresh_namespace_asymmetry();

@@ -451,6 +451,82 @@ DurableFileResult clear_verified_stage(HANDLE handle) {
     return make_result(DurableFileStatus::Succeeded);
 }
 
+enum class WindowsDirectoryBindStatus { Bound, NotFound, Unsafe };
+
+struct WindowsDirectoryBinding {
+    WindowsDirectoryBindStatus status = WindowsDirectoryBindStatus::Unsafe;
+    std::filesystem::path path;
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    FILE_ID_INFO identity {};
+};
+
+WindowsDirectoryBinding
+bind_windows_directory(const std::filesystem::path &directory) {
+    const auto handle = ::CreateFileW(
+        directory.c_str(), FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        const auto error = ::GetLastError();
+        return {error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND
+                    ? WindowsDirectoryBindStatus::NotFound
+                    : WindowsDirectoryBindStatus::Unsafe,
+                {}, INVALID_HANDLE_VALUE, {}};
+    }
+    FILE_ATTRIBUTE_TAG_INFO attributes {};
+    FILE_ID_INFO identity {};
+    if (!::GetFileInformationByHandleEx(
+            handle, FileAttributeTagInfo, &attributes,
+            sizeof(attributes)) ||
+        (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 ||
+        (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+        !::GetFileInformationByHandleEx(handle, FileIdInfo, &identity,
+                                        sizeof(identity))) {
+        close_best_effort(handle);
+        return {};
+    }
+    auto bound = final_directory_path(handle);
+    if (!bound.has_value()) {
+        close_best_effort(handle);
+        return {};
+    }
+    return {WindowsDirectoryBindStatus::Bound, std::move(*bound), handle,
+            identity};
+}
+
+std::optional<bool>
+windows_directory_is_empty(const std::filesystem::path &directory) {
+    WIN32_FIND_DATAW entry {};
+    const auto pattern = directory / L"*";
+    const auto search = ::FindFirstFileW(pattern.c_str(), &entry);
+    if (search == INVALID_HANDLE_VALUE) {
+        const auto error = ::GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND) {
+            return true;
+        }
+        return std::nullopt;
+    }
+    bool empty = true;
+    do {
+        const std::wstring_view name(entry.cFileName);
+        if (name != L"." && name != L"..") {
+            empty = false;
+            break;
+        }
+    } while (::FindNextFileW(search, &entry));
+    const auto search_error = ::GetLastError();
+    if (!::FindClose(search) ||
+        (empty && search_error != ERROR_NO_MORE_FILES)) {
+        return std::nullopt;
+    }
+    return empty;
+}
+
+bool close_windows_directory(WindowsDirectoryBinding &binding) {
+    const auto handle = std::exchange(binding.handle, INVALID_HANDLE_VALUE);
+    return handle == INVALID_HANDLE_VALUE || ::CloseHandle(handle);
+}
+
 class WindowsDurableFileAdapter final : public DurableFileAdapter {
 public:
     WindowsDurableFileAdapter(std::filesystem::path bound_directory,
@@ -1052,6 +1128,141 @@ public:
         return read_bounded_close(channel, max_bytes);
     }
 
+    DurableReadResult
+    read_immutable_object(std::string_view sha256,
+                          std::size_t max_bytes) override {
+        if (!bound()) {
+            return {make_result(DurableFileStatus::Unsupported), {}, false};
+        }
+        const auto object_name = durable_immutable_object_filename(sha256);
+        if (!object_name.has_value()) {
+            return {make_result(DurableFileStatus::Unsupported), {}, false};
+        }
+        const std::wstring wide_name(object_name->begin(),
+                                     object_name->end());
+        const auto path = child_path(directory_, wide_name);
+        const auto handle = ::CreateFileW(
+            path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+            nullptr, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            return {open_error_result(::GetLastError()), {}, false};
+        }
+        const auto safe = validate_open_regular_single_link(handle);
+        if (!safe.succeeded()) {
+            return {close_open_handle(handle, safe), {}, false};
+        }
+        WindowsDurableReadChannel channel(handle);
+        return read_bounded_close(channel, max_bytes);
+    }
+
+    DurableFileResult
+    create_immutable_object(std::string_view sha256,
+                            std::string_view bytes) override {
+        if (!bound()) {
+            return make_result(DurableFileStatus::Unsupported);
+        }
+        const auto object_name = durable_immutable_object_filename(sha256);
+        const auto stage_name =
+            durable_immutable_object_stage_filename(sha256);
+        if (!object_name.has_value() || !stage_name.has_value()) {
+            return make_result(DurableFileStatus::Unsupported);
+        }
+        const std::wstring wide_object_name(object_name->begin(),
+                                            object_name->end());
+        const std::wstring wide_stage_name(stage_name->begin(),
+                                           stage_name->end());
+        const auto target_path = child_path(directory_, wide_object_name);
+        const auto stage_path = child_path(directory_, wide_stage_name);
+
+        const auto recovered_stage_handle = ::CreateFileW(
+            stage_path.c_str(), FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        if (recovered_stage_handle != INVALID_HANDLE_VALUE) {
+            FILE_ID_INFO recovered_stage_identity {};
+            const auto safe = capture_regular_identity(
+                recovered_stage_handle, recovered_stage_identity);
+            const auto closed = close_open_handle(recovered_stage_handle,
+                                                  safe);
+            if (!closed.succeeded()) {
+                return closed;
+            }
+            const auto removed = remove_owned_probe(
+                stage_path, recovered_stage_identity);
+            if (!removed.succeeded()) {
+                return removed;
+            }
+        } else {
+            const auto error = ::GetLastError();
+            if (error != ERROR_FILE_NOT_FOUND &&
+                error != ERROR_PATH_NOT_FOUND) {
+                return open_error_result(error);
+            }
+        }
+
+        const auto existing_attributes = ::GetFileAttributesW(
+            target_path.c_str());
+        if (existing_attributes != INVALID_FILE_ATTRIBUTES) {
+            return make_result(DurableFileStatus::AlreadyExists);
+        }
+        const auto target_error = ::GetLastError();
+        if (target_error != ERROR_FILE_NOT_FOUND &&
+            target_error != ERROR_PATH_NOT_FOUND) {
+            return open_error_result(target_error);
+        }
+
+        const auto handle = ::CreateFileW(
+            stage_path.c_str(), GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            const auto error = ::GetLastError();
+            if (error == ERROR_FILE_EXISTS ||
+                error == ERROR_ALREADY_EXISTS) {
+                return make_windows_result(DurableFileStatus::Unsupported,
+                                           error);
+            }
+            return open_error_result(error);
+        }
+        FILE_ID_INFO object_identity {};
+        const auto safe = capture_regular_identity(handle, object_identity);
+        if (!safe.succeeded()) {
+            return close_open_handle(handle, post_create_failure(safe));
+        }
+        WindowsDurableFileChannel channel(handle);
+        const auto persisted = write_flush_close(channel, bytes);
+        if (!persisted.succeeded()) {
+            if (persisted.effect_may_have_occurred()) {
+                return persisted;
+            }
+            return {DurableFileStatus::EffectMayHaveOccurred,
+                    persisted.diagnostic};
+        }
+        const auto stage_current = verify_owned_probe(
+            stage_path, object_identity);
+        if (!stage_current.succeeded()) {
+            return stage_current;
+        }
+        if (!::MoveFileExW(stage_path.c_str(), target_path.c_str(),
+                           MOVEFILE_WRITE_THROUGH)) {
+            const auto error = ::GetLastError();
+            const auto removed = remove_owned_probe(stage_path,
+                                                    object_identity);
+            if (!removed.succeeded()) {
+                return removed;
+            }
+            if (error == ERROR_FILE_EXISTS ||
+                error == ERROR_ALREADY_EXISTS) {
+                return make_windows_result(DurableFileStatus::AlreadyExists,
+                                           error);
+            }
+            return make_windows_result(
+                DurableFileStatus::EffectMayHaveOccurred, error);
+        }
+        return verify_replaced_target(target_path, object_identity, bytes);
+    }
+
     DurableFileResult create_journal(std::string_view bytes) override {
         if (!bound()) {
             return make_result(DurableFileStatus::Unsupported);
@@ -1429,6 +1640,113 @@ make_platform_durable_file_adapter(const std::filesystem::path &directory) {
     }
     return std::make_unique<WindowsDurableFileAdapter>(
         std::move(*bound_directory), directory_handle);
+}
+
+std::unique_ptr<DurableFileAdapter>
+make_platform_durable_file_adapter_in_fixed_namespace(
+    const std::filesystem::path &parent_directory,
+    std::string_view child_namespace) {
+    const auto unbound = [] {
+        return std::make_unique<WindowsDurableFileAdapter>(
+            std::filesystem::path{}, INVALID_HANDLE_VALUE);
+    };
+    if (!durable_fixed_namespace_name_is_valid(child_namespace)) {
+        return unbound();
+    }
+
+    auto parent = bind_windows_directory(parent_directory);
+    if (parent.status != WindowsDirectoryBindStatus::Bound) {
+        return unbound();
+    }
+    const std::wstring child_name(child_namespace.begin(),
+                                  child_namespace.end());
+    const auto child = parent.path / child_name;
+    const auto stage = parent.path /
+                       (L"." + child_name + L".directory-stage");
+
+    const auto cleanup_stage = [&](std::optional<FILE_ID_INFO> expected) {
+        auto bound_stage = bind_windows_directory(stage);
+        if (bound_stage.status == WindowsDirectoryBindStatus::NotFound) {
+            return true;
+        }
+        if (bound_stage.status != WindowsDirectoryBindStatus::Bound ||
+            (expected.has_value() &&
+             !same_file_identity(bound_stage.identity, *expected))) {
+            close_windows_directory(bound_stage);
+            return false;
+        }
+        const auto empty = windows_directory_is_empty(bound_stage.path);
+        const auto bound_stage_path = bound_stage.path;
+        if (!empty.has_value() || !*empty ||
+            !close_windows_directory(bound_stage)) {
+            return false;
+        }
+        return ::RemoveDirectoryW(bound_stage_path.c_str()) != 0;
+    };
+    const auto release_parent = [&] {
+        return close_windows_directory(parent);
+    };
+    const auto reject = [&](WindowsDirectoryBinding *child_binding = nullptr) {
+        if (child_binding != nullptr) {
+            close_windows_directory(*child_binding);
+        }
+        release_parent();
+        return unbound();
+    };
+    const auto publish = [&](WindowsDirectoryBinding &child_binding) {
+        if (!release_parent()) {
+            return reject(&child_binding);
+        }
+        return std::make_unique<WindowsDurableFileAdapter>(
+            std::move(child_binding.path),
+            std::exchange(child_binding.handle, INVALID_HANDLE_VALUE));
+    };
+
+    auto bound_child = bind_windows_directory(child);
+    if (bound_child.status == WindowsDirectoryBindStatus::Bound) {
+        if (!cleanup_stage(std::nullopt)) {
+            return reject(&bound_child);
+        }
+        return publish(bound_child);
+    }
+    if (bound_child.status != WindowsDirectoryBindStatus::NotFound) {
+        return reject();
+    }
+
+    if (!::CreateDirectoryW(stage.c_str(), nullptr)) {
+        const auto error = ::GetLastError();
+        if (error != ERROR_ALREADY_EXISTS && error != ERROR_FILE_EXISTS) {
+            return reject();
+        }
+    }
+    auto bound_stage = bind_windows_directory(stage);
+    if (bound_stage.status != WindowsDirectoryBindStatus::Bound) {
+        return reject();
+    }
+    const auto empty_stage = windows_directory_is_empty(bound_stage.path);
+    const auto stage_identity = bound_stage.identity;
+    if (!empty_stage.has_value() || !*empty_stage ||
+        !close_windows_directory(bound_stage)) {
+        return reject();
+    }
+
+    const auto moved = ::MoveFileExW(stage.c_str(), child.c_str(),
+                                     MOVEFILE_WRITE_THROUGH);
+    auto published_child = bind_windows_directory(child);
+    if (published_child.status != WindowsDirectoryBindStatus::Bound ||
+        (!moved && !cleanup_stage(stage_identity)) ||
+        (moved && !same_file_identity(published_child.identity,
+                                      stage_identity))) {
+        return reject(&published_child);
+    }
+    if (moved) {
+        const auto empty_child =
+            windows_directory_is_empty(published_child.path);
+        if (!empty_child.has_value() || !*empty_child) {
+            return reject(&published_child);
+        }
+    }
+    return publish(published_child);
 }
 
 #ifdef LEMONADE_RESIDENCY_DURABLE_TESTING

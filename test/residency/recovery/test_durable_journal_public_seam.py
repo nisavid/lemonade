@@ -27,6 +27,12 @@ INTERNAL_INCLUDE_ROOT = REPO_ROOT / "src/cpp/server/residency"
 TEST_INCLUDE_ROOT = REPO_ROOT / "test/residency/recovery"
 DURABLE_HEADER = INCLUDE_ROOT / "lemon/residency/durable_journal.h"
 DURABLE_SOURCE = REPO_ROOT / "src/cpp/server/residency/durable_journal.cpp"
+AUTHORITY_FENCE = INTERNAL_INCLUDE_ROOT / "authority_fence.h"
+CLAIMS_SOURCE = REPO_ROOT / "src/cpp/server/residency/claims.cpp"
+DURABLE_LOCAL_OVERLAY_SOURCE = (
+    REPO_ROOT / "src/cpp/server/residency/durable_local_overlay.cpp"
+)
+LOCAL_OVERLAY_SOURCE = REPO_ROOT / "src/cpp/server/residency/local_overlay.cpp"
 JOURNAL_SOURCE = REPO_ROOT / "src/cpp/server/residency/journal.cpp"
 JOURNAL_HEADER = INCLUDE_ROOT / "lemon/residency/journal.h"
 ADAPTER_HEADER = INTERNAL_INCLUDE_ROOT / "platform/durable_file_adapter.h"
@@ -128,7 +134,10 @@ def compiler_command(
     mbedcrypto_library = environment.get("MBEDCRYPTO_LIBRARY")
     sources = [
         JOURNAL_SOURCE,
+        CLAIMS_SOURCE,
         DURABLE_SOURCE,
+        DURABLE_LOCAL_OVERLAY_SOURCE,
+        LOCAL_OVERLAY_SOURCE,
         ADAPTER_COMMON,
         native_adapter_source(),
         TEST_SUPPORT,
@@ -454,6 +463,7 @@ def require_platform_source_contract() -> None:
     )
     macos = strip_cpp_comments_and_literals(ADAPTER_MACOS.read_text(encoding="utf-8"))
     durable = DURABLE_SOURCE.read_text(encoding="utf-8")
+    authority_fence = AUTHORITY_FENCE.read_text(encoding="utf-8")
     durable_header_raw = DURABLE_HEADER.read_text(encoding="utf-8")
     durable_header = strip_cpp_comments_preserve_literals(durable_header_raw)
     durable_header_code = strip_cpp_comments_and_literals(durable_header_raw)
@@ -720,7 +730,9 @@ enum class JournalQuiescence { Unconfirmed, Confirmed, Assumed };
         raise AssertionError("persistence duplicated TASK-019 JSON parsing")
     require_task019_live_contract(durable_code)
     require_compaction_prefix_binding(durable_code)
-    require_directory_lineage_fence_registry(durable_code)
+    require_directory_lineage_fence_registry(
+        strip_cpp_comments_and_literals(authority_fence)
+    )
     require_final_authority_revalidation(durable_code)
     for path, expected in TASK019_HASHES.items():
         observed = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -1012,6 +1024,9 @@ enum class JournalQuiescence { Unconfirmed, Confirmed, Assumed };
     ):
         require_post_replace_verification(platform_source, platform, label)
         require_post_replace_verification_mutants(platform_source, platform, label)
+    require_fixed_namespace_factory_contract(
+        adapter_header, common, posix, macos, windows
+    )
     require_windows_bound_directory_factory(windows)
     require_windows_bound_directory_factory_mutants(windows)
     require_transaction_helper_contract(all_adapter_sources)
@@ -5396,6 +5411,11 @@ def require_post_replace_verification(
         raise AssertionError(f"{label} verifier ignores observed bounded bytes")
 
     if platform == "posix":
+        link_count_default = re.search(
+            r"\bverify_replaced_target\s*\([^;{}]*\bnlink_t\s+"
+            r"expected_link_count\s*=\s*1\s*\)\s*\{",
+            source,
+        )
         opens = call_argument_lists(helper, "openat")
         if len(opens) != 1 or not all(
             token in "".join(opens[0])
@@ -5405,7 +5425,11 @@ def require_post_replace_verification(
         if (
             re.search(r"\bfstat\s*\(", helper) is None
             or re.search(r"!\s*S_ISREG\s*\(", helper) is None
-            or re.search(r"\bst_nlink\s*!=\s*1\b", helper) is None
+            or link_count_default is None
+            or re.search(
+                r"\bst_nlink\s*!=\s*expected_link_count\b", helper
+            )
+            is None
             or re.search(
                 r"\bst_dev\s*!=\s*expected_identity\s*\.\s*device\b",
                 helper,
@@ -5786,6 +5810,134 @@ def require_windows_bound_directory_factory(source: str) -> None:
     for arguments in call_argument_lists(final_body, "GetFinalPathNameByHandleW"):
         if not any(compact_cpp(argument) == "flags" for argument in arguments):
             raise AssertionError("Windows final-path call ignores normalized flags")
+
+
+def require_fixed_namespace_factory_contract(
+    header: str,
+    common: str,
+    posix: str,
+    macos: str,
+    windows: str,
+) -> None:
+    declaration = re.compile(
+        r"\bmake_platform_durable_file_adapter_in_fixed_namespace\s*\(\s*"
+        r"const\s+std::filesystem::path\s*&\s*parent_directory\s*,\s*"
+        r"std::string_view\s+child_namespace\s*\)\s*;"
+    )
+    if declaration.search(header) is None:
+        raise AssertionError("fixed-namespace adapter factory is unavailable")
+    validators = function_bodies(
+        common, "durable_fixed_namespace_name_is_valid"
+    )
+    if len(validators) != 1 or not all(
+        token in validators[0]
+        for token in ("name.empty()", "name.size()", "name.front()", "name.back()")
+    ):
+        raise AssertionError("fixed-namespace name validation drifted")
+
+    for source, label in (
+        (posix, "POSIX durable adapter"),
+        (macos, "macOS durable adapter"),
+    ):
+        factories = function_bodies(
+            source, "make_platform_durable_file_adapter_in_fixed_namespace"
+        )
+        binders = function_bodies(source, "bind_fixed_namespace_directory")
+        if (
+            len(factories) != 1
+            or len(binders) != 1
+            or "bind_fixed_namespace_directory" not in factories[0]
+        ):
+            raise AssertionError(f"{label} fixed-namespace factory is not unique")
+        binder = binders[0]
+        required = (
+            "durable_fixed_namespace_name_is_valid",
+            "O_DIRECTORY",
+            "O_NOFOLLOW",
+            "lock_directory_retrying_interrupts",
+            "mkdirat",
+            "AT_SYMLINK_NOFOLLOW",
+            "openat",
+            "fstat",
+            "S_ISDIR",
+            "sync_directory_retrying_interrupts",
+            "unlock_directory_retrying_interrupts",
+            "st_dev",
+            "st_ino",
+        )
+        if not all(token in binder for token in required):
+            raise AssertionError(
+                f"{label} fixed namespace omits safe durable binding"
+            )
+        create_at = binder.find("mkdirat")
+        bind_at = binder.find("openat")
+        sync_at = binder.find("sync_directory_retrying_interrupts")
+        if not 0 <= create_at < bind_at < sync_at:
+            raise AssertionError(
+                f"{label} fixed namespace is bound or returned before durability"
+            )
+        open_calls = call_argument_lists(binder, "openat")
+        if len(open_calls) != 1 or not all(
+            token in "".join(open_calls[0])
+            for token in ("parent_fd", "child_name", "O_DIRECTORY", "O_NOFOLLOW")
+        ):
+            raise AssertionError(f"{label} fixed namespace follows its child")
+
+    factories = function_bodies(
+        windows, "make_platform_durable_file_adapter_in_fixed_namespace"
+    )
+    binders = function_bodies(windows, "bind_windows_directory")
+    emptiness_checks = function_bodies(windows, "windows_directory_is_empty")
+    if len(factories) != 1 or len(binders) != 1 or len(emptiness_checks) != 1:
+        raise AssertionError("Windows fixed-namespace seams are not unique")
+    factory = factories[0]
+    binder = binders[0]
+    emptiness = emptiness_checks[0]
+    if not all(
+        token in binder
+        for token in (
+            "CreateFileW",
+            "FILE_FLAG_BACKUP_SEMANTICS",
+            "FILE_FLAG_OPEN_REPARSE_POINT",
+            "FileAttributeTagInfo",
+            "FILE_ATTRIBUTE_REPARSE_POINT",
+            "FILE_ATTRIBUTE_DIRECTORY",
+            "FileIdInfo",
+            "final_directory_path",
+        )
+    ):
+        raise AssertionError("Windows fixed namespace does not bind safe directories")
+    if not all(
+        token in emptiness for token in ("FindFirstFileW", "FindNextFileW", "FindClose")
+    ):
+        raise AssertionError("Windows fixed namespace does not prove stage emptiness")
+    required_factory_tokens = (
+        "durable_fixed_namespace_name_is_valid",
+        "bind_windows_directory(parent_directory)",
+        "cleanup_stage",
+        "CreateDirectoryW",
+        "ERROR_ALREADY_EXISTS",
+        "windows_directory_is_empty",
+        "MoveFileExW",
+        "MOVEFILE_WRITE_THROUGH",
+        "same_file_identity",
+    )
+    if not all(token in factory for token in required_factory_tokens):
+        raise AssertionError("Windows fixed namespace omits durable staged publication")
+    moves = call_argument_lists(factory, "MoveFileExW")
+    if (
+        len(moves) != 1
+        or len(moves[0]) != 3
+        or compact_cpp(moves[0][2]) != "MOVEFILE_WRITE_THROUGH"
+        or "MOVEFILE_REPLACE_EXISTING" in "".join(moves[0])
+    ):
+        raise AssertionError("Windows fixed namespace replaces an existing child")
+    existing_at = factory.find("bind_windows_directory(child)")
+    stage_at = factory.find("CreateDirectoryW")
+    move_at = factory.find("MoveFileExW")
+    published_at = factory.rfind("bind_windows_directory(child)")
+    if not 0 <= existing_at < stage_at < move_at < published_at:
+        raise AssertionError("Windows fixed namespace mishandles concurrent creators")
 
 
 def require_windows_bound_directory_factory_mutants(source: str) -> None:
@@ -7206,8 +7358,15 @@ def require_build_contract() -> None:
     )
     if testing_definition.search(block) is None:
         raise AssertionError("durable test injection is not target-confined")
-    if cmake_code.count(TESTING_DEFINITION) != 1:
-        raise AssertionError("durable test injection escaped its one test target")
+    overlay_testing_definition = re.compile(
+        rf"target_compile_definitions\s*\(\s*test_durable_local_overlay\s+"
+        rf"PRIVATE\s+{TESTING_DEFINITION}\s*\)",
+        re.DOTALL,
+    )
+    if overlay_testing_definition.search(cmake_code) is None:
+        raise AssertionError("overlay durability test injection is not target-confined")
+    if cmake_code.count(TESTING_DEFINITION) != 2:
+        raise AssertionError("durable test injection escaped its test targets")
     quoted_hash_control = """
 if(TRUE)
     set(version_pattern "^#define CLI11_VERSION ")
