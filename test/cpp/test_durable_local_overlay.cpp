@@ -104,6 +104,28 @@ std::vector<ClaimFamilyClosure> claims(std::uint64_t bytes) {
     return claims_for("gpu/gtt", bytes);
 }
 
+std::vector<ClaimFamilyClosure> compatibility_claims(bool claimed) {
+    std::vector<ClaimAmount> compatibility;
+    if (claimed) {
+        compatibility.push_back(
+            ClaimAmount{"npu/exclusive", ClaimUnit::Count, 1});
+    }
+    return {
+        ClaimFamilyClosure{ClaimFamily::ConsumableCapacity,
+                           ClaimCompleteness::KnownZero, {}},
+        ClaimFamilyClosure{ClaimFamily::SafetyFloor,
+                           ClaimCompleteness::KnownZero, {}},
+        ClaimFamilyClosure{ClaimFamily::CardinalityPool,
+                           ClaimCompleteness::KnownZero, {}},
+        ClaimFamilyClosure{
+            ClaimFamily::CompatibilityExclusivity,
+            claimed ? ClaimCompleteness::Bounded
+                    : ClaimCompleteness::KnownZero,
+            std::move(compatibility),
+        },
+    };
+}
+
 LocalOverlaySelectorIdentity selector() {
     RuntimeCatalogSelector catalog;
     catalog.source_support_baseline = std::string(40, 'a');
@@ -159,7 +181,7 @@ ParsedProfilingInputEnvelope profile_for(std::string deployment_id,
     return std::move(*sealed.candidate);
 }
 
-ParsedLocalOverlayObject overlay_for_claims(
+LocalOverlayObjectDraft overlay_draft_for_claims(
     const ParsedProfilingInputEnvelope &profile,
     std::vector<ClaimFamilyClosure> bound_claims,
     std::vector<ClaimFamilyClosure> uncertainty_claims,
@@ -181,7 +203,17 @@ ParsedLocalOverlayObject overlay_for_claims(
     draft.expires_at = "2026-09-23T10:01:00Z";
     draft.status = LocalOverlayObjectStatus::Qualified;
     draft.decision_trace_sha256 = digest('3');
-    auto sealed = seal_local_overlay(std::move(draft));
+    return draft;
+}
+
+ParsedLocalOverlayObject overlay_for_claims(
+    const ParsedProfilingInputEnvelope &profile,
+    std::vector<ClaimFamilyClosure> bound_claims,
+    std::vector<ClaimFamilyClosure> uncertainty_claims,
+    std::vector<ClaimFamilyClosure> safety_margin_claims) {
+    auto sealed = seal_local_overlay(overlay_draft_for_claims(
+        profile, std::move(bound_claims), std::move(uncertainty_claims),
+        std::move(safety_margin_claims)));
     require(sealed.accepted(), sealed.diagnostic);
     return std::move(*sealed.candidate);
 }
@@ -699,6 +731,29 @@ void require_claim_admission_fails_before_writes() {
                 !after.authority_mutation_attempted,
             "not-applicable conservative claims covered an applicable "
             "attributed family");
+}
+
+void require_unreclosable_claims_cannot_seal_or_activate() {
+    auto storage = JournalTestStorage::fresh();
+    auto store = storage.make_overlay_store(generous_limits());
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "unreclosable-claim fixture did not start empty");
+
+    auto observations = observations_for(1);
+    auto profile = profile_for(
+        std::string(empty.authority->deployment_id()), 1, observations);
+    storage.reset_observations();
+    auto sealed = seal_local_overlay(overlay_draft_for_claims(
+        profile, compatibility_claims(true), compatibility_claims(false),
+        compatibility_claims(true)));
+    const auto after = storage.snapshot();
+    require(!sealed.accepted() && !sealed.candidate.has_value() &&
+                sealed.status == OverlayContractStatus::InvalidClaimClosure &&
+                after.authority_root_bytes.empty() &&
+                !after.authority_mutation_attempted,
+            "unreclosable conservative claims reached durable activation");
 }
 
 void require_same_observation_digest_is_deduplicated() {
@@ -1367,6 +1422,7 @@ int main() {
     require_full_history_rejects_rollback_before_writes();
     require_observation_admission_fails_before_writes();
     require_claim_admission_fails_before_writes();
+    require_unreclosable_claims_cannot_seal_or_activate();
     require_same_observation_digest_is_deduplicated();
     require_rollback_advances_generation_and_preserves_history();
     require_rollback_can_select_another_prior_overlay();
