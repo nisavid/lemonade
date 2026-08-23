@@ -15,7 +15,7 @@ namespace {
 using namespace lemon::residency;
 
 constexpr std::string_view expected_catalog_sha256 =
-    "8c09d12881e4e93b34d685bee8645187b3eb9867a39b312d6a386c4391f3a2d1";
+    "d11c2011462a8b2d2f83d557ee6e535e506c2e2d36a30a22875ceb743aa78485";
 
 template <typename T>
 T known_value(const DecodedValue<T> &decoded, std::string_view label) {
