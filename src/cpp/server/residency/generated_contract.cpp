@@ -85,13 +85,16 @@ constexpr std::array<std::string_view, 14> fallback_ids{{
     "residency_unload_preserve_live_use_v1",
 }};
 
-constexpr std::array<std::string_view, 12> schema_types{{
+constexpr std::array<std::string_view, 15> schema_types{{
     "residency.artifact_quarantine_record/1.0",
     "residency.artifact_writer_job_revision/1.0",
     "residency.artifact_writer_request_result/1.0",
     "residency.authority_transaction_result/1.0",
     "residency.coordinator_step_result/1.0",
+    "residency.deployment_local_overlay_object/1.0",
     "residency.operation_revision/1.0",
+    "residency.overlay_activation_root/1.0",
+    "residency.profiling_input_envelope/1.0",
     "residency.reason/1.0",
     "residency.request_error/1.0",
     "residency.profiles/1.0",

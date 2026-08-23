@@ -83,6 +83,144 @@
       "schema": "residency.explanation/1.0",
       "step_kind": "artifact_acquisition"
     },
+    "deployment_local_overlay_object": {
+      "bound_claims": [
+        {
+          "completeness": "bounded",
+          "entries": [
+            {
+              "amount": 4096,
+              "constraint_id": "gpu/gtt",
+              "unit": "bytes"
+            }
+          ],
+          "family": "consumable_capacity"
+        },
+        {
+          "completeness": "known_zero",
+          "entries": [],
+          "family": "safety_floor"
+        },
+        {
+          "completeness": "known_zero",
+          "entries": [],
+          "family": "cardinality_pool"
+        },
+        {
+          "completeness": "not_applicable",
+          "entries": [],
+          "family": "compatibility_exclusivity"
+        }
+      ],
+      "checksum_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "confidence_basis_points": 9900,
+      "decision_trace_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "deployment_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "expires_at": "2026-09-23T10:01:00Z",
+      "method": {
+        "architecture_predicate_sha256": null,
+        "calibration_revision_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "method_id": "method/exact-profile",
+        "method_revision_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "operation_kind": "admission",
+        "scope": "deployment_exact"
+      },
+      "profiling_input_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "qualified_at": "2026-01-01T00:00:00Z",
+      "safety_margin_claims": [
+        {
+          "completeness": "bounded",
+          "entries": [
+            {
+              "amount": 4096,
+              "constraint_id": "gpu/gtt",
+              "unit": "bytes"
+            }
+          ],
+          "family": "consumable_capacity"
+        },
+        {
+          "completeness": "known_zero",
+          "entries": [],
+          "family": "safety_floor"
+        },
+        {
+          "completeness": "known_zero",
+          "entries": [],
+          "family": "cardinality_pool"
+        },
+        {
+          "completeness": "not_applicable",
+          "entries": [],
+          "family": "compatibility_exclusivity"
+        }
+      ],
+      "schema": {
+        "major": 1,
+        "minor": 0
+      },
+      "selector": {
+        "backend_build_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "canonical_model_id": "model/alpha",
+        "catalog": {
+          "backend_channel": "stable",
+          "base_variant": "llamacpp-rocm",
+          "constraints": [
+            "gpu_shared_residency"
+          ],
+          "material_profiles": {
+            "configuration_profile": "profile-free-residency-estimation-v1-text-only",
+            "hardware_profile": "hatchery-gfx1151-shared-gtt-v1",
+            "workload_profile": "hatchery-text-generation-campaign-v1"
+          },
+          "model_type": "llm",
+          "operation_kind": "admission",
+          "operation_template": "ADM",
+          "platform": "linux-amd-rocm-llamacpp",
+          "recovery": "native_subprocess_tree",
+          "source_support_baseline": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "catalog_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "configuration_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "dependency_set_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "device_identity_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "driver_identity_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+        "model_artifact_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "operation_contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "topology_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "workload_sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "sequence": 1,
+      "status": "qualified",
+      "uncertainty_claims": [
+        {
+          "completeness": "bounded",
+          "entries": [
+            {
+              "amount": 4096,
+              "constraint_id": "gpu/gtt",
+              "unit": "bytes"
+            }
+          ],
+          "family": "consumable_capacity"
+        },
+        {
+          "completeness": "known_zero",
+          "entries": [],
+          "family": "safety_floor"
+        },
+        {
+          "completeness": "known_zero",
+          "entries": [],
+          "family": "cardinality_pool"
+        },
+        {
+          "completeness": "not_applicable",
+          "entries": [],
+          "family": "compatibility_exclusivity"
+        }
+      ]
+    },
     "operation_revision": {
       "created_at": "2026-01-01T00:00:00Z",
       "expires_at": null,
@@ -99,6 +237,115 @@
       "schema": "residency.explanation/1.0",
       "terminal_outcome": null,
       "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "overlay_activation_root": {
+      "activated_at": "2026-01-01T00:00:00Z",
+      "authority_status": "active",
+      "checksum_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "decision_trace_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "deployment_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "expires_at": "2026-09-23T10:01:00Z",
+      "generation": 1,
+      "previous_root_sha256": null,
+      "schema": {
+        "major": 1,
+        "minor": 0
+      },
+      "selected_method_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "selected_overlay_sequence": 1,
+      "selected_overlay_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "selected_selector_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sequence_high_water": 1,
+      "transition": "qualification"
+    },
+    "profiling_input_envelope": {
+      "attributed_claims": [
+        {
+          "completeness": "bounded",
+          "entries": [
+            {
+              "amount": 4096,
+              "constraint_id": "gpu/gtt",
+              "unit": "bytes"
+            }
+          ],
+          "family": "consumable_capacity"
+        },
+        {
+          "completeness": "known_zero",
+          "entries": [],
+          "family": "safety_floor"
+        },
+        {
+          "completeness": "known_zero",
+          "entries": [],
+          "family": "cardinality_pool"
+        },
+        {
+          "completeness": "not_applicable",
+          "entries": [],
+          "family": "compatibility_exclusivity"
+        }
+      ],
+      "attribution_complete": true,
+      "baseline_observation_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "checksum_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "deployment_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "external_demand_absent": true,
+      "fresh_until": "2026-09-23T10:01:00Z",
+      "generations": {
+        "backend": 2,
+        "configuration": 6,
+        "device": 3,
+        "driver": 5,
+        "model": 1,
+        "topology": 4,
+        "workload": 7
+      },
+      "lifecycle_release_verified": true,
+      "max_clock_skew_milliseconds": 1,
+      "observation_contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "observed_at": "2026-01-01T00:00:00Z",
+      "predictor_contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "profiling_transaction_id": "profiling_transaction_id-1",
+      "release_observation_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "schema": {
+        "major": 1,
+        "minor": 0
+      },
+      "selector": {
+        "backend_build_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "canonical_model_id": "model/alpha",
+        "catalog": {
+          "backend_channel": "stable",
+          "base_variant": "llamacpp-rocm",
+          "constraints": [
+            "gpu_shared_residency"
+          ],
+          "material_profiles": {
+            "configuration_profile": "profile-free-residency-estimation-v1-text-only",
+            "hardware_profile": "hatchery-gfx1151-shared-gtt-v1",
+            "workload_profile": "hatchery-text-generation-campaign-v1"
+          },
+          "model_type": "llm",
+          "operation_kind": "admission",
+          "operation_template": "ADM",
+          "platform": "linux-amd-rocm-llamacpp",
+          "recovery": "native_subprocess_tree",
+          "source_support_baseline": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "catalog_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "configuration_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "dependency_set_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "device_identity_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "driver_identity_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+        "model_artifact_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "operation_contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "topology_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "workload_sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "sequence": 1,
+      "workload_observation_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     },
     "reason": {
       "code": "residency_operation_succeeded",
@@ -4688,6 +4935,77 @@
               "minor": 0
             }
           },
+          "deployment_local_overlay_object": {
+            "conditionals": [],
+            "fields": {
+              "bound_claims": {
+                "required": true,
+                "type": "local_overlay_claim_closure"
+              },
+              "checksum_sha256": {
+                "required": true,
+                "type": "sha256"
+              },
+              "confidence_basis_points": {
+                "required": true,
+                "type": "local_overlay_confidence_basis_points"
+              },
+              "decision_trace_sha256": {
+                "required": true,
+                "type": "local_overlay_decision_trace_reference"
+              },
+              "deployment_id": {
+                "required": true,
+                "type": "local_overlay_deployment_identity"
+              },
+              "expires_at": {
+                "required": true,
+                "type": "local_overlay_expiry"
+              },
+              "method": {
+                "required": true,
+                "type": "local_overlay_method_identity"
+              },
+              "profiling_input_sha256": {
+                "required": true,
+                "type": "sha256"
+              },
+              "qualified_at": {
+                "required": true,
+                "type": "rfc3339"
+              },
+              "safety_margin_claims": {
+                "required": true,
+                "type": "local_overlay_claim_closure"
+              },
+              "schema": {
+                "required": true,
+                "type": "local_overlay_schema_version"
+              },
+              "selector": {
+                "required": true,
+                "type": "local_overlay_selector_identity"
+              },
+              "sequence": {
+                "required": true,
+                "type": "local_overlay_positive_uint64"
+              },
+              "status": {
+                "required": true,
+                "type": "local_overlay_object_status"
+              },
+              "uncertainty_claims": {
+                "required": true,
+                "type": "local_overlay_claim_closure"
+              }
+            },
+            "output": "docs/api/schemas/residency/deployment_local_overlay_object.schema.json",
+            "schema_type": "residency.deployment_local_overlay_object/1.0",
+            "version": {
+              "major": 1,
+              "minor": 0
+            }
+          },
           "operation_revision": {
             "conditionals": [
               {
@@ -4796,6 +5114,196 @@
             },
             "output": "docs/api/schemas/residency/operation_revision.schema.json",
             "schema_type": "residency.operation_revision/1.0",
+            "version": {
+              "major": 1,
+              "minor": 0
+            }
+          },
+          "overlay_activation_root": {
+            "conditionals": [
+              {
+                "if": {
+                  "equals": 1,
+                  "field": "generation"
+                },
+                "require_null": [
+                  "previous_root_sha256"
+                ],
+                "require_values": {
+                  "transition": "qualification"
+                }
+              },
+              {
+                "if": {
+                  "field": "generation",
+                  "not_equals": 1
+                },
+                "require_nonnull": [
+                  "previous_root_sha256"
+                ]
+              },
+              {
+                "if": {
+                  "equals": "rollback",
+                  "field": "transition"
+                },
+                "require_nonnull": [
+                  "previous_root_sha256"
+                ]
+              }
+            ],
+            "fields": {
+              "activated_at": {
+                "required": true,
+                "type": "rfc3339"
+              },
+              "authority_status": {
+                "required": true,
+                "type": "local_overlay_authority_status"
+              },
+              "checksum_sha256": {
+                "required": true,
+                "type": "sha256"
+              },
+              "decision_trace_sha256": {
+                "required": true,
+                "type": "local_overlay_decision_trace_reference"
+              },
+              "deployment_id": {
+                "required": true,
+                "type": "local_overlay_deployment_identity"
+              },
+              "expires_at": {
+                "required": true,
+                "type": "local_overlay_expiry"
+              },
+              "generation": {
+                "required": true,
+                "type": "local_overlay_positive_uint64"
+              },
+              "previous_root_sha256": {
+                "required": true,
+                "type": "local_overlay_previous_root_reference"
+              },
+              "schema": {
+                "required": true,
+                "type": "local_overlay_schema_version"
+              },
+              "selected_method_sha256": {
+                "required": true,
+                "type": "sha256"
+              },
+              "selected_overlay_sequence": {
+                "required": true,
+                "type": "local_overlay_positive_uint64"
+              },
+              "selected_overlay_sha256": {
+                "required": true,
+                "type": "sha256"
+              },
+              "selected_selector_sha256": {
+                "required": true,
+                "type": "sha256"
+              },
+              "sequence_high_water": {
+                "required": true,
+                "type": "local_overlay_positive_uint64"
+              },
+              "transition": {
+                "required": true,
+                "type": "local_overlay_root_transition"
+              }
+            },
+            "output": "docs/api/schemas/residency/overlay_activation_root.schema.json",
+            "schema_type": "residency.overlay_activation_root/1.0",
+            "version": {
+              "major": 1,
+              "minor": 0
+            }
+          },
+          "profiling_input_envelope": {
+            "conditionals": [],
+            "fields": {
+              "attributed_claims": {
+                "required": true,
+                "type": "local_overlay_claim_closure"
+              },
+              "attribution_complete": {
+                "required": true,
+                "type": "local_overlay_required_true"
+              },
+              "baseline_observation_sha256": {
+                "required": true,
+                "type": "sha256"
+              },
+              "checksum_sha256": {
+                "required": true,
+                "type": "sha256"
+              },
+              "deployment_id": {
+                "required": true,
+                "type": "local_overlay_deployment_identity"
+              },
+              "external_demand_absent": {
+                "required": true,
+                "type": "local_overlay_required_true"
+              },
+              "fresh_until": {
+                "required": true,
+                "type": "local_overlay_expiry"
+              },
+              "generations": {
+                "required": true,
+                "type": "local_overlay_source_generations"
+              },
+              "lifecycle_release_verified": {
+                "required": true,
+                "type": "local_overlay_required_true"
+              },
+              "max_clock_skew_milliseconds": {
+                "required": true,
+                "type": "local_overlay_positive_uint64"
+              },
+              "observation_contract_sha256": {
+                "required": true,
+                "type": "sha256"
+              },
+              "observed_at": {
+                "required": true,
+                "type": "rfc3339"
+              },
+              "predictor_contract_sha256": {
+                "required": true,
+                "type": "sha256"
+              },
+              "profiling_transaction_id": {
+                "max_bytes": 128,
+                "required": true,
+                "type": "opaque"
+              },
+              "release_observation_sha256": {
+                "required": true,
+                "type": "sha256"
+              },
+              "schema": {
+                "required": true,
+                "type": "local_overlay_schema_version"
+              },
+              "selector": {
+                "required": true,
+                "type": "local_overlay_selector_identity"
+              },
+              "sequence": {
+                "required": true,
+                "type": "local_overlay_positive_uint64"
+              },
+              "workload_observation_sha256": {
+                "required": true,
+                "type": "sha256"
+              }
+            },
+            "output": "docs/api/schemas/residency/profiling_input_envelope.schema.json",
+            "schema_type": "residency.profiling_input_envelope/1.0",
             "version": {
               "major": 1,
               "minor": 0
@@ -7086,7 +7594,7 @@
         }
       ],
       "schema": "residency.profiles/1.0",
-      "selection_registry_sha256": "3985ff529d728d54afb8e048f0d55a73efd02b5bc9628ea596ccbf29e841aa1a",
+      "selection_registry_sha256": "a9569b5f499e4e8e8d9acff9657f1f4789a379a15fe61fe424c793d91708023d",
       "source_support_baseline": "a505bbc702cc1fcd44ef73c44defabc98c36d505"
     },
     "resource_diagnostic": {

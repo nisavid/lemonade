@@ -19,7 +19,10 @@ OUTPUT_PATHS = (
     "docs/api/schemas/residency/artifact_writer_request_result.schema.json",
     "docs/api/schemas/residency/authority_transaction_result.schema.json",
     "docs/api/schemas/residency/coordinator_step_result.schema.json",
+    "docs/api/schemas/residency/deployment_local_overlay_object.schema.json",
     "docs/api/schemas/residency/operation_revision.schema.json",
+    "docs/api/schemas/residency/overlay_activation_root.schema.json",
+    "docs/api/schemas/residency/profiling_input_envelope.schema.json",
     "docs/api/schemas/residency/reason.schema.json",
     "docs/api/schemas/residency/request_error.schema.json",
     "docs/api/schemas/residency/residency_profiles.schema.json",
@@ -312,7 +315,7 @@ def _schema_rows(registry: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     rows = _registry_mapping(registry, "schema_registry")
     if set(rows) != set(SCHEMA_KEYS):
         raise ContractGenerationError(
-            "schema_registry must contain the exact 12 generated schema keys"
+            "schema_registry must contain the exact 15 generated schema keys"
         )
     return {
         key: copy.deepcopy(_mapping(rows[key], f"schema_registry.{key}"))
