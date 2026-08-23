@@ -1,0 +1,429 @@
+#include "lemon/residency/local_overlay.h"
+
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+namespace {
+
+using namespace lemon::residency;
+
+void require(bool condition, std::string_view message) {
+    if (!condition) {
+        std::cerr << "FAIL: " << message << '\n';
+        std::exit(1);
+    }
+}
+
+std::string digest(char value) { return std::string(64, value); }
+
+std::vector<ClaimFamilyClosure> claims(std::uint64_t bytes) {
+    std::vector<ClaimAmount> capacity;
+    if (bytes != 0) {
+        capacity.push_back(ClaimAmount{"gpu/gtt", ClaimUnit::Bytes, bytes});
+    }
+    return {
+        ClaimFamilyClosure{
+            ClaimFamily::ConsumableCapacity,
+            bytes == 0 ? ClaimCompleteness::KnownZero
+                       : ClaimCompleteness::Bounded,
+            std::move(capacity),
+        },
+        ClaimFamilyClosure{
+            ClaimFamily::SafetyFloor,
+            ClaimCompleteness::KnownZero,
+            {},
+        },
+        ClaimFamilyClosure{
+            ClaimFamily::CardinalityPool,
+            ClaimCompleteness::KnownZero,
+            {},
+        },
+        ClaimFamilyClosure{
+            ClaimFamily::CompatibilityExclusivity,
+            ClaimCompleteness::NotApplicable,
+            {},
+        },
+    };
+}
+
+LocalOverlaySelectorIdentity selector() {
+    RuntimeCatalogSelector catalog;
+    catalog.source_support_baseline = std::string(40, 'a');
+    catalog.base_variant = "llamacpp-rocm";
+    catalog.platform = "linux-amd-rocm-llamacpp";
+    catalog.backend_channel = "stable";
+    catalog.model_type = "llm";
+    catalog.operation_template = OperationTemplate::Adm;
+    catalog.operation_kind = OperationKind::Admission;
+    catalog.constraints = {
+        ConstraintKind::Ownership,
+        ConstraintKind::GpuSharedResidency,
+        ConstraintKind::ModelTypePool,
+        ConstraintKind::HostMemAvailableFloor,
+    };
+    catalog.recovery = "native_subprocess_tree";
+    catalog.material_profiles = {
+        {"configuration_profile",
+         "profile-free-residency-estimation-v1-text-only"},
+        {"hardware_profile", "hatchery-gfx1151-shared-gtt-v1"},
+        {"workload_profile", "hatchery-text-generation-campaign-v1"},
+    };
+
+    return LocalOverlaySelectorIdentity{
+        digest('1'), std::move(catalog), "model/alpha", digest('2'),
+        digest('3'), digest('4'),        digest('5'),   digest('6'),
+        digest('7'), digest('8'),        digest('9'),   digest('a'),
+    };
+}
+
+ProfilingInputEnvelopeDraft profiling_draft() {
+    ProfilingInputEnvelopeDraft draft;
+    draft.schema = supported_local_overlay_schema;
+    draft.deployment_id = digest('b');
+    draft.sequence = 1;
+    draft.profiling_transaction_id = "profiling/1";
+    draft.selector = selector();
+    draft.generations = OverlaySourceGenerations{1, 2, 3, 4, 5, 6, 7};
+    draft.attributed_claims = claims(4096);
+    draft.baseline_observation_sha256 = digest('c');
+    draft.workload_observation_sha256 = digest('d');
+    draft.release_observation_sha256 = digest('e');
+    draft.observation_contract_sha256 = digest('f');
+    draft.predictor_contract_sha256 = digest('0');
+    draft.observed_at = "2026-08-23T10:00:00Z";
+    draft.fresh_until = "2026-08-23T10:05:00Z";
+    draft.max_clock_skew_milliseconds = 1000;
+    draft.attribution_complete = true;
+    draft.external_demand_absent = true;
+    draft.lifecycle_release_verified = true;
+    return draft;
+}
+
+LocalOverlayMethodIdentity method() {
+    return LocalOverlayMethodIdentity{
+        "method/exact-profile",
+        digest('1'),
+        LocalOverlayMethodScope::DeploymentExact,
+        OperationKind::Admission,
+        std::nullopt,
+        digest('2'),
+    };
+}
+
+LocalOverlayObjectDraft
+overlay_draft(const ParsedProfilingInputEnvelope &profile) {
+    LocalOverlayObjectDraft draft;
+    draft.schema = supported_local_overlay_schema;
+    draft.deployment_id = std::string(profile.deployment_id());
+    draft.sequence = profile.sequence();
+    draft.profiling_input_sha256 = std::string(profile.checksum_sha256());
+    draft.selector = profile.selector();
+    draft.method = method();
+    draft.bound_claims = claims(4096);
+    draft.uncertainty_claims = claims(512);
+    draft.safety_margin_claims = claims(256);
+    draft.confidence_basis_points = 9900;
+    draft.qualified_at = "2026-08-23T10:01:00Z";
+    draft.expires_at = "2026-09-23T10:01:00Z";
+    draft.status = LocalOverlayObjectStatus::Qualified;
+    draft.decision_trace_sha256 = digest('3');
+    return draft;
+}
+
+OverlayActivationRootDraft root_draft(const ParsedLocalOverlayObject &overlay) {
+    OverlayActivationRootDraft draft;
+    draft.schema = supported_local_overlay_schema;
+    draft.deployment_id = std::string(overlay.deployment_id());
+    draft.generation = 1;
+    draft.transition = OverlayRootTransition::Qualification;
+    draft.authority_status = OverlayAuthorityStatus::Active;
+    draft.selected_overlay_sha256 = std::string(overlay.checksum_sha256());
+    draft.selected_overlay_sequence = overlay.sequence();
+    draft.sequence_high_water = overlay.sequence();
+    draft.selected_selector_sha256 = std::string(overlay.selector_sha256());
+    draft.selected_method_sha256 = std::string(overlay.method_sha256());
+    draft.decision_trace_sha256 = digest('4');
+    draft.activated_at = "2026-08-23T10:02:00Z";
+    draft.expires_at = std::string(overlay.expires_at());
+    return draft;
+}
+
+template <typename Result>
+void require_rejected(const Result &result, OverlayContractStatus status,
+                      std::string_view message) {
+    require(!result.accepted(), message);
+    require(!result.candidate.has_value(),
+            "rejected codec result returned a candidate");
+    require(result.status == status,
+            "codec rejection returned the wrong status");
+    require(result.diagnostic.size() <= max_local_overlay_diagnostic_bytes,
+            "codec diagnostic exceeded its bound");
+}
+
+std::uint64_t amount(const std::vector<ClaimFamilyClosure> &closure,
+                     ClaimFamily family, std::string_view constraint_id) {
+    for (const auto &family_claims : closure) {
+        if (family_claims.family != family) {
+            continue;
+        }
+        for (const auto &entry : family_claims.entries) {
+            if (entry.constraint_id == constraint_id) {
+                return entry.amount;
+            }
+        }
+    }
+    return 0;
+}
+
+std::string with_unknown_root_field(std::string bytes) {
+    const auto end = bytes.rfind('}');
+    require(end != std::string::npos, "canonical fixture has no root object");
+    bytes.insert(end, ",\"future\":true");
+    return bytes;
+}
+
+std::string tamper_once(std::string bytes, std::string_view needle,
+                        std::string_view replacement) {
+    const auto offset = bytes.find(needle);
+    require(offset != std::string::npos, "tamper fixture field is absent");
+    bytes.replace(offset, needle.size(), replacement);
+    return bytes;
+}
+
+void require_public_shape() {
+    static_assert(
+        !std::is_default_constructible_v<ParsedProfilingInputEnvelope>);
+    static_assert(!std::is_default_constructible_v<ParsedLocalOverlayObject>);
+    static_assert(
+        !std::is_default_constructible_v<ParsedOverlayActivationRoot>);
+    static_assert(std::is_copy_constructible_v<ParsedProfilingInputEnvelope>);
+    static_assert(std::is_copy_constructible_v<ParsedLocalOverlayObject>);
+    static_assert(std::is_copy_constructible_v<ParsedOverlayActivationRoot>);
+}
+
+void require_profiling_input_codec() {
+    auto sealed = seal_profiling_input(profiling_draft());
+    require(sealed.accepted(), sealed.diagnostic);
+    require(sealed.candidate->sequence() == 1 &&
+                sealed.candidate->deployment_id() == digest('b') &&
+                sealed.candidate->checksum_sha256().size() == 64 &&
+                sealed.candidate->selector_sha256().size() == 64,
+            "sealed profiling input lost its closed identity");
+
+    const auto canonical = std::string(sealed.candidate->canonical_bytes());
+    require(canonical.find("\"selector_sha256\"") == std::string::npos,
+            "profiling input serialized a derived selector digest");
+    auto reparsed = parse_profiling_input(canonical);
+    require(reparsed.accepted(), reparsed.diagnostic);
+    require(reparsed.candidate->canonical_bytes() == canonical &&
+                reparsed.candidate->checksum_sha256() ==
+                    sealed.candidate->checksum_sha256() &&
+                reparsed.candidate->selector_sha256() ==
+                    sealed.candidate->selector_sha256(),
+            "profiling input round-trip changed canonical identity");
+
+    require_rejected(parse_profiling_input(" " + canonical),
+                     OverlayContractStatus::NonCanonical,
+                     "profiling input accepted noncanonical whitespace");
+    require_rejected(parse_profiling_input("{"),
+                     OverlayContractStatus::MalformedJson,
+                     "profiling input accepted malformed JSON");
+    require_rejected(parse_profiling_input(with_unknown_root_field(canonical)),
+                     OverlayContractStatus::UnknownField,
+                     "profiling input accepted an unknown field");
+    require_rejected(parse_profiling_input(tamper_once(
+                         canonical, "\"deployment_id\":\"" + digest('b') + "\"",
+                         "\"deployment_id\":\"" + digest('c') + "\"")),
+                     OverlayContractStatus::DigestMismatch,
+                     "profiling input accepted a stale checksum");
+    require_rejected(parse_profiling_input(tamper_once(
+                         canonical, "\"schema\":{",
+                         "\"schema\":{\"major\":1,\"minor\":0},\"schema\":{")),
+                     OverlayContractStatus::Duplicate,
+                     "profiling input accepted a duplicate key");
+
+    auto incomplete = profiling_draft();
+    incomplete.attribution_complete = false;
+    require_rejected(seal_profiling_input(std::move(incomplete)),
+                     OverlayContractStatus::IncompleteIdentity,
+                     "profiling input accepted incomplete attribution");
+
+    auto unknown_claims = profiling_draft();
+    unknown_claims.attributed_claims.front().completeness =
+        ClaimCompleteness::Unknown;
+    unknown_claims.attributed_claims.front().entries.clear();
+    require_rejected(seal_profiling_input(std::move(unknown_claims)),
+                     OverlayContractStatus::IncompleteClaimClosure,
+                     "profiling input accepted an unknown claim family");
+}
+
+void require_overlay_object_codec() {
+    auto profile = seal_profiling_input(profiling_draft());
+    require(profile.accepted(), "overlay fixture profile was rejected");
+
+    auto sealed = seal_local_overlay(overlay_draft(*profile.candidate));
+    require(sealed.accepted(), sealed.diagnostic);
+    require(amount(sealed.candidate->conservative_claims(),
+                   ClaimFamily::ConsumableCapacity, "gpu/gtt") == 4864,
+            "overlay did not use checked claim addition for its conservative "
+            "bound");
+    require(amount(sealed.candidate->bound_claims(),
+                   ClaimFamily::ConsumableCapacity, "gpu/gtt") == 4096 &&
+                amount(sealed.candidate->uncertainty_claims(),
+                       ClaimFamily::ConsumableCapacity, "gpu/gtt") == 512 &&
+                amount(sealed.candidate->safety_margin_claims(),
+                       ClaimFamily::ConsumableCapacity, "gpu/gtt") == 256,
+            "overlay did not retain its reconstructible bound components");
+    require(sealed.candidate->status() == LocalOverlayObjectStatus::Qualified &&
+                sealed.candidate->selector_sha256() ==
+                    profile.candidate->selector_sha256() &&
+                sealed.candidate->method_sha256().size() == 64,
+            "overlay lost status, selector, or method identity");
+
+    const auto canonical = std::string(sealed.candidate->canonical_bytes());
+    require(canonical.find("\"selector_sha256\"") == std::string::npos &&
+                canonical.find("\"method_sha256\"") == std::string::npos &&
+                canonical.find("\"conservative_claims\"") == std::string::npos,
+            "overlay serialized derived fields outside the public schema");
+    auto reparsed = parse_local_overlay(canonical);
+    require(reparsed.accepted(), reparsed.diagnostic);
+    require(reparsed.candidate->canonical_bytes() == canonical &&
+                amount(reparsed.candidate->conservative_claims(),
+                       ClaimFamily::ConsumableCapacity, "gpu/gtt") == 4864,
+            "overlay round-trip changed canonical content");
+
+    require_rejected(parse_local_overlay("\n" + canonical),
+                     OverlayContractStatus::NonCanonical,
+                     "overlay accepted noncanonical whitespace");
+    require_rejected(parse_local_overlay(with_unknown_root_field(canonical)),
+                     OverlayContractStatus::UnknownField,
+                     "overlay accepted an unknown field");
+    require_rejected(parse_local_overlay(tamper_once(
+                         canonical, "\"confidence_basis_points\":9900",
+                         "\"confidence_basis_points\":9800")),
+                     OverlayContractStatus::DigestMismatch,
+                     "overlay accepted a stale checksum");
+
+    auto wrong_operation = overlay_draft(*profile.candidate);
+    wrong_operation.method.operation_kind = OperationKind::ExplicitUnload;
+    require_rejected(seal_local_overlay(std::move(wrong_operation)),
+                     OverlayContractStatus::ReferenceMismatch,
+                     "overlay accepted a method for another operation");
+
+    auto invalid_expiry = overlay_draft(*profile.candidate);
+    invalid_expiry.expires_at = invalid_expiry.qualified_at;
+    require_rejected(seal_local_overlay(std::move(invalid_expiry)),
+                     OverlayContractStatus::InvalidValue,
+                     "overlay accepted a non-advancing expiry");
+
+    auto incomplete_method = overlay_draft(*profile.candidate);
+    incomplete_method.method.scope =
+        LocalOverlayMethodScope::ArchitecturePredicate;
+    require_rejected(
+        seal_local_overlay(std::move(incomplete_method)),
+        OverlayContractStatus::IncompleteIdentity,
+        "overlay accepted an architecture method without its predicate");
+
+    auto overflowing_claims = overlay_draft(*profile.candidate);
+    overflowing_claims.bound_claims =
+        claims(std::numeric_limits<std::uint64_t>::max());
+    overflowing_claims.uncertainty_claims = claims(1);
+    overflowing_claims.safety_margin_claims = claims(0);
+    require_rejected(seal_local_overlay(std::move(overflowing_claims)),
+                     OverlayContractStatus::ClaimArithmeticOverflow,
+                     "overlay accepted overflowing conservative claims");
+}
+
+void require_activation_root_codec() {
+    auto profile = seal_profiling_input(profiling_draft());
+    require(profile.accepted(), "root fixture profile was rejected");
+    auto overlay = seal_local_overlay(overlay_draft(*profile.candidate));
+    require(overlay.accepted(), "root fixture overlay was rejected");
+
+    auto sealed = seal_overlay_activation_root(root_draft(*overlay.candidate));
+    require(sealed.accepted(), sealed.diagnostic);
+    require(sealed.candidate->generation() == 1 &&
+                sealed.candidate->selected_overlay_sequence() == 1 &&
+                sealed.candidate->sequence_high_water() == 1 &&
+                sealed.candidate->authority_status() ==
+                    OverlayAuthorityStatus::Active &&
+                sealed.candidate->selected_overlay_sha256() ==
+                    overlay.candidate->checksum_sha256(),
+            "activation root lost generation, sequence, status, or content "
+            "address");
+
+    const auto canonical = std::string(sealed.candidate->canonical_bytes());
+    auto reparsed = parse_overlay_activation_root(canonical);
+    require(reparsed.accepted(), reparsed.diagnostic);
+    require(reparsed.candidate->canonical_bytes() == canonical &&
+                reparsed.candidate->checksum_sha256() ==
+                    sealed.candidate->checksum_sha256(),
+            "activation-root round-trip changed canonical identity");
+
+    require_rejected(parse_overlay_activation_root(" " + canonical),
+                     OverlayContractStatus::NonCanonical,
+                     "activation root accepted noncanonical whitespace");
+    require_rejected(
+        parse_overlay_activation_root(with_unknown_root_field(canonical)),
+        OverlayContractStatus::UnknownField,
+        "activation root accepted an unknown field");
+    require_rejected(
+        parse_overlay_activation_root(
+            tamper_once(canonical, "\"generation\":1", "\"generation\":2")),
+        OverlayContractStatus::InvalidSequence,
+        "activation root accepted a generation without a predecessor");
+    require_rejected(parse_overlay_activation_root(tamper_once(
+                         canonical, "\"authority_status\":\"active\",", "")),
+                     OverlayContractStatus::InvalidValue,
+                     "activation root accepted a missing required field");
+    require_rejected(
+        parse_overlay_activation_root(tamper_once(
+            canonical,
+            "\"selected_overlay_sha256\":\"" +
+                std::string(overlay.candidate->checksum_sha256()) + "\"",
+            "\"selected_overlay_sha256\":\"" + digest('7') + "\"")),
+        OverlayContractStatus::DigestMismatch,
+        "activation root accepted a stale checksum");
+
+    auto rollback = root_draft(*overlay.candidate);
+    rollback.generation = 2;
+    rollback.previous_root_sha256 =
+        std::string(sealed.candidate->checksum_sha256());
+    rollback.transition = OverlayRootTransition::Rollback;
+    rollback.sequence_high_water = 2;
+    rollback.selected_overlay_sequence = 1;
+    auto rolled_back = seal_overlay_activation_root(std::move(rollback));
+    require(rolled_back.accepted(), rolled_back.diagnostic);
+    require(rolled_back.candidate->generation() == 2 &&
+                rolled_back.candidate->selected_overlay_sequence() == 1 &&
+                rolled_back.candidate->sequence_high_water() == 2,
+            "rollback rewrote generation or sequence high-water");
+
+    auto invalid_rollback = root_draft(*overlay.candidate);
+    invalid_rollback.generation = 2;
+    invalid_rollback.previous_root_sha256 =
+        std::string(sealed.candidate->checksum_sha256());
+    invalid_rollback.transition = OverlayRootTransition::Rollback;
+    invalid_rollback.sequence_high_water = 1;
+    require_rejected(seal_overlay_activation_root(std::move(invalid_rollback)),
+                     OverlayContractStatus::InvalidSequence,
+                     "rollback accepted the current high-water sequence");
+}
+
+} // namespace
+
+int main() {
+    require_public_shape();
+    require_profiling_input_codec();
+    require_overlay_object_codec();
+    require_activation_root_codec();
+    std::cout << "residency local-overlay contract passed\n";
+    return 0;
+}
