@@ -733,6 +733,38 @@ void require_claim_admission_fails_before_writes() {
             "attributed family");
 }
 
+void require_qualification_at_fresh_until_fails_before_writes() {
+    auto storage = JournalTestStorage::fresh();
+    auto store = storage.make_overlay_store(generous_limits());
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "freshness-boundary fixture did not start empty");
+
+    auto observations = observations_for(1);
+    auto profile = profile_for(
+        std::string(empty.authority->deployment_id()), 1, observations);
+    const auto freshness_boundary = std::string(profile.fresh_until());
+    auto overlay_draft = overlay_draft_for_claims(
+        profile, claims(4096), claims(512), claims(256));
+    overlay_draft.qualified_at = freshness_boundary;
+    auto sealed_overlay = seal_local_overlay(std::move(overlay_draft));
+    require(sealed_overlay.accepted(),
+            "freshness-boundary overlay was not canonical");
+
+    storage.reset_observations();
+    auto rejected = activate_qualification(
+        store, std::move(*empty.authority), std::move(profile),
+        std::move(*sealed_overlay.candidate), std::move(observations), '4',
+        freshness_boundary);
+    const auto after = storage.snapshot();
+    require(rejected.status == LocalOverlayStoreStatus::CorruptOrRollback &&
+                !rejected.authority.has_value() &&
+                after.authority_root_bytes.empty() &&
+                !after.authority_mutation_attempted,
+            "qualification at fresh_until caused an object or root write");
+}
+
 void require_unreclosable_claims_cannot_seal_or_activate() {
     auto storage = JournalTestStorage::fresh();
     auto store = storage.make_overlay_store(generous_limits());
@@ -1136,6 +1168,70 @@ void require_historic_under_bound_overlay_fails_closed() {
             "generation two replay accepted a historic under-bound overlay");
 }
 
+void require_historic_freshness_boundary_fails_closed() {
+    auto storage = JournalTestStorage::fresh();
+    auto store = storage.make_overlay_store(generous_limits());
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "historic freshness-boundary fixture did not start empty");
+    const auto deployment_id = std::string(empty.authority->deployment_id());
+
+    const auto first_observations = observations_for(1);
+    auto first_input = profile_for(deployment_id, 1, first_observations);
+    auto first_overlay_draft = overlay_draft_for_claims(
+        first_input, claims(4096), claims(512), claims(256));
+    first_overlay_draft.qualified_at =
+        std::string(first_input.fresh_until());
+    auto sealed_first_overlay =
+        seal_local_overlay(std::move(first_overlay_draft));
+    require(sealed_first_overlay.accepted(),
+            "historic freshness-boundary overlay was not canonical");
+    auto first_overlay = std::move(*sealed_first_overlay.candidate);
+    auto first_root = root_for(deployment_id, 1, std::nullopt, first_overlay, 1,
+                               '4', "2026-08-23T10:05:00Z");
+
+    const auto second_observations = observations_for(2);
+    auto second_input = profile_for(deployment_id, 2, second_observations);
+    auto second_overlay = overlay_for(second_input);
+    auto second_root = root_for(
+        deployment_id, 2, std::string(first_root.checksum_sha256()),
+        second_overlay, 2, '5', "2026-08-23T10:06:00Z");
+
+    auto persist_node = [&](const ObservationBundle &observations,
+                            const ParsedProfilingInputEnvelope &input,
+                            const ParsedLocalOverlayObject &overlay,
+                            const ParsedOverlayActivationRoot &root) {
+        storage.overwrite_immutable_object(observations.baseline_sha256,
+                                           observations.baseline);
+        storage.overwrite_immutable_object(observations.workload_sha256,
+                                           observations.workload);
+        storage.overwrite_immutable_object(observations.release_sha256,
+                                           observations.release);
+        storage.overwrite_immutable_object(
+            std::string(input.checksum_sha256()),
+            std::string(input.canonical_bytes()));
+        storage.overwrite_immutable_object(
+            std::string(overlay.checksum_sha256()),
+            std::string(overlay.canonical_bytes()));
+        storage.overwrite_immutable_object(
+            std::string(root.checksum_sha256()),
+            std::string(root.canonical_bytes()));
+    };
+    persist_node(first_observations, first_input, first_overlay, first_root);
+    persist_node(second_observations, second_input, second_overlay, second_root);
+    storage.overwrite_fixed_child_bytes(
+        FixedAuthorityChild::Root,
+        std::string(second_root.canonical_bytes()));
+
+    auto reader = storage.make_overlay_store(generous_limits());
+    auto replayed = reader.snapshot(TrustedLocalOverlayReplayFloor::exact_root(
+        std::string(first_root.canonical_bytes())));
+    require(replayed.status == LocalOverlayStoreStatus::CorruptOrRollback &&
+                !replayed.authority.has_value(),
+            "fresh snapshot accepted a historic overlay at fresh_until");
+}
+
 void require_generation_replay_is_rejected() {
     auto fixture = published_fixture();
     auto parsed = parse_overlay_activation_root(fixture.root_bytes);
@@ -1422,6 +1518,7 @@ int main() {
     require_full_history_rejects_rollback_before_writes();
     require_observation_admission_fails_before_writes();
     require_claim_admission_fails_before_writes();
+    require_qualification_at_fresh_until_fails_before_writes();
     require_unreclosable_claims_cannot_seal_or_activate();
     require_same_observation_digest_is_deduplicated();
     require_rollback_advances_generation_and_preserves_history();
@@ -1430,6 +1527,7 @@ int main() {
     require_copied_store_and_object_corruption_fail_closed();
     require_historic_observation_corruption_fails_closed();
     require_historic_under_bound_overlay_fails_closed();
+    require_historic_freshness_boundary_fails_closed();
     require_generation_replay_is_rejected();
     require_concurrent_activators_share_one_owner_lock();
     require_object_publication_crash_boundaries();

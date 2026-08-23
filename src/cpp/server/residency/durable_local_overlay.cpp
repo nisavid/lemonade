@@ -173,7 +173,7 @@ bool node_references_match(const LoadedOverlayNode &node,
            overlay.sequence() == input.sequence() &&
            overlay.selector_sha256() == input.selector_sha256() &&
            input.observed_at() <= overlay.qualified_at() &&
-           overlay.qualified_at() <= input.fresh_until() &&
+           overlay.qualified_at() < input.fresh_until() &&
            overlay.qualified_at() <= root.activated_at() &&
            qualification_claims_are_safe(input, overlay);
 }
@@ -1062,7 +1062,7 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
             selected_overlay->selector_sha256() !=
                 selected_input->selector_sha256() ||
             selected_input->observed_at() > selected_overlay->qualified_at() ||
-            selected_overlay->qualified_at() >
+            selected_overlay->qualified_at() >=
                 selected_input->fresh_until() ||
             selected_overlay->qualified_at() > activation.activated_at_ ||
             activation.activated_at_ >= selected_overlay->expires_at() ||
