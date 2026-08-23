@@ -5,6 +5,7 @@
 #endif
 
 #include "lemon/residency/durable_journal.h"
+#include "lemon/residency/durable_local_overlay.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -57,6 +58,16 @@ enum class FaultOperation {
     JournalOpen,
     JournalRead,
     JournalReadClose,
+    ObjectOpen,
+    ObjectRead,
+    ObjectReadClose,
+    ObjectStageCreate,
+    ObjectWrite,
+    ObjectFlush,
+    ObjectClose,
+    ObjectPublish,
+    ObjectNamespaceDurability,
+    ObjectStageCleanup,
     JournalAppendOpen,
     InitialJournalCreate,
     JournalWrite,
@@ -168,6 +179,14 @@ struct NativeLockPathProbeResult {
     bool replacement_after_release_rebound;
 };
 
+struct ImmutableObjectLinkedPublishProbeResult {
+    HelperResultKind creation_result;
+    bool linked_names_survived_restart;
+    bool read_succeeded;
+    bool read_was_unsupported;
+    bool authority_released;
+};
+
 bool operator==(const NamespaceSnapshot &left, const NamespaceSnapshot &right);
 bool same_persistent_state(const NamespaceSnapshot &left,
                            const NamespaceSnapshot &right);
@@ -209,6 +228,8 @@ public:
                                      PlatformContract platform);
     static JournalTestStorage
     missing_authority_directory(PlatformContract platform);
+    static ImmutableObjectLinkedPublishProbeResult
+    probe_immutable_object_linked_publish_read(PlatformContract platform);
 
     JournalTestStorage(const JournalTestStorage &);
     JournalTestStorage &operator=(const JournalTestStorage &);
@@ -218,8 +239,11 @@ public:
 
     JournalTestStorage clone() const;
     DurableJournal make_journal(JournalLimits limits);
+    LocalOverlayStore make_overlay_store(LocalOverlayStoreLimits limits);
     NamespaceSnapshot snapshot() const;
     void seed_untrusted_file(std::string name, std::string bytes);
+    void overwrite_immutable_object(std::string sha256, std::string bytes);
+    void remove_immutable_object(std::string sha256);
     void overwrite_fixed_child_bytes(FixedAuthorityChild child,
                                      std::string bytes);
     void replace_fixed_child_file(FixedAuthorityChild child,

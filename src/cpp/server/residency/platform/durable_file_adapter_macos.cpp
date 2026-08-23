@@ -352,7 +352,7 @@ bool same_file_identity(const MacosFileIdentity &left,
 DurableFileResult verify_replaced_target(
     int directory_fd, std::string_view target_name,
     const MacosFileIdentity &expected_identity,
-    std::string_view expected_bytes) {
+    std::string_view expected_bytes, nlink_t expected_link_count = 1) {
     int descriptor;
     do {
         descriptor = ::openat(directory_fd, target_name.data(),
@@ -370,7 +370,8 @@ DurableFileResult verify_replaced_target(
             make_errno_result(DurableFileStatus::EffectMayHaveOccurred,
                               error_number));
     }
-    if (!S_ISREG(information.st_mode) || information.st_nlink != 1 ||
+    if (!S_ISREG(information.st_mode) ||
+        information.st_nlink != expected_link_count ||
         information.st_dev != expected_identity.device ||
         information.st_ino != expected_identity.inode) {
         return close_open_descriptor(
@@ -404,7 +405,8 @@ DurableFileResult clear_verified_stage(int descriptor) {
 
 DurableFileResult verify_owned_probe(
     int directory_fd, std::string_view name,
-    const MacosFileIdentity &expected_identity) {
+    const MacosFileIdentity &expected_identity,
+    nlink_t expected_link_count = 1) {
     struct stat information {};
     if (::fstatat(directory_fd, name.data(), &information,
                   AT_SYMLINK_NOFOLLOW) != 0) {
@@ -413,7 +415,8 @@ DurableFileResult verify_owned_probe(
     }
     const MacosFileIdentity observed{information.st_dev,
                                      information.st_ino};
-    if (!S_ISREG(information.st_mode) || information.st_nlink != 1 ||
+    if (!S_ISREG(information.st_mode) ||
+        information.st_nlink != expected_link_count ||
         !same_file_identity(observed, expected_identity)) {
         return make_result(DurableFileStatus::EffectMayHaveOccurred);
     }
@@ -422,9 +425,11 @@ DurableFileResult verify_owned_probe(
 
 DurableFileResult remove_owned_probe(
     int directory_fd, std::string_view name,
-    const MacosFileIdentity &expected_identity) {
+    const MacosFileIdentity &expected_identity,
+    nlink_t expected_link_count = 1) {
     const auto verified =
-        verify_owned_probe(directory_fd, name, expected_identity);
+        verify_owned_probe(directory_fd, name, expected_identity,
+                           expected_link_count);
     if (!verified.succeeded()) {
         return verified;
     }
@@ -858,6 +863,219 @@ public:
         return read_bounded_close(channel, max_bytes);
     }
 
+    DurableReadResult
+    read_immutable_object(std::string_view sha256,
+                          std::size_t max_bytes) override {
+        const auto object_name = durable_immutable_object_filename(sha256);
+        if (!object_name.has_value()) {
+            return {make_result(DurableFileStatus::Unsupported), {}, false};
+        }
+        int descriptor;
+        do {
+            descriptor = ::openat(directory_fd_, object_name->c_str(),
+                                  O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        } while (descriptor < 0 && errno == EINTR);
+        if (descriptor < 0) {
+            return {open_error_result(errno), {}, false};
+        }
+        struct stat information {};
+        if (::fstat(descriptor, &information) != 0) {
+            return {close_open_descriptor(
+                        descriptor,
+                        make_errno_result(DurableFileStatus::Unsupported,
+                                          errno)),
+                    {}, false};
+        }
+        if (!S_ISREG(information.st_mode) || information.st_nlink != 1) {
+            return {close_open_descriptor(
+                        descriptor,
+                        make_result(DurableFileStatus::Unsupported)),
+                    {}, false};
+        }
+        MacosDurableReadChannel channel(descriptor);
+        return read_bounded_close(channel, max_bytes);
+    }
+
+    DurableFileResult
+    create_immutable_object(std::string_view sha256,
+                            std::string_view bytes) override {
+        const auto object_name = durable_immutable_object_filename(sha256);
+        const auto stage_name =
+            durable_immutable_object_stage_filename(sha256);
+        if (!object_name.has_value() || !stage_name.has_value()) {
+            return make_result(DurableFileStatus::Unsupported);
+        }
+
+        int recovered_stage_descriptor;
+        do {
+            recovered_stage_descriptor =
+                ::openat(directory_fd_, stage_name->c_str(),
+                         O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        } while (recovered_stage_descriptor < 0 && errno == EINTR);
+        if (recovered_stage_descriptor >= 0) {
+            struct stat recovered_stage_information {};
+            if (::fstat(recovered_stage_descriptor,
+                        &recovered_stage_information) != 0) {
+                const auto error_number = errno;
+                return close_open_descriptor(
+                    recovered_stage_descriptor,
+                    make_errno_result(
+                        DurableFileStatus::EffectMayHaveOccurred,
+                        error_number));
+            }
+            if (!S_ISREG(recovered_stage_information.st_mode) ||
+                (recovered_stage_information.st_nlink != 1 &&
+                 recovered_stage_information.st_nlink != 2)) {
+                return close_open_descriptor(
+                    recovered_stage_descriptor,
+                    make_result(DurableFileStatus::Unsupported));
+            }
+            const MacosFileIdentity recovered_stage_identity{
+                recovered_stage_information.st_dev,
+                recovered_stage_information.st_ino};
+            const auto recovered_link_count =
+                recovered_stage_information.st_nlink;
+            const auto closed = close_open_descriptor(
+                recovered_stage_descriptor,
+                make_result(DurableFileStatus::Succeeded));
+            if (!closed.succeeded()) {
+                return closed;
+            }
+            if (recovered_link_count == 2) {
+                const auto linked = verify_replaced_target(
+                    directory_fd_, *object_name, recovered_stage_identity,
+                    bytes, 2);
+                if (!linked.succeeded()) {
+                    return linked;
+                }
+                const auto removed = remove_owned_probe(
+                    directory_fd_, *stage_name, recovered_stage_identity, 2);
+                if (!removed.succeeded()) {
+                    return removed;
+                }
+                const auto namespace_result =
+                    sync_directory_retrying_interrupts(directory_fd_);
+                if (!namespace_result.succeeded()) {
+                    return namespace_result;
+                }
+                return verify_replaced_target(
+                    directory_fd_, *object_name, recovered_stage_identity,
+                    bytes);
+            }
+            const auto removed = remove_owned_probe(
+                directory_fd_, *stage_name, recovered_stage_identity);
+            if (!removed.succeeded()) {
+                return removed;
+            }
+            const auto namespace_result =
+                sync_directory_retrying_interrupts(directory_fd_);
+            if (!namespace_result.succeeded()) {
+                return namespace_result;
+            }
+        } else if (errno != ENOENT) {
+            return open_error_result(errno);
+        }
+
+        struct stat existing_target {};
+        if (::fstatat(directory_fd_, object_name->c_str(), &existing_target,
+                      AT_SYMLINK_NOFOLLOW) == 0) {
+            return make_result(DurableFileStatus::AlreadyExists);
+        }
+        if (errno != ENOENT) {
+            return open_error_result(errno);
+        }
+
+        int descriptor;
+        do {
+            descriptor = ::openat(directory_fd_, stage_name->c_str(),
+                                  O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC |
+                                      O_NOFOLLOW,
+                                  0600);
+        } while (descriptor < 0 && errno == EINTR);
+        if (descriptor < 0) {
+            if (errno == EEXIST) {
+                return make_errno_result(DurableFileStatus::Unsupported,
+                                         errno);
+            }
+            return open_error_result(errno);
+        }
+        struct stat information {};
+        if (::fstat(descriptor, &information) != 0) {
+            return close_open_descriptor(
+                descriptor,
+                make_errno_result(DurableFileStatus::EffectMayHaveOccurred,
+                                  errno));
+        }
+        if (!S_ISREG(information.st_mode) || information.st_nlink != 1) {
+            return close_open_descriptor(
+                descriptor,
+                make_result(DurableFileStatus::EffectMayHaveOccurred));
+        }
+        const MacosFileIdentity object_identity{information.st_dev,
+                                                information.st_ino};
+        MacosDurableFileChannel channel(descriptor);
+        const auto persisted = write_flush_close(channel, bytes);
+        if (!persisted.succeeded()) {
+            if (persisted.effect_may_have_occurred()) {
+                return persisted;
+            }
+            return {DurableFileStatus::EffectMayHaveOccurred,
+                    persisted.diagnostic};
+        }
+
+        const auto stage_current = verify_owned_probe(
+            directory_fd_, *stage_name, object_identity);
+        if (!stage_current.succeeded()) {
+            return stage_current;
+        }
+        if (::linkat(directory_fd_, stage_name->c_str(), directory_fd_,
+                     object_name->c_str(), 0) != 0) {
+            const auto error_number = errno;
+            const auto removed = remove_owned_probe(
+                directory_fd_, *stage_name, object_identity);
+            if (!removed.succeeded()) {
+                return removed;
+            }
+            const auto cleanup_result =
+                sync_directory_retrying_interrupts(directory_fd_);
+            if (!cleanup_result.succeeded()) {
+                return cleanup_result;
+            }
+            if (error_number == EEXIST) {
+                return make_errno_result(DurableFileStatus::AlreadyExists,
+                                         error_number);
+            }
+            if (error_number == EOPNOTSUPP || error_number == EPERM) {
+                return make_errno_result(DurableFileStatus::Unsupported,
+                                         error_number);
+            }
+            return make_errno_result(
+                DurableFileStatus::EffectMayHaveOccurred, error_number);
+        }
+        const auto linked = verify_replaced_target(
+            directory_fd_, *object_name, object_identity, bytes, 2);
+        if (!linked.succeeded()) {
+            return linked;
+        }
+        auto namespace_result =
+            sync_directory_retrying_interrupts(directory_fd_);
+        if (!namespace_result.succeeded()) {
+            return namespace_result;
+        }
+        const auto removed = remove_owned_probe(
+            directory_fd_, *stage_name, object_identity, 2);
+        if (!removed.succeeded()) {
+            return removed;
+        }
+        namespace_result =
+            sync_directory_retrying_interrupts(directory_fd_);
+        if (!namespace_result.succeeded()) {
+            return namespace_result;
+        }
+        return verify_replaced_target(directory_fd_, *object_name,
+                                      object_identity, bytes);
+    }
+
     DurableFileResult create_journal(std::string_view bytes) override {
         int descriptor;
         do {
@@ -1166,6 +1384,94 @@ private:
 #endif
 };
 
+int bind_fixed_namespace_directory(
+    const std::filesystem::path &parent_directory,
+    std::string_view child_namespace) {
+    if (!durable_fixed_namespace_name_is_valid(child_namespace)) {
+        return -1;
+    }
+    const std::string child_name(child_namespace);
+    int parent_fd;
+    do {
+        parent_fd = ::open(parent_directory.c_str(),
+                           O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
+    } while (parent_fd < 0 && errno == EINTR);
+    if (parent_fd < 0) {
+        return -1;
+    }
+
+    struct stat parent_before {};
+    if (::fstat(parent_fd, &parent_before) != 0 ||
+        !S_ISDIR(parent_before.st_mode)) {
+        close_best_effort(parent_fd);
+        return -1;
+    }
+    const auto parent_locked =
+        lock_directory_retrying_interrupts(parent_fd);
+    if (!parent_locked.succeeded()) {
+        close_best_effort(parent_fd);
+        return -1;
+    }
+
+    int create_result;
+    do {
+        create_result = ::mkdirat(parent_fd, child_name.c_str(), 0700);
+    } while (create_result != 0 && errno == EINTR);
+    if (create_result != 0 && errno != EEXIST) {
+        static_cast<void>(unlock_directory_retrying_interrupts(parent_fd));
+        close_best_effort(parent_fd);
+        return -1;
+    }
+
+    struct stat child_entry {};
+    if (::fstatat(parent_fd, child_name.c_str(), &child_entry,
+                  AT_SYMLINK_NOFOLLOW) != 0 ||
+        !S_ISDIR(child_entry.st_mode)) {
+        static_cast<void>(unlock_directory_retrying_interrupts(parent_fd));
+        close_best_effort(parent_fd);
+        return -1;
+    }
+
+    int child_fd;
+    do {
+        child_fd = ::openat(parent_fd, child_name.c_str(),
+                            O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
+    } while (child_fd < 0 && errno == EINTR);
+    if (child_fd < 0) {
+        static_cast<void>(unlock_directory_retrying_interrupts(parent_fd));
+        close_best_effort(parent_fd);
+        return -1;
+    }
+
+    struct stat child_bound {};
+    struct stat child_current {};
+    struct stat parent_after {};
+    const auto parent_synced =
+        sync_directory_retrying_interrupts(parent_fd);
+    const bool identities_match =
+        ::fstat(child_fd, &child_bound) == 0 &&
+        ::fstatat(parent_fd, child_name.c_str(), &child_current,
+                  AT_SYMLINK_NOFOLLOW) == 0 &&
+        ::fstat(parent_fd, &parent_after) == 0 &&
+        S_ISDIR(child_bound.st_mode) && S_ISDIR(child_current.st_mode) &&
+        S_ISDIR(parent_after.st_mode) &&
+        child_entry.st_dev == child_bound.st_dev &&
+        child_entry.st_ino == child_bound.st_ino &&
+        child_current.st_dev == child_bound.st_dev &&
+        child_current.st_ino == child_bound.st_ino &&
+        parent_before.st_dev == parent_after.st_dev &&
+        parent_before.st_ino == parent_after.st_ino;
+    const auto parent_unlocked =
+        unlock_directory_retrying_interrupts(parent_fd);
+    const auto parent_closed = ::close(parent_fd);
+    if (!parent_synced.succeeded() || !identities_match ||
+        !parent_unlocked.succeeded() || parent_closed != 0) {
+        close_best_effort(child_fd);
+        return -1;
+    }
+    return child_fd;
+}
+
 } // namespace
 
 std::unique_ptr<DurableFileAdapter>
@@ -1176,6 +1482,14 @@ make_platform_durable_file_adapter(const std::filesystem::path &directory) {
                               O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
     } while (directory_fd < 0 && errno == EINTR);
     return std::make_unique<MacosDurableFileAdapter>(directory_fd);
+}
+
+std::unique_ptr<DurableFileAdapter>
+make_platform_durable_file_adapter_in_fixed_namespace(
+    const std::filesystem::path &parent_directory,
+    std::string_view child_namespace) {
+    return std::make_unique<MacosDurableFileAdapter>(
+        bind_fixed_namespace_directory(parent_directory, child_namespace));
 }
 
 #ifdef LEMONADE_RESIDENCY_DURABLE_TESTING

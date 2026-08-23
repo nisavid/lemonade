@@ -187,4 +187,40 @@ DurableReadResult read_bounded_close(DurableReadChannel &channel,
             std::move(retained), truncated};
 }
 
+std::optional<std::string>
+durable_immutable_object_filename(std::string_view sha256) {
+    if (sha256.size() != 64 ||
+        !std::all_of(sha256.begin(), sha256.end(), [](char value) {
+            return (value >= '0' && value <= '9') ||
+                   (value >= 'a' && value <= 'f');
+        })) {
+        return std::nullopt;
+    }
+    std::string filename = "object-sha256-";
+    filename.append(sha256);
+    filename.append(".json");
+    return filename;
+}
+
+std::optional<std::string>
+durable_immutable_object_stage_filename(std::string_view sha256) {
+    const auto object_name = durable_immutable_object_filename(sha256);
+    if (!object_name.has_value()) {
+        return std::nullopt;
+    }
+    return "." + *object_name + ".stage";
+}
+
+bool durable_fixed_namespace_name_is_valid(
+    std::string_view name) noexcept {
+    if (name.empty() || name.size() > 63 || name.front() == '-' ||
+        name.back() == '-') {
+        return false;
+    }
+    return std::all_of(name.begin(), name.end(), [](char value) {
+        return (value >= 'a' && value <= 'z') ||
+               (value >= '0' && value <= '9') || value == '-';
+    });
+}
+
 } // namespace lemon::residency::detail

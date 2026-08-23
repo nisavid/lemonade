@@ -1,5 +1,6 @@
 #include "journal_persistence_test_support.h"
 
+#include "durable_local_overlay_test_factory.h"
 #include "platform/durable_file_adapter.h"
 
 #include <algorithm>
@@ -101,6 +102,16 @@ bool is_authority_operation(FaultOperation operation) {
     case FaultOperation::JournalOpen:
     case FaultOperation::JournalRead:
     case FaultOperation::JournalReadClose:
+    case FaultOperation::ObjectOpen:
+    case FaultOperation::ObjectRead:
+    case FaultOperation::ObjectReadClose:
+    case FaultOperation::ObjectStageCreate:
+    case FaultOperation::ObjectWrite:
+    case FaultOperation::ObjectFlush:
+    case FaultOperation::ObjectClose:
+    case FaultOperation::ObjectPublish:
+    case FaultOperation::ObjectNamespaceDurability:
+    case FaultOperation::ObjectStageCleanup:
     case FaultOperation::JournalAppendOpen:
     case FaultOperation::InitialJournalCreate:
     case FaultOperation::JournalWrite:
@@ -486,6 +497,14 @@ struct JournalTestStorage::State {
             return nullptr;
         }
         return &found->second;
+    }
+
+    std::size_t live_link_count(std::uint64_t identity) const {
+        return static_cast<std::size_t>(std::count_if(
+            entries.begin(), entries.end(), [&](const auto &item) {
+                return item.second.live_exists &&
+                       item.second.identity == identity;
+            }));
     }
 
     void observe(FaultOperation operation, bool lock_held,
@@ -950,6 +969,170 @@ public:
                           FaultOperation::JournalReadClose, max_bytes);
     }
 
+    detail::DurableReadResult
+    read_immutable_object(std::string_view sha256,
+                          std::size_t max_bytes) override {
+        const auto object_name =
+            detail::durable_immutable_object_filename(sha256);
+        if (!object_name.has_value()) {
+            return {result(DurableFileStatus::Unsupported), {}, false};
+        }
+        return read_fixed(*object_name, FaultOperation::ObjectOpen,
+                          FaultOperation::ObjectRead,
+                          FaultOperation::ObjectReadClose, max_bytes, true);
+    }
+
+    DurableFileResult
+    create_immutable_object(std::string_view sha256,
+                            std::string_view bytes) override {
+        const auto object_name =
+            detail::durable_immutable_object_filename(sha256);
+        const auto stage_name =
+            detail::durable_immutable_object_stage_filename(sha256);
+        if (!object_name.has_value() || !stage_name.has_value()) {
+            return result(DurableFileStatus::Unsupported);
+        }
+
+        bool recovered_stage_present = false;
+        bool recovered_linked_publish = false;
+        {
+            std::unique_lock lock(state_->mutex);
+            const auto *stage = state_->live_entry(*stage_name);
+            if (stage != nullptr) {
+                recovered_stage_present = true;
+                if (stage->kind != State::EntryKind::Regular) {
+                    return result(DurableFileStatus::Unsupported);
+                }
+                const auto *target = state_->live_entry(*object_name);
+                recovered_linked_publish =
+                    target != nullptr &&
+                    target->kind == State::EntryKind::Regular &&
+                    target->identity == stage->identity;
+                if (recovered_linked_publish &&
+                    (stage->live_bytes != bytes ||
+                     target->live_bytes != bytes)) {
+                    return result(
+                        DurableFileStatus::EffectMayHaveOccurred);
+                }
+            }
+        }
+        if (recovered_stage_present) {
+            const auto cleaned = cleanup_object_stage(*stage_name);
+            if (!cleaned.succeeded()) {
+                return cleaned;
+            }
+            const auto namespace_result =
+                make_object_namespace_durable();
+            if (!namespace_result.succeeded()) {
+                return namespace_result;
+            }
+        }
+        if (recovered_linked_publish) {
+            std::lock_guard lock(state_->mutex);
+            const auto *target = state_->live_entry(*object_name);
+            if (target == nullptr ||
+                target->kind != State::EntryKind::Regular ||
+                target->live_bytes != bytes || !target->durable_exists ||
+                !target->durable_content_available ||
+                target->durable_bytes != bytes) {
+                return result(DurableFileStatus::EffectMayHaveOccurred);
+            }
+            return succeeded();
+        }
+
+        {
+            std::unique_lock lock(state_->mutex);
+            if (state_->live_entry(*object_name) != nullptr) {
+                return result(DurableFileStatus::AlreadyExists);
+            }
+            const auto created = run_step(
+                lock, FaultOperation::ObjectStageCreate, true, [&] {
+                    auto &entry = state_->entries[*stage_name];
+                    entry = State::Entry{};
+                    entry.live_exists = true;
+                    entry.identity = next_entry_identity.fetch_add(1);
+                    state_->open_entries.insert(*stage_name);
+                });
+            if (!is_succeeded(created)) {
+                if (state_->open_entries.count(*stage_name) == 0 ||
+                    state_->simulated_crash) {
+                    return created;
+                }
+                const auto closed =
+                    run_step(lock, FaultOperation::ObjectClose, false, [&] {
+                        state_->open_entries.erase(*stage_name);
+                    });
+                state_->open_entries.erase(*stage_name);
+                return combine_results(created, closed);
+            }
+        }
+        Channel channel(
+            *this, *stage_name, false, FaultOperation::ObjectWrite,
+            FaultOperation::ObjectFlush, FaultOperation::ObjectWrite,
+            FaultOperation::ObjectClose);
+        const auto persisted = promote_after_persistent_effect(
+            detail::write_flush_close(channel, bytes));
+        if (!persisted.succeeded()) {
+            return persisted;
+        }
+
+        {
+            std::unique_lock lock(state_->mutex);
+            const auto *stage = state_->live_entry(*stage_name);
+            if (stage == nullptr ||
+                stage->kind != State::EntryKind::Regular ||
+                state_->live_entry(*object_name) != nullptr) {
+                return result(DurableFileStatus::EffectMayHaveOccurred);
+            }
+            const auto published = run_step(
+                lock, FaultOperation::ObjectPublish, true, [&] {
+                    const auto staged = state_->entries[*stage_name];
+                    auto &target = state_->entries[*object_name];
+                    target = State::Entry{};
+                    target.live_exists = true;
+                    target.live_bytes = staged.live_bytes;
+                    target.durable_bytes = staged.durable_bytes;
+                    target.durable_content_available =
+                        staged.durable_content_available;
+                    target.identity = staged.identity;
+                    if (state_->platform == PlatformContract::Windows) {
+                        erase_live(*stage_name);
+                    }
+                });
+            if (!published.succeeded()) {
+                return promote_after_persistent_effect(published);
+            }
+        }
+        auto namespace_result = make_object_namespace_durable();
+        if (!namespace_result.succeeded()) {
+            return namespace_result;
+        }
+        if (state_->platform != PlatformContract::Windows) {
+            const auto cleaned = cleanup_object_stage(*stage_name);
+            if (!cleaned.succeeded()) {
+                return cleaned;
+            }
+            namespace_result = make_object_namespace_durable();
+            if (!namespace_result.succeeded()) {
+                return namespace_result;
+            }
+        }
+        std::lock_guard lock(state_->mutex);
+        const auto *target = state_->live_entry(*object_name);
+        const auto *stage = state_->live_entry(*stage_name);
+        const auto durable_stage = state_->entries.find(*stage_name);
+        if (target == nullptr ||
+            target->kind != State::EntryKind::Regular ||
+            target->live_bytes != bytes || !target->durable_exists ||
+            !target->durable_content_available ||
+            target->durable_bytes != bytes || stage != nullptr ||
+            (durable_stage != state_->entries.end() &&
+             durable_stage->second.durable_exists)) {
+            return result(DurableFileStatus::EffectMayHaveOccurred);
+        }
+        return namespace_result;
+    }
+
     DurableFileResult create_journal(std::string_view bytes) override {
         {
             std::unique_lock lock(state_->mutex);
@@ -1340,11 +1523,64 @@ private:
         state_->paused = false;
     }
 
+    DurableFileResult cleanup_object_stage(std::string_view stage_name) {
+        class CleanupCall final : public DurableInterruptibleCall {
+        public:
+            CleanupCall(Adapter &adapter, std::string_view stage_name)
+                : adapter_(adapter), stage_name_(stage_name) {}
+
+            DurableFileResult attempt() override {
+                std::unique_lock lock(adapter_.state_->mutex);
+                return adapter_.run_step(
+                    lock, FaultOperation::ObjectStageCleanup, true, [&] {
+                        adapter_.state_->open_entries.erase(stage_name_);
+                        adapter_.erase_live(stage_name_);
+                    });
+            }
+
+        private:
+            Adapter &adapter_;
+            std::string stage_name_;
+        } call(*this, stage_name);
+        return promote_after_persistent_effect(
+            detail::retry_interrupted(call));
+    }
+
+    DurableFileResult make_object_namespace_durable() {
+        class NamespaceCall final : public DurableInterruptibleCall {
+        public:
+            explicit NamespaceCall(Adapter &adapter) : adapter_(adapter) {}
+
+            DurableFileResult attempt() override {
+                std::unique_lock lock(adapter_.state_->mutex);
+                return adapter_.run_step(
+                    lock, FaultOperation::ObjectNamespaceDurability, true,
+                    [&] {
+                        for (auto &[name, entry] :
+                             adapter_.state_->entries) {
+                            static_cast<void>(name);
+                            entry.durable_exists = entry.live_exists;
+                            if (!entry.live_exists) {
+                                entry.durable_bytes.clear();
+                                entry.durable_content_available = false;
+                            }
+                        }
+                    });
+            }
+
+        private:
+            Adapter &adapter_;
+        } call(*this);
+        return promote_after_persistent_effect(
+            detail::retry_interrupted(call));
+    }
+
     detail::DurableReadResult read_fixed(std::string_view name,
                                          FaultOperation open_operation,
                                          FaultOperation read_operation,
                                          FaultOperation close_operation,
-                                         std::size_t max_bytes) {
+                                         std::size_t max_bytes,
+                                         bool require_single_link = false) {
         std::unique_lock lock(state_->mutex);
         const auto *entry_before_open = state_->live_entry(name);
         const auto opened = run_step(
@@ -1371,7 +1607,9 @@ private:
         if (entry == nullptr) {
             return {result(DurableFileStatus::NotFound), {}, false};
         }
-        if (entry->kind != State::EntryKind::Regular) {
+        if (entry->kind != State::EntryKind::Regular ||
+            (require_single_link &&
+             state_->live_link_count(entry->identity) != 1)) {
             const auto unsupported = result(DurableFileStatus::Unsupported);
             lock.unlock();
             ReadChannel unsafe_channel(*this, name, read_operation,
@@ -1861,6 +2099,59 @@ JournalTestStorage::missing_authority_directory(PlatformContract platform) {
     return JournalTestStorage(std::make_shared<State>(platform, false));
 }
 
+ImmutableObjectLinkedPublishProbeResult
+JournalTestStorage::probe_immutable_object_linked_publish_read(
+    PlatformContract platform) {
+    constexpr std::string_view bytes = R"({"overlay":"linked"})";
+    const std::string digest(64, 'c');
+    const auto object_name =
+        detail::durable_immutable_object_filename(digest);
+    const auto stage_name =
+        detail::durable_immutable_object_stage_filename(digest);
+    auto storage = fresh(platform);
+
+    auto writer = std::make_unique<Adapter>(storage.state_);
+    if (!writer->lock_authority().succeeded()) {
+        return {HelperResultKind::FailedBeforeEffect, false, false, false,
+                false};
+    }
+    storage.arm_fault(FaultOperation::ObjectStageCleanup,
+                      FaultPosition::Before, FaultAction::Crash);
+    const auto creation = writer->create_immutable_object(digest, bytes);
+    writer.reset();
+    storage.restart();
+
+    bool linked_names_survived_restart = false;
+    {
+        std::lock_guard lock(storage.state_->mutex);
+        const auto *object = storage.state_->live_entry(*object_name);
+        const auto *stage = storage.state_->live_entry(*stage_name);
+        linked_names_survived_restart =
+            object != nullptr && stage != nullptr &&
+            object->kind == State::EntryKind::Regular &&
+            stage->kind == State::EntryKind::Regular &&
+            object->identity == stage->identity &&
+            object->live_bytes == bytes && stage->live_bytes == bytes;
+    }
+
+    auto reader = std::make_unique<Adapter>(storage.state_);
+    const auto locked = reader->lock_authority();
+    detail::DurableReadResult read;
+    if (locked.succeeded()) {
+        read = reader->read_immutable_object(digest, bytes.size());
+    } else {
+        read.result = locked;
+    }
+    const auto unlocked = reader->unlock_authority();
+    reader.reset();
+    const auto snapshot = storage.snapshot();
+    return {helper_result_kind(creation.status),
+            linked_names_survived_restart,
+            read.result.succeeded(),
+            read.result.status == DurableFileStatus::Unsupported,
+            unlocked.succeeded() && snapshot.open_handles.empty()};
+}
+
 JournalTestStorage::JournalTestStorage(const JournalTestStorage &) = default;
 
 JournalTestStorage &
@@ -1891,6 +2182,12 @@ JournalTestStorage JournalTestStorage::clone() const {
 
 DurableJournal JournalTestStorage::make_journal(JournalLimits limits) {
     return detail::make_durable_journal_for_test(
+        std::make_unique<Adapter>(state_), limits);
+}
+
+LocalOverlayStore
+JournalTestStorage::make_overlay_store(LocalOverlayStoreLimits limits) {
+    return detail::make_local_overlay_store_for_test(
         std::make_unique<Adapter>(state_), limits);
 }
 
@@ -2005,6 +2302,28 @@ void JournalTestStorage::seed_untrusted_file(std::string name,
                                              std::string bytes) {
     std::lock_guard lock(state_->mutex);
     state_->add_durable_regular(name, std::move(bytes));
+}
+
+void JournalTestStorage::overwrite_immutable_object(std::string sha256,
+                                                    std::string bytes) {
+    const auto object_name =
+        detail::durable_immutable_object_filename(sha256);
+    if (!object_name.has_value()) {
+        return;
+    }
+    std::lock_guard lock(state_->mutex);
+    state_->entries[*object_name].kind = State::EntryKind::Regular;
+    state_->add_durable_regular(*object_name, std::move(bytes));
+}
+
+void JournalTestStorage::remove_immutable_object(std::string sha256) {
+    const auto object_name =
+        detail::durable_immutable_object_filename(sha256);
+    if (!object_name.has_value()) {
+        return;
+    }
+    std::lock_guard lock(state_->mutex);
+    state_->entries.erase(*object_name);
 }
 
 void JournalTestStorage::overwrite_fixed_child_bytes(FixedAuthorityChild child,
