@@ -6099,6 +6099,19 @@ def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
         raise AssertionError("Windows fixed namespace does not bind the winner")
     if factory.count("yield_fixed_namespace_convergence();") < 2:
         raise AssertionError("Windows fixed namespace spins during convergence")
+    if (
+        re.search(
+            r"if\s*\(\s*cleaned\s*==\s*"
+            r"WindowsStageCleanupStatus::Unsafe\s*\)\s*\{\s*"
+            r"return\s+reject\s*\(\s*&bound_child\s*\)\s*;\s*\}",
+            factory,
+            re.DOTALL,
+        )
+        is None
+    ):
+        raise AssertionError(
+            "Windows fixed namespace can leak its bound child after unsafe cleanup"
+        )
 
 
 def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
@@ -6148,6 +6161,32 @@ def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
             skip_winner_rebind,
         ),
         "winner-rebind",
+    )
+
+    def restore_unsafe_cleanup_short_circuit(body: str) -> str:
+        guarded_close = re.compile(
+            r"if\s*\(\s*cleaned\s*==\s*"
+            r"WindowsStageCleanupStatus::Unsafe\s*\)\s*\{\s*"
+            r"return\s+reject\s*\(\s*&bound_child\s*\)\s*;\s*\}\s*"
+            r"if\s*\(\s*!\s*close_windows_directory\s*"
+            r"\(\s*bound_child\s*\)\s*\)\s*\{\s*"
+            r"return\s+reject\s*\(\s*\)\s*;\s*\}",
+            re.DOTALL,
+        )
+        return guarded_close.sub(
+            "if (cleaned == WindowsStageCleanupStatus::Unsafe || "
+            "!close_windows_directory(bound_child)) { return reject(); }",
+            body,
+            count=1,
+        )
+
+    rejected(
+        replace_unique_function_body(
+            source,
+            "make_windows_fixed_namespace_adapter",
+            restore_unsafe_cleanup_short_circuit,
+        ),
+        "unsafe-cleanup-short-circuit",
     )
 
 
@@ -9598,6 +9637,10 @@ def required_production_files() -> tuple[Path, ...]:
     return (
         DURABLE_HEADER,
         DURABLE_SOURCE,
+        AUTHORITY_FENCE,
+        CLAIMS_SOURCE,
+        DURABLE_LOCAL_OVERLAY_SOURCE,
+        LOCAL_OVERLAY_SOURCE,
         ADAPTER_HEADER,
         ADAPTER_COMMON,
         ADAPTER_POSIX,
