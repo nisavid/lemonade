@@ -63,6 +63,9 @@ public:
     static LocalOverlayActivation
     qualification(ParsedProfilingInputEnvelope profiling_input,
                   ParsedLocalOverlayObject overlay,
+                  std::string baseline_observation_bytes,
+                  std::string workload_observation_bytes,
+                  std::string release_observation_bytes,
                   std::string decision_trace_sha256,
                   std::string activated_at);
     static LocalOverlayActivation rollback(std::string overlay_sha256,
@@ -77,12 +80,18 @@ private:
         std::optional<ParsedProfilingInputEnvelope> profiling_input,
         std::optional<ParsedLocalOverlayObject> overlay,
         std::optional<std::string> rollback_overlay_sha256,
+        std::optional<std::string> baseline_observation_bytes,
+        std::optional<std::string> workload_observation_bytes,
+        std::optional<std::string> release_observation_bytes,
         std::string decision_trace_sha256, std::string activated_at);
 
     LocalOverlayActivationKind kind_;
     std::optional<ParsedProfilingInputEnvelope> profiling_input_;
     std::optional<ParsedLocalOverlayObject> overlay_;
     std::optional<std::string> rollback_overlay_sha256_;
+    std::optional<std::string> baseline_observation_bytes_;
+    std::optional<std::string> workload_observation_bytes_;
+    std::optional<std::string> release_observation_bytes_;
     std::string decision_trace_sha256_;
     std::string activated_at_;
 
@@ -117,6 +126,9 @@ public:
     const ParsedOverlayActivationRoot *active_root() const noexcept;
     const ParsedLocalOverlayObject *active_overlay() const noexcept;
     const ParsedProfilingInputEnvelope *active_profiling_input() const noexcept;
+    std::string_view active_baseline_observation_bytes() const noexcept;
+    std::string_view active_workload_observation_bytes() const noexcept;
+    std::string_view active_release_observation_bytes() const noexcept;
 
 private:
     friend class LocalOverlayStore;

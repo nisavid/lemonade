@@ -1073,6 +1073,68 @@ enum class JournalQuiescence { Unconfirmed, Confirmed, Assumed };
             "LOCK_UN",
             f"{label} directory release",
         )
+        require_unique_function_call_arguments(
+            platform_source,
+            "lock_fixed_namespace_parent_retrying_interrupts",
+            "lock_directory_retrying_interrupts",
+            ("parent_fd",),
+            label,
+        )
+        require_unique_function_call_arguments(
+            platform_source,
+            "unlock_fixed_namespace_parent_retrying_interrupts",
+            "unlock_directory_retrying_interrupts",
+            ("parent_fd",),
+            label,
+        )
+        for entry in (
+            "lock_authority",
+            "authority_identity",
+            "preflight_capabilities",
+            "inspect_fixed_namespace",
+            "read_root",
+            "read_journal",
+            "read_immutable_object",
+            "create_immutable_object",
+            "create_journal",
+            "append_journal",
+            "truncate_journal",
+            "replace_journal",
+            "replace_root",
+            "unlock_authority",
+        ):
+            require_each_override_call(
+                combined_platform,
+                "DurableFileAdapter",
+                entry,
+                "validate_fixed_namespace_binding",
+                f"{label} fixed namespace lifetime binding",
+            )
+        require_each_override_call_exactly_once(
+            combined_platform,
+            "DurableFileAdapter",
+            "lock_authority",
+            "lock_fixed_namespace_parent_retrying_interrupts",
+            label,
+        )
+        require_each_override_call_exactly_once(
+            combined_platform,
+            "DurableFileAdapter",
+            "unlock_authority",
+            "unlock_fixed_namespace_parent_retrying_interrupts",
+            label,
+        )
+        require_tokens(
+            platform_source,
+            (
+                "fixed_parent_fd_",
+                "fixed_child_name_",
+                "fixed_parent_identity_",
+                "fixed_child_identity_",
+                "AT_SYMLINK_NOFOLLOW",
+            ),
+            f"{label} fixed namespace lifetime binding",
+        )
         require_each_override_call_exactly_once(
             combined_platform,
             "DurableFileAdapter",
@@ -5426,10 +5488,7 @@ def require_post_replace_verification(
             re.search(r"\bfstat\s*\(", helper) is None
             or re.search(r"!\s*S_ISREG\s*\(", helper) is None
             or link_count_default is None
-            or re.search(
-                r"\bst_nlink\s*!=\s*expected_link_count\b", helper
-            )
-            is None
+            or re.search(r"\bst_nlink\s*!=\s*expected_link_count\b", helper) is None
             or re.search(
                 r"\bst_dev\s*!=\s*expected_identity\s*\.\s*device\b",
                 helper,
@@ -5510,10 +5569,13 @@ def require_post_replace_verification(
         verify_at = body.find("verify_replaced_target")
         if write_at < 0 or not write_at < replace_at < verify_at:
             raise AssertionError(f"{label} {entry} verifies before replacement")
-        if (
-            re.search(r"\breturn\s+verify_replaced_target\s*\(", body[verify_at - 16 :])
-            is None
-        ):
+        propagated_result = (
+            r"\breturn\s+validate_completed_mutation\s*\(\s*"
+            r"verify_replaced_target\s*\([^;]*\)\s*\)\s*;"
+            if platform == "posix"
+            else r"\breturn\s+verify_replaced_target\s*\([^;]*\)\s*;"
+        )
+        if re.search(propagated_result, body, re.DOTALL) is None:
             raise AssertionError(f"{label} {entry} ignores verifier result")
         verify = tuple(compact_cpp(value) for value in verifier_calls[0])
         replacement = tuple(compact_cpp(value) for value in replacement_calls[0])
@@ -5591,9 +5653,16 @@ def require_post_replace_verification_mutants(
             return
         raise AssertionError(f"{label} verifier accepted {name} mutant")
 
+    propagated_result = (
+        r"\breturn\s+validate_completed_mutation\s*\(\s*"
+        r"verify_replaced_target\s*\([^;]*\)\s*\)\s*;"
+        if platform == "posix"
+        else r"\breturn\s+verify_replaced_target\s*\([^;]*\)\s*;"
+    )
+
     def missing(body: str) -> str:
         return re.sub(
-            r"\breturn\s+verify_replaced_target\s*\([^;]*\)\s*;",
+            propagated_result,
             "return make_result(DurableFileStatus::Succeeded);",
             body,
             count=1,
@@ -5607,7 +5676,7 @@ def require_post_replace_verification_mutants(
 
     def early(body: str) -> str:
         match = re.search(
-            r"\breturn\s+verify_replaced_target\s*\([^;]*\)\s*;",
+            propagated_result,
             body,
             re.DOTALL,
         )
@@ -5621,6 +5690,30 @@ def require_post_replace_verification_mutants(
         replace_unique_override_body(source, "replace_journal", early),
         "before-replace",
     )
+
+    if platform == "posix":
+
+        def before_binding_validation(body: str) -> str:
+            return re.sub(
+                propagated_result,
+                lambda match: re.sub(
+                    r"validate_completed_mutation\s*\(\s*(.*)\s*\)\s*;",
+                    r"\1;",
+                    match.group(0),
+                    count=1,
+                    flags=re.DOTALL,
+                ),
+                body,
+                count=1,
+                flags=re.DOTALL,
+            )
+
+        rejected(
+            replace_unique_override_body(
+                source, "replace_journal", before_binding_validation
+            ),
+            "pre-verification-binding-only",
+        )
 
     def identity_only(body: str) -> str:
         if platform == "posix":
@@ -5826,9 +5919,7 @@ def require_fixed_namespace_factory_contract(
     )
     if declaration.search(header) is None:
         raise AssertionError("fixed-namespace adapter factory is unavailable")
-    validators = function_bodies(
-        common, "durable_fixed_namespace_name_is_valid"
-    )
+    validators = function_bodies(common, "durable_fixed_namespace_name_is_valid")
     if len(validators) != 1 or not all(
         token in validators[0]
         for token in ("name.empty()", "name.size()", "name.front()", "name.back()")
@@ -5866,9 +5957,7 @@ def require_fixed_namespace_factory_contract(
             "st_ino",
         )
         if not all(token in binder for token in required):
-            raise AssertionError(
-                f"{label} fixed namespace omits safe durable binding"
-            )
+            raise AssertionError(f"{label} fixed namespace omits safe durable binding")
         create_at = binder.find("mkdirat")
         bind_at = binder.find("openat")
         sync_at = binder.find("sync_directory_retrying_interrupts")

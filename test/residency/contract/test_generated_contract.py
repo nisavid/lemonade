@@ -586,6 +586,147 @@ def require_generated_cpp_compiles(output_root: Path, files: dict[str, bytes]) -
         require(executed.returncode == 0, executed.stdout + executed.stderr)
 
 
+def require_cpp_codec_schema_seam(
+    schemas: dict[str, Any], resources: Registry, contract_validator: Any
+) -> None:
+    configured = shlex.split(os.environ.get("CXX", "c++"))
+    require(
+        bool(configured) and shutil.which(configured[0]) is not None,
+        f"C++ compiler is unavailable: {configured!r}",
+    )
+    compiler = Path(configured[0]).name.lower()
+    explicit_crypto_flags = os.environ.get("RESIDENCY_CONTRACT_MBEDCRYPTO_FLAGS")
+    if explicit_crypto_flags is not None:
+        crypto_flags = shlex.split(explicit_crypto_flags)
+    elif compiler in {"cl", "cl.exe"}:
+        crypto_flags = ["mbedcrypto.lib"]
+    else:
+        pkg_config = shutil.which("pkg-config")
+        discovered = (
+            subprocess.run(
+                [pkg_config, "--cflags", "--libs", "mbedcrypto"],
+                cwd=REPO_ROOT,
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+            if pkg_config is not None
+            else None
+        )
+        crypto_flags = (
+            shlex.split(discovered.stdout)
+            if discovered is not None and discovered.returncode == 0
+            else ["-lmbedcrypto"]
+        )
+
+    with tempfile.TemporaryDirectory(prefix="residency-overlay-codec-") as directory:
+        build_root = Path(directory)
+        executable = build_root / (
+            "local_overlay_schema_seam.exe"
+            if os.name == "nt"
+            else "local_overlay_schema_seam"
+        )
+        sources = [
+            REPO_ROOT / "test/cpp/test_residency_local_overlay.cpp",
+            REPO_ROOT / "src/cpp/server/residency/claims.cpp",
+            REPO_ROOT / "src/cpp/server/residency/local_overlay.cpp",
+        ]
+        if compiler in {"cl", "cl.exe"}:
+            command = [
+                *configured,
+                "/nologo",
+                "/std:c++17",
+                "/W4",
+                "/WX",
+                "/EHsc",
+                f"/I{REPO_ROOT / 'src/cpp/include'}",
+                f"/Fo{build_root}{os.sep}",
+                f"/Fd{build_root / 'local_overlay_schema_seam.pdb'}",
+                *(str(source) for source in sources),
+                f"/Fe:{executable}",
+                "/link",
+                *crypto_flags,
+            ]
+        else:
+            command = [
+                *configured,
+                "-std=c++17",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-pedantic",
+                "-I",
+                str(REPO_ROOT / "src/cpp/include"),
+                *(str(source) for source in sources),
+                *crypto_flags,
+                "-o",
+                str(executable),
+            ]
+        compiled = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        require(compiled.returncode == 0, compiled.stdout + compiled.stderr)
+        emitted = subprocess.run(
+            [str(executable), "--emit-schema-validation-corpus"],
+            cwd=REPO_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        require(emitted.returncode == 0, emitted.stdout + emitted.stderr)
+
+    corpus = load_json(emitted.stdout.encode("utf-8"))
+    require(
+        corpus["confidence_basis_points_boundary"]
+        == {"maximum_accepted": 10000, "first_rejected": 10001},
+        "C++ codec confidence boundary drifted",
+    )
+    documents = corpus["accepted_documents"]
+    expected_documents = {
+        "deployment_local_overlay_object",
+        "overlay_activation_root",
+        "profiling_input_envelope",
+    }
+    require(
+        set(documents) == expected_documents,
+        "C++ codec schema corpus is incomplete",
+    )
+    parsed_documents: dict[str, Any] = {}
+    for name, canonical_bytes in documents.items():
+        require(isinstance(canonical_bytes, str), f"{name} codec output is not text")
+        document = load_json(canonical_bytes.encode("utf-8"))
+        require(
+            json.dumps(
+                document,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            == canonical_bytes,
+            f"{name} codec output is not canonical JSON",
+        )
+        contract_validator(schemas[name], registry=resources).validate(document)
+        parsed_documents[name] = document
+
+    require(
+        parsed_documents["deployment_local_overlay_object"]["confidence_basis_points"]
+        == 10000,
+        "C++ codec corpus omitted the accepted confidence maximum",
+    )
+    above_maximum = copy.deepcopy(parsed_documents["deployment_local_overlay_object"])
+    above_maximum["confidence_basis_points"] = 10001
+    require(
+        not contract_validator(
+            schemas["deployment_local_overlay_object"], registry=resources
+        ).is_valid(above_maximum),
+        "overlay schema accepted confidence above 10000 basis points",
+    )
+
+
 REASON_BEARING_SCHEMAS = (
     "artifact_quarantine_record",
     "artifact_writer_job_revision",
@@ -817,6 +958,44 @@ def require_closed_schema_conditionals(
         authority_validator.is_valid(examples["authority_transaction_result"]),
         "successful authority transaction no longer permits empty reasons",
     )
+
+
+def require_local_overlay_authoritative_vocabulary(
+    schemas: dict[str, Any],
+) -> None:
+    vocabulary = import_module("residency_inventory.contract")
+    expected_templates = {
+        template: sorted(operations)
+        for template, operations in sorted(
+            vocabulary.OPERATION_LEAVES_BY_TEMPLATE.items()
+        )
+    }
+    expected_constraints = sorted(vocabulary.EXPECTED_CONSTRAINT_KINDS)
+    for name in (
+        "profiling_input_envelope",
+        "deployment_local_overlay_object",
+    ):
+        catalog = schemas[name]["$defs"]["selector_identity"]["properties"]["catalog"]
+        require(
+            catalog["properties"]["operation_template"]["enum"]
+            == list(expected_templates),
+            f"{name} operation templates drifted from inventory vocabulary",
+        )
+        require(
+            catalog["properties"]["constraints"]["items"]["enum"]
+            == expected_constraints,
+            f"{name} constraints drifted from inventory vocabulary",
+        )
+        rendered_templates = {
+            conditional["if"]["properties"]["operation_template"]["const"]: conditional[
+                "then"
+            ]["properties"]["operation_kind"]["enum"]
+            for conditional in catalog["allOf"]
+        }
+        require(
+            rendered_templates == expected_templates,
+            f"{name} template operations drifted from inventory vocabulary",
+        )
 
 
 def require_local_overlay_schemas(
@@ -1094,7 +1273,9 @@ def require_schemas_and_examples(files: dict[str, bytes]) -> None:
     require_quarantine_provenance(schemas)
     require_reason_boundaries(schemas, resources, contract_validator, examples)
     require_closed_schema_conditionals(schemas, resources, contract_validator, examples)
+    require_local_overlay_authoritative_vocabulary(schemas)
     require_local_overlay_schemas(schemas, resources, contract_validator, examples)
+    require_cpp_codec_schema_seam(schemas, resources, contract_validator)
     require_schema_translation_mutations_rejected(files)
 
 

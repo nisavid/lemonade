@@ -73,6 +73,38 @@ deployment_id_for_storage(std::string_view storage_identity) {
     return result;
 }
 
+std::optional<std::string> raw_sha256(std::string_view bytes) {
+    const auto *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (info == nullptr) {
+        return std::nullopt;
+    }
+
+    mbedtls_md_context_t context;
+    mbedtls_md_init(&context);
+    std::array<unsigned char, 32> digest{};
+    const bool failed =
+        mbedtls_md_setup(&context, info, 0) != 0 ||
+        mbedtls_md_starts(&context) != 0 ||
+        mbedtls_md_update(
+            &context,
+            reinterpret_cast<const unsigned char *>(bytes.data()),
+            bytes.size()) != 0 ||
+        mbedtls_md_finish(&context, digest.data()) != 0;
+    mbedtls_md_free(&context);
+    if (failed) {
+        return std::nullopt;
+    }
+
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(64);
+    for (const auto byte : digest) {
+        result.push_back(hex[(byte >> 4) & 0x0f]);
+        result.push_back(hex[byte & 0x0f]);
+    }
+    return result;
+}
+
 LocalOverlayStoreStatus
 contract_failure_status(OverlayContractStatus status) noexcept {
     switch (status) {
@@ -102,6 +134,9 @@ struct LoadedOverlayNode {
     ParsedOverlayActivationRoot root;
     ParsedLocalOverlayObject overlay;
     ParsedProfilingInputEnvelope profiling_input;
+    std::string baseline_observation_bytes;
+    std::string workload_observation_bytes;
+    std::string release_observation_bytes;
 };
 
 struct LoadedOverlayGraph {
@@ -117,8 +152,12 @@ struct GraphLoadResult {
     std::optional<LoadedOverlayGraph> graph;
 };
 
+bool qualification_claims_are_safe(
+    const ParsedProfilingInputEnvelope &input,
+    const ParsedLocalOverlayObject &overlay);
+
 bool node_references_match(const LoadedOverlayNode &node,
-                           std::string_view deployment_id) noexcept {
+                           std::string_view deployment_id) {
     const auto &root = node.root;
     const auto &overlay = node.overlay;
     const auto &input = node.profiling_input;
@@ -135,7 +174,8 @@ bool node_references_match(const LoadedOverlayNode &node,
            overlay.selector_sha256() == input.selector_sha256() &&
            input.observed_at() <= overlay.qualified_at() &&
            overlay.qualified_at() <= input.fresh_until() &&
-           overlay.qualified_at() <= root.activated_at();
+           overlay.qualified_at() <= root.activated_at() &&
+           qualification_claims_are_safe(input, overlay);
 }
 
 bool transition_matches(const LoadedOverlayNode &child,
@@ -184,6 +224,57 @@ bool rollback_target_was_reachable(
     return false;
 }
 
+bool qualification_claims_are_safe(
+    const ParsedProfilingInputEnvelope &input,
+    const ParsedLocalOverlayObject &overlay) {
+    auto attributed = check_claim_closure(input.attributed_claims());
+    auto conservative = check_claim_closure(overlay.conservative_claims());
+    if (!attributed.accepted() || !conservative.accepted() ||
+        !checked_subtract(*conservative.claims, *attributed.claims)
+             .accepted()) {
+        return false;
+    }
+
+    constexpr std::array families{
+        ClaimFamily::ConsumableCapacity,
+        ClaimFamily::SafetyFloor,
+        ClaimFamily::CardinalityPool,
+        ClaimFamily::CompatibilityExclusivity,
+    };
+    for (const auto family : families) {
+        const auto attributed_completeness =
+            attributed.claims->completeness(family);
+        const auto conservative_completeness =
+            conservative.claims->completeness(family);
+        if ((attributed_completeness == ClaimCompleteness::KnownZero &&
+             conservative_completeness == ClaimCompleteness::NotApplicable) ||
+            (attributed_completeness == ClaimCompleteness::Bounded &&
+             conservative_completeness != ClaimCompleteness::Bounded)) {
+            return false;
+        }
+    }
+
+    for (const auto &attributed_family : input.attributed_claims()) {
+        if (attributed_family.completeness != ClaimCompleteness::Bounded) {
+            continue;
+        }
+        for (const auto &safety_family : overlay.safety_margin_claims()) {
+            if (safety_family.family != attributed_family.family) {
+                continue;
+            }
+            for (const auto &attributed_entry : attributed_family.entries) {
+                for (const auto &safety_entry : safety_family.entries) {
+                    if (safety_entry.constraint_id ==
+                        attributed_entry.constraint_id) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 class PublishedLocalOverlay::Impl {
@@ -197,12 +288,21 @@ public:
          std::string selected_deployment_id, std::string selected_root_bytes,
          ParsedOverlayActivationRoot selected_root,
          ParsedLocalOverlayObject selected_overlay,
-         ParsedProfilingInputEnvelope selected_profiling_input)
+         ParsedProfilingInputEnvelope selected_profiling_input,
+         std::string selected_baseline_observation_bytes,
+         std::string selected_workload_observation_bytes,
+         std::string selected_release_observation_bytes)
         : storage_identity(std::move(selected_storage_identity)),
           deployment_id(std::move(selected_deployment_id)),
           root_bytes(std::move(selected_root_bytes)),
           root(std::move(selected_root)), overlay(std::move(selected_overlay)),
-          profiling_input(std::move(selected_profiling_input)) {}
+          profiling_input(std::move(selected_profiling_input)),
+          baseline_observation_bytes(
+              std::move(selected_baseline_observation_bytes)),
+          workload_observation_bytes(
+              std::move(selected_workload_observation_bytes)),
+          release_observation_bytes(
+              std::move(selected_release_observation_bytes)) {}
 
     std::string storage_identity;
     std::string deployment_id;
@@ -210,6 +310,9 @@ public:
     std::optional<ParsedOverlayActivationRoot> root;
     std::optional<ParsedLocalOverlayObject> overlay;
     std::optional<ParsedProfilingInputEnvelope> profiling_input;
+    std::string baseline_observation_bytes;
+    std::string workload_observation_bytes;
+    std::string release_observation_bytes;
 };
 
 class LocalOverlayStore::Impl {
@@ -393,10 +496,58 @@ public:
                 return {LocalOverlayStoreStatus::DigestMismatch, std::nullopt};
             }
 
+            auto read_observation = [&](std::string_view sha256,
+                                        std::string &bytes)
+                -> LocalOverlayStoreStatus {
+                const auto object = adapter->read_immutable_object(
+                    sha256, limits.max_object_bytes);
+                if (!object.result.succeeded()) {
+                    return read_failure_status(
+                        object, LocalOverlayStoreStatus::MissingObject);
+                }
+                if (object.truncated) {
+                    return LocalOverlayStoreStatus::LimitExceeded;
+                }
+                if (object.bytes.empty()) {
+                    return LocalOverlayStoreStatus::MissingObject;
+                }
+                const auto observed_sha256 = raw_sha256(object.bytes);
+                if (!observed_sha256.has_value()) {
+                    return LocalOverlayStoreStatus::UnsupportedStorage;
+                }
+                if (*observed_sha256 != sha256) {
+                    return LocalOverlayStoreStatus::DigestMismatch;
+                }
+                bytes = object.bytes;
+                return LocalOverlayStoreStatus::Ready;
+            };
+
+            std::string baseline_observation_bytes;
+            std::string workload_observation_bytes;
+            std::string release_observation_bytes;
+            for (const auto &[sha256, bytes] :
+                 std::array<std::pair<std::string_view, std::string *>, 3>{
+                     std::pair<std::string_view, std::string *>{
+                         parsed_input.candidate->baseline_observation_sha256(),
+                         &baseline_observation_bytes},
+                     {parsed_input.candidate->workload_observation_sha256(),
+                      &workload_observation_bytes},
+                     {parsed_input.candidate->release_observation_sha256(),
+                      &release_observation_bytes}}) {
+                const auto observation_status =
+                    read_observation(sha256, *bytes);
+                if (observation_status != LocalOverlayStoreStatus::Ready) {
+                    return {observation_status, std::nullopt};
+                }
+            }
+
             LoadedOverlayNode node{
                 std::move(*parsed_root.candidate),
                 std::move(*parsed_overlay.candidate),
                 std::move(*parsed_input.candidate),
+                std::move(baseline_observation_bytes),
+                std::move(workload_observation_bytes),
+                std::move(release_observation_bytes),
             };
             if (!node_references_match(node, graph.deployment_id)) {
                 const bool deployment_mismatch =
@@ -510,21 +661,32 @@ LocalOverlayActivation::LocalOverlayActivation(
     std::optional<ParsedProfilingInputEnvelope> profiling_input,
     std::optional<ParsedLocalOverlayObject> overlay,
     std::optional<std::string> rollback_overlay_sha256,
+    std::optional<std::string> baseline_observation_bytes,
+    std::optional<std::string> workload_observation_bytes,
+    std::optional<std::string> release_observation_bytes,
     std::string decision_trace_sha256, std::string activated_at)
     : kind_(kind), profiling_input_(std::move(profiling_input)),
       overlay_(std::move(overlay)),
       rollback_overlay_sha256_(std::move(rollback_overlay_sha256)),
+      baseline_observation_bytes_(std::move(baseline_observation_bytes)),
+      workload_observation_bytes_(std::move(workload_observation_bytes)),
+      release_observation_bytes_(std::move(release_observation_bytes)),
       decision_trace_sha256_(std::move(decision_trace_sha256)),
       activated_at_(std::move(activated_at)) {}
 
 LocalOverlayActivation LocalOverlayActivation::qualification(
     ParsedProfilingInputEnvelope profiling_input,
-    ParsedLocalOverlayObject overlay, std::string decision_trace_sha256,
+    ParsedLocalOverlayObject overlay, std::string baseline_observation_bytes,
+    std::string workload_observation_bytes,
+    std::string release_observation_bytes, std::string decision_trace_sha256,
     std::string activated_at) {
     return LocalOverlayActivation(
         LocalOverlayActivationKind::Qualification, std::move(profiling_input),
-        std::move(overlay), std::nullopt, std::move(decision_trace_sha256),
-        std::move(activated_at));
+        std::move(overlay), std::nullopt,
+        std::move(baseline_observation_bytes),
+        std::move(workload_observation_bytes),
+        std::move(release_observation_bytes),
+        std::move(decision_trace_sha256), std::move(activated_at));
 }
 
 LocalOverlayActivation
@@ -533,8 +695,8 @@ LocalOverlayActivation::rollback(std::string overlay_sha256,
                                  std::string activated_at) {
     return LocalOverlayActivation(
         LocalOverlayActivationKind::Rollback, std::nullopt, std::nullopt,
-        std::move(overlay_sha256), std::move(decision_trace_sha256),
-        std::move(activated_at));
+        std::move(overlay_sha256), std::nullopt, std::nullopt, std::nullopt,
+        std::move(decision_trace_sha256), std::move(activated_at));
 }
 
 LocalOverlayActivationKind LocalOverlayActivation::kind() const noexcept {
@@ -603,6 +765,24 @@ PublishedLocalOverlay::active_profiling_input() const noexcept {
     return impl_ == nullptr || !impl_->profiling_input.has_value()
                ? nullptr
                : &*impl_->profiling_input;
+}
+
+std::string_view
+PublishedLocalOverlay::active_baseline_observation_bytes() const noexcept {
+    return impl_ == nullptr ? std::string_view{}
+                            : impl_->baseline_observation_bytes;
+}
+
+std::string_view
+PublishedLocalOverlay::active_workload_observation_bytes() const noexcept {
+    return impl_ == nullptr ? std::string_view{}
+                            : impl_->workload_observation_bytes;
+}
+
+std::string_view
+PublishedLocalOverlay::active_release_observation_bytes() const noexcept {
+    return impl_ == nullptr ? std::string_view{}
+                            : impl_->release_observation_bytes;
 }
 
 bool LocalOverlayStoreResult::usable() const noexcept {
@@ -722,7 +902,10 @@ LocalOverlayStore::snapshot(TrustedLocalOverlayReplayFloor floor) {
         published = std::make_unique<PublishedLocalOverlay::Impl>(
             loaded.graph->storage_identity, loaded.graph->deployment_id,
             loaded.graph->root_bytes, std::move(active.root),
-            std::move(active.overlay), std::move(active.profiling_input));
+            std::move(active.overlay), std::move(active.profiling_input),
+            std::move(active.baseline_observation_bytes),
+            std::move(active.workload_observation_bytes),
+            std::move(active.release_observation_bytes));
     }
     const auto unlocked = impl_->release_lock();
     if (!unlocked.succeeded()) {
@@ -821,6 +1004,10 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
         return release_with_status(
             LocalOverlayStoreStatus::ConflictBeforeWrite);
     }
+    if (loaded.graph->newest_first.size() >=
+        impl_->limits.max_history_roots) {
+        return release_with_status(LocalOverlayStoreStatus::LimitExceeded);
+    }
 
     const std::uint64_t current_generation =
         expected_empty ? 0 : loaded.graph->newest_first.front().root.generation();
@@ -834,6 +1021,9 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
 
     const ParsedProfilingInputEnvelope *selected_input = nullptr;
     const ParsedLocalOverlayObject *selected_overlay = nullptr;
+    const std::string *selected_baseline_observation_bytes = nullptr;
+    const std::string *selected_workload_observation_bytes = nullptr;
+    const std::string *selected_release_observation_bytes = nullptr;
     OverlayRootTransition transition = OverlayRootTransition::Qualification;
     std::uint64_t next_high_water = current_high_water;
 
@@ -841,6 +1031,9 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
         if (!activation.profiling_input_.has_value() ||
             !activation.overlay_.has_value() ||
             activation.rollback_overlay_sha256_.has_value() ||
+            !activation.baseline_observation_bytes_.has_value() ||
+            !activation.workload_observation_bytes_.has_value() ||
+            !activation.release_observation_bytes_.has_value() ||
             current_high_water == std::numeric_limits<std::uint64_t>::max()) {
             return release_with_status(
                 current_high_water ==
@@ -850,6 +1043,12 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
         }
         selected_input = &*activation.profiling_input_;
         selected_overlay = &*activation.overlay_;
+        selected_baseline_observation_bytes =
+            &*activation.baseline_observation_bytes_;
+        selected_workload_observation_bytes =
+            &*activation.workload_observation_bytes_;
+        selected_release_observation_bytes =
+            &*activation.release_observation_bytes_;
         next_high_water = current_high_water + 1;
         if (selected_input->deployment_id() != *deployment ||
             selected_overlay->deployment_id() != *deployment) {
@@ -866,14 +1065,50 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
             selected_overlay->qualified_at() >
                 selected_input->fresh_until() ||
             selected_overlay->qualified_at() > activation.activated_at_ ||
-            activation.activated_at_ >= selected_overlay->expires_at()) {
+            activation.activated_at_ >= selected_overlay->expires_at() ||
+            !qualification_claims_are_safe(*selected_input,
+                                           *selected_overlay)) {
             return release_with_status(
                 LocalOverlayStoreStatus::CorruptOrRollback);
+        }
+        if (selected_baseline_observation_bytes->size() >
+                impl_->limits.max_object_bytes ||
+            selected_workload_observation_bytes->size() >
+                impl_->limits.max_object_bytes ||
+            selected_release_observation_bytes->size() >
+                impl_->limits.max_object_bytes) {
+            return release_with_status(LocalOverlayStoreStatus::LimitExceeded);
+        }
+        if (selected_baseline_observation_bytes->empty() ||
+            selected_workload_observation_bytes->empty() ||
+            selected_release_observation_bytes->empty()) {
+            return release_with_status(LocalOverlayStoreStatus::MissingObject);
+        }
+        const auto baseline_sha256 =
+            raw_sha256(*selected_baseline_observation_bytes);
+        const auto workload_sha256 =
+            raw_sha256(*selected_workload_observation_bytes);
+        const auto release_sha256 =
+            raw_sha256(*selected_release_observation_bytes);
+        if (!baseline_sha256.has_value() || !workload_sha256.has_value() ||
+            !release_sha256.has_value()) {
+            return release_with_status(
+                LocalOverlayStoreStatus::UnsupportedStorage);
+        }
+        if (*baseline_sha256 !=
+                selected_input->baseline_observation_sha256() ||
+            *workload_sha256 !=
+                selected_input->workload_observation_sha256() ||
+            *release_sha256 != selected_input->release_observation_sha256()) {
+            return release_with_status(LocalOverlayStoreStatus::DigestMismatch);
         }
     } else {
         transition = OverlayRootTransition::Rollback;
         if (expected_empty || activation.profiling_input_.has_value() ||
             activation.overlay_.has_value() ||
+            activation.baseline_observation_bytes_.has_value() ||
+            activation.workload_observation_bytes_.has_value() ||
+            activation.release_observation_bytes_.has_value() ||
             !activation.rollback_overlay_sha256_.has_value()) {
             return release_with_status(
                 LocalOverlayStoreStatus::CorruptOrRollback);
@@ -889,6 +1124,12 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
                     active.overlay.selector_sha256()) {
                 selected_overlay = &candidate.overlay;
                 selected_input = &candidate.profiling_input;
+                selected_baseline_observation_bytes =
+                    &candidate.baseline_observation_bytes;
+                selected_workload_observation_bytes =
+                    &candidate.workload_observation_bytes;
+                selected_release_observation_bytes =
+                    &candidate.release_observation_bytes;
                 break;
             }
         }
@@ -984,6 +1225,21 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
     };
 
     if (activation.kind_ == LocalOverlayActivationKind::Qualification) {
+        if (auto failed = publish_object(
+                selected_input->baseline_observation_sha256(),
+                *selected_baseline_observation_bytes)) {
+            return std::move(*failed);
+        }
+        if (auto failed = publish_object(
+                selected_input->workload_observation_sha256(),
+                *selected_workload_observation_bytes)) {
+            return std::move(*failed);
+        }
+        if (auto failed = publish_object(
+                selected_input->release_observation_sha256(),
+                *selected_release_observation_bytes)) {
+            return std::move(*failed);
+        }
         if (auto failed = publish_object(selected_input->checksum_sha256(),
                                          selected_input->canonical_bytes())) {
             return std::move(*failed);
@@ -1021,7 +1277,10 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
         published_graph.graph->storage_identity,
         published_graph.graph->deployment_id,
         published_graph.graph->root_bytes, std::move(active.root),
-        std::move(active.overlay), std::move(active.profiling_input));
+        std::move(active.overlay), std::move(active.profiling_input),
+        std::move(active.baseline_observation_bytes),
+        std::move(active.workload_observation_bytes),
+        std::move(active.release_observation_bytes));
     const auto unlocked = impl_->release_lock();
     if (!unlocked.succeeded()) {
         return store_result(LocalOverlayStoreStatus::RecoveryRequired);

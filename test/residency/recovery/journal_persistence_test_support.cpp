@@ -468,7 +468,8 @@ struct JournalTestStorage::State {
     explicit State(PlatformContract selected_platform, bool directory_present)
         : platform(selected_platform),
           authority_directory_exists(directory_present),
-          directory_identity(next_directory_identity.fetch_add(1)) {}
+          directory_identity(next_directory_identity.fetch_add(1)),
+          named_directory_identity(directory_identity) {}
 
     void add_durable_regular(std::string_view name, std::string bytes) {
         auto &entry = entries[std::string(name)];
@@ -561,6 +562,7 @@ struct JournalTestStorage::State {
     PlatformContract platform;
     bool authority_directory_exists;
     const std::uint64_t directory_identity;
+    std::uint64_t named_directory_identity;
     std::map<std::string, Entry> entries;
     std::set<DurabilityCapability> unavailable_capabilities;
     std::optional<FaultScript> fault;
@@ -767,8 +769,13 @@ probe_native_lock_path_revalidation(std::string directory) {
 
 class JournalTestStorage::Adapter final : public detail::DurableFileAdapter {
 public:
-    explicit Adapter(std::shared_ptr<State> state)
+    explicit Adapter(std::shared_ptr<State> state,
+                     bool fixed_namespace = false)
         : state_(std::move(state)),
+          fixed_namespace_(fixed_namespace),
+          bound_directory_identity_(fixed_namespace
+                                        ? state_->named_directory_identity
+                                        : state_->directory_identity),
           lock_handle_identity_(next_handle_identity.fetch_add(1)) {}
 
     ~Adapter() override {
@@ -830,7 +837,8 @@ public:
             current = state_->live_entry(lock_name);
             if (current != nullptr &&
                 current->kind == State::EntryKind::Regular &&
-                current->identity == opened_lock_identity_) {
+                current->identity == opened_lock_identity_ &&
+                fixed_namespace_binding_is_current()) {
                 return succeeded();
             }
         }
@@ -855,7 +863,8 @@ public:
             return {result(DurableFileStatus::FailedBeforeEffect), {}};
         }
         return {succeeded(),
-                "directory:" + std::to_string(state_->directory_identity) +
+                "directory:" +
+                    std::to_string(bound_directory_identity_) +
                     "/lock:" + std::to_string(opened_lock_identity_)};
     }
 
@@ -1420,6 +1429,9 @@ private:
 
     DurableFileResult acquire_opened_lock_once() {
         std::unique_lock lock(state_->mutex);
+        if (!fixed_namespace_binding_is_current()) {
+            return result(DurableFileStatus::Unsupported);
+        }
         const auto before = state_->take_fault(
             FaultOperation::AuthorityLockAcquire, FaultPosition::Before);
         if (before.has_value()) {
@@ -1454,6 +1466,10 @@ private:
         owned_lock_identity_ = opened_lock_identity_;
         state_->observe(FaultOperation::AuthorityLockAcquire, true, false,
                         opened_lock_identity_);
+        if (!fixed_namespace_binding_is_current()) {
+            release_owned_lock();
+            return result(DurableFileStatus::Unsupported);
+        }
         const auto after = state_->take_fault(
             FaultOperation::AuthorityLockAcquire, FaultPosition::After);
         if (before.has_value() || after.has_value()) {
@@ -1470,6 +1486,9 @@ private:
                                FaultOperation operation, bool mutation,
                                Effect effect, std::size_t requested_bytes = 0,
                                std::size_t transferred_bytes = 0) {
+        if (!fixed_namespace_binding_is_current()) {
+            return result(DurableFileStatus::Unsupported);
+        }
         const auto before =
             state_->take_fault(operation, FaultPosition::Before);
         if (before.has_value()) {
@@ -1497,6 +1516,11 @@ private:
         state_->observe(operation, owns_lock(), mutation, owned_lock_identity_,
                         requested_bytes, transferred_bytes);
         pause_if_requested(lock, operation);
+        if (!fixed_namespace_binding_is_current()) {
+            return result(mutation
+                              ? DurableFileStatus::EffectMayHaveOccurred
+                              : DurableFileStatus::Unsupported);
+        }
         const auto after = state_->take_fault(operation, FaultPosition::After);
         if (after.has_value()) {
             if (*after == FaultAction::Crash) {
@@ -1627,6 +1651,9 @@ private:
                                   bool append_initial, FaultOperation operation,
                                   bool &wrote_any) {
         std::unique_lock lock(state_->mutex);
+        if (!fixed_namespace_binding_is_current()) {
+            return {result(DurableFileStatus::Unsupported), 0};
+        }
         auto *entry = state_->live_entry(name);
         if (entry == nullptr || entry->kind != State::EntryKind::Regular) {
             return {result(DurableFileStatus::NotFound), 0};
@@ -1681,6 +1708,10 @@ private:
         state_->observe(operation, owns_lock(), true, owned_lock_identity_,
                         bytes.size(), bytes.size());
         pause_if_requested(lock, operation);
+        if (!fixed_namespace_binding_is_current()) {
+            return {result(DurableFileStatus::EffectMayHaveOccurred),
+                    bytes.size()};
+        }
         const auto after = state_->take_fault(operation, FaultPosition::After);
         if (after.has_value()) {
             if (*after == FaultAction::Crash) {
@@ -1817,6 +1848,13 @@ private:
             }
         }
         return true;
+    }
+
+    bool fixed_namespace_binding_is_current() const {
+        return !fixed_namespace_ ||
+               (state_->authority_directory_exists &&
+                state_->named_directory_identity ==
+                    bound_directory_identity_);
     }
 
     static bool is_preflight_close(FaultOperation operation) {
@@ -2033,6 +2071,8 @@ private:
     }
 
     std::shared_ptr<State> state_;
+    bool fixed_namespace_;
+    std::uint64_t bound_directory_identity_;
     const std::uint64_t lock_handle_identity_;
     std::uint64_t opened_lock_identity_ = 0;
     std::uint64_t owned_lock_identity_ = 0;
@@ -2188,7 +2228,15 @@ DurableJournal JournalTestStorage::make_journal(JournalLimits limits) {
 LocalOverlayStore
 JournalTestStorage::make_overlay_store(LocalOverlayStoreLimits limits) {
     return detail::make_local_overlay_store_for_test(
-        std::make_unique<Adapter>(state_), limits);
+        std::make_unique<Adapter>(state_, true), limits);
+}
+
+void JournalTestStorage::rename_and_replace_authority_directory() {
+    std::lock_guard lock(state_->mutex);
+    state_->named_directory_identity =
+        next_directory_identity.fetch_add(1);
+    state_->entries.clear();
+    state_->authority_directory_exists = true;
 }
 
 NamespaceSnapshot JournalTestStorage::snapshot() const {

@@ -295,6 +295,16 @@ DurableFileResult unlock_directory_retrying_interrupts(int directory_fd) {
     return retry_interrupted(call);
 }
 
+DurableFileResult
+lock_fixed_namespace_parent_retrying_interrupts(int parent_fd) {
+    return lock_directory_retrying_interrupts(parent_fd);
+}
+
+DurableFileResult
+unlock_fixed_namespace_parent_retrying_interrupts(int parent_fd) {
+    return unlock_directory_retrying_interrupts(parent_fd);
+}
+
 DurableFileResult sync_directory_retrying_interrupts(int directory_fd) {
     class DirectorySyncCall final : public DurableInterruptibleCall {
     public:
@@ -323,6 +333,14 @@ DurableFileResult sync_directory_retrying_interrupts(int directory_fd) {
 struct PosixFileIdentity {
     dev_t device;
     ino_t inode;
+};
+
+struct PosixDirectoryBinding {
+    int directory_fd = -1;
+    int parent_fd = -1;
+    std::string child_name;
+    PosixFileIdentity parent_identity{};
+    PosixFileIdentity child_identity{};
 };
 
 DurableFileResult capture_regular_identity(
@@ -445,6 +463,13 @@ public:
     explicit PosixDurableFileAdapter(int directory_fd)
         : directory_fd_(directory_fd) {}
 
+    explicit PosixDurableFileAdapter(PosixDirectoryBinding binding)
+        : directory_fd_(binding.directory_fd),
+          fixed_parent_fd_(binding.parent_fd),
+          fixed_child_name_(std::move(binding.child_name)),
+          fixed_parent_identity_(binding.parent_identity),
+          fixed_child_identity_(binding.child_identity) {}
+
 #ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
     PosixDurableFileAdapter(int directory_fd,
                             DurablePreflightTestFault preflight_test_fault)
@@ -455,16 +480,35 @@ public:
     ~PosixDurableFileAdapter() override {
         close_best_effort(lock_fd_);
         close_best_effort(directory_fd_);
+        close_best_effort(fixed_parent_fd_);
     }
 
     DurableFileResult lock_authority() override {
-        if (directory_fd_ < 0 || lock_fd_ >= 0 || directory_lock_held_) {
+        if (directory_fd_ < 0 || lock_fd_ >= 0 || directory_lock_held_ ||
+            fixed_parent_lock_held_) {
             return make_result(DurableFileStatus::Unsupported);
+        }
+        auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return binding_result;
+        }
+        if (fixed_parent_fd_ >= 0) {
+            const auto parent_lock_result =
+                lock_fixed_namespace_parent_retrying_interrupts(
+                    fixed_parent_fd_);
+            if (!parent_lock_result.succeeded()) {
+                return parent_lock_result;
+            }
+            fixed_parent_lock_held_ = true;
+            binding_result = validate_fixed_namespace_binding();
+            if (!binding_result.succeeded()) {
+                return release_parent_after_failed_lock(binding_result);
+            }
         }
         const auto directory_lock_result =
             lock_directory_retrying_interrupts(directory_fd_);
         if (!directory_lock_result.succeeded()) {
-            return directory_lock_result;
+            return release_parent_after_failed_lock(directory_lock_result);
         }
         directory_lock_held_ = true;
 
@@ -507,12 +551,20 @@ public:
             return abandon_failed_lock(
                 make_result(DurableFileStatus::Unsupported));
         }
+        binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return abandon_failed_lock(binding_result);
+        }
         return make_result(DurableFileStatus::Succeeded);
     }
 
     DurableIdentityResult authority_identity() override {
         if (directory_fd_ < 0 || lock_fd_ < 0 || !directory_lock_held_) {
             return {make_result(DurableFileStatus::Unsupported), {}};
+        }
+        auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return {binding_result, {}};
         }
         struct stat directory_information {};
         if (::fstat(directory_fd_, &directory_information) != 0) {
@@ -539,6 +591,10 @@ public:
             lock_information.st_ino != current_lock_information.st_ino) {
             return {make_result(DurableFileStatus::Unsupported), {}};
         }
+        binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return {binding_result, {}};
+        }
         return {make_result(DurableFileStatus::Succeeded),
                 "directory:" +
                     std::to_string(
@@ -557,6 +613,10 @@ public:
     DurableFileResult preflight_capabilities() override {
         if (directory_fd_ < 0 || lock_fd_ < 0) {
             return make_result(DurableFileStatus::Unsupported);
+        }
+        const auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return binding_result;
         }
         for (const auto name : {journal_name, root_name, lock_name,
                                 journal_stage_name, root_stage_name}) {
@@ -769,7 +829,7 @@ public:
             if (!namespace_result.succeeded()) {
                 return terminal_failure(namespace_result);
             }
-            return make_result(DurableFileStatus::Succeeded);
+            return terminal_failure(validate_fixed_namespace_binding());
         }
         return terminal_failure(
             make_errno_result(DurableFileStatus::AlreadyExists, EEXIST));
@@ -779,6 +839,10 @@ public:
         DurableFixedNamespaceResult inspected{
             make_result(DurableFileStatus::Succeeded), false, false, false,
             false, false};
+        inspected.result = validate_fixed_namespace_binding();
+        if (!inspected.result.succeeded()) {
+            return inspected;
+        }
         const std::array<std::pair<std::string_view, bool *>, 5> entries{
             std::pair{journal_name, &inspected.journal_present},
             std::pair{root_name, &inspected.root_present},
@@ -806,10 +870,15 @@ public:
             }
             *present = true;
         }
+        inspected.result = validate_fixed_namespace_binding();
         return inspected;
     }
 
     DurableReadResult read_root(std::size_t max_bytes) override {
+        auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return {std::move(binding_result), {}, false};
+        }
         int descriptor;
         do {
             descriptor = ::openat(directory_fd_, root_name.data(),
@@ -833,10 +902,18 @@ public:
                     {}, false};
         }
         PosixDurableReadChannel channel(descriptor);
-        return read_bounded_close(channel, max_bytes);
+        auto read_result = read_bounded_close(channel, max_bytes);
+        if (!read_result.result.succeeded()) {
+            return read_result;
+        }
+        return validate_completed_read(std::move(read_result));
     }
 
     DurableReadResult read_journal(std::size_t max_bytes) override {
+        auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return {std::move(binding_result), {}, false};
+        }
         int descriptor;
         do {
             descriptor = ::openat(directory_fd_, journal_name.data(),
@@ -860,12 +937,20 @@ public:
                     {}, false};
         }
         PosixDurableReadChannel channel(descriptor);
-        return read_bounded_close(channel, max_bytes);
+        auto read_result = read_bounded_close(channel, max_bytes);
+        if (!read_result.result.succeeded()) {
+            return read_result;
+        }
+        return validate_completed_read(std::move(read_result));
     }
 
     DurableReadResult
     read_immutable_object(std::string_view sha256,
                           std::size_t max_bytes) override {
+        auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return {std::move(binding_result), {}, false};
+        }
         const auto object_name = durable_immutable_object_filename(sha256);
         if (!object_name.has_value()) {
             return {make_result(DurableFileStatus::Unsupported), {}, false};
@@ -893,12 +978,20 @@ public:
                     {}, false};
         }
         PosixDurableReadChannel channel(descriptor);
-        return read_bounded_close(channel, max_bytes);
+        auto read_result = read_bounded_close(channel, max_bytes);
+        if (!read_result.result.succeeded()) {
+            return read_result;
+        }
+        return validate_completed_read(std::move(read_result));
     }
 
     DurableFileResult
     create_immutable_object(std::string_view sha256,
                             std::string_view bytes) override {
+        const auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return binding_result;
+        }
         const auto object_name = durable_immutable_object_filename(sha256);
         const auto stage_name =
             durable_immutable_object_stage_filename(sha256);
@@ -958,9 +1051,9 @@ public:
                 if (!namespace_result.succeeded()) {
                     return namespace_result;
                 }
-                return verify_replaced_target(
+                return validate_completed_mutation(verify_replaced_target(
                     directory_fd_, *object_name, recovered_stage_identity,
-                    bytes);
+                    bytes));
             }
             const auto removed = remove_owned_probe(
                 directory_fd_, *stage_name, recovered_stage_identity);
@@ -1072,11 +1165,15 @@ public:
         if (!namespace_result.succeeded()) {
             return namespace_result;
         }
-        return verify_replaced_target(directory_fd_, *object_name,
-                                      object_identity, bytes);
+        return validate_completed_mutation(verify_replaced_target(
+            directory_fd_, *object_name, object_identity, bytes));
     }
 
     DurableFileResult create_journal(std::string_view bytes) override {
+        const auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return binding_result;
+        }
         int descriptor;
         do {
             descriptor = ::openat(directory_fd_, journal_name.data(),
@@ -1101,15 +1198,21 @@ public:
         }
         PosixDurableFileChannel channel(descriptor);
         const auto persisted = write_flush_close(channel, bytes);
-        if (!persisted.succeeded() &&
-            !persisted.effect_may_have_occurred()) {
+        if (persisted.effect_may_have_occurred()) {
+            return persisted;
+        }
+        if (!persisted.succeeded()) {
             return {DurableFileStatus::EffectMayHaveOccurred,
                     persisted.diagnostic};
         }
-        return persisted;
+        return validate_completed_mutation(persisted);
     }
 
     DurableFileResult append_journal(std::string_view bytes) override {
+        const auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return binding_result;
+        }
         int descriptor;
         do {
             descriptor = ::openat(directory_fd_, journal_name.data(),
@@ -1132,10 +1235,18 @@ public:
                 make_result(DurableFileStatus::Unsupported));
         }
         PosixDurableFileChannel channel(descriptor);
-        return write_flush_close(channel, bytes);
+        const auto persisted = write_flush_close(channel, bytes);
+        if (!persisted.succeeded()) {
+            return persisted;
+        }
+        return validate_completed_mutation(persisted);
     }
 
     DurableFileResult truncate_journal(std::size_t bytes) override {
+        const auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return binding_result;
+        }
         int descriptor;
         do {
             descriptor = ::openat(directory_fd_, journal_name.data(),
@@ -1157,10 +1268,18 @@ public:
                 make_result(DurableFileStatus::Unsupported));
         }
         PosixDurableFileChannel channel(descriptor);
-        return truncate_flush_close(channel, bytes);
+        const auto truncated = truncate_flush_close(channel, bytes);
+        if (!truncated.succeeded()) {
+            return truncated;
+        }
+        return validate_completed_mutation(truncated);
     }
 
     DurableFileResult replace_journal(std::string_view bytes) override {
+        const auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return binding_result;
+        }
         int descriptor;
         do {
             descriptor = ::openat(directory_fd_, journal_stage_name.data(),
@@ -1207,11 +1326,15 @@ public:
         if (!namespace_result.succeeded()) {
             return namespace_result;
         }
-        return verify_replaced_target(directory_fd_, journal_name,
-                                      staged_identity, bytes);
+        return validate_completed_mutation(verify_replaced_target(
+            directory_fd_, journal_name, staged_identity, bytes));
     }
 
     DurableFileResult replace_root(std::string_view bytes) override {
+        const auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return binding_result;
+        }
         int descriptor;
         do {
             descriptor = ::openat(directory_fd_, root_stage_name.data(),
@@ -1258,14 +1381,16 @@ public:
         if (!namespace_result.succeeded()) {
             return namespace_result;
         }
-        return verify_replaced_target(directory_fd_, root_name,
-                                      staged_identity, bytes);
+        return validate_completed_mutation(verify_replaced_target(
+            directory_fd_, root_name, staged_identity, bytes));
     }
 
     DurableFileResult unlock_authority() override {
-        if (lock_fd_ < 0 || !directory_lock_held_) {
+        if (lock_fd_ < 0 || !directory_lock_held_ ||
+            (fixed_parent_fd_ >= 0 && !fixed_parent_lock_held_)) {
             return make_result(DurableFileStatus::Unsupported);
         }
+        const auto binding_result = validate_fixed_namespace_binding();
         const auto descriptor = std::exchange(lock_fd_, -1);
         const auto unlock_result =
             unlock_file_retrying_interrupts(descriptor);
@@ -1273,10 +1398,19 @@ public:
         const auto close_error_number = close_result == 0 ? 0 : errno;
         const auto directory_unlock_result =
             unlock_directory_retrying_interrupts(directory_fd_);
-        if (!directory_unlock_result.succeeded()) {
-            return directory_unlock_result;
-        }
         directory_lock_held_ = false;
+        auto parent_unlock_result =
+            make_result(DurableFileStatus::Succeeded);
+        if (fixed_parent_lock_held_) {
+            parent_unlock_result =
+                unlock_fixed_namespace_parent_retrying_interrupts(
+                    fixed_parent_fd_);
+            fixed_parent_lock_held_ = false;
+        }
+        if (!directory_unlock_result.succeeded() ||
+            !parent_unlock_result.succeeded()) {
+            return make_result(DurableFileStatus::EffectMayHaveOccurred);
+        }
         if (!unlock_result.succeeded() && close_result != 0) {
             return make_result(DurableFileStatus::EffectMayHaveOccurred);
         }
@@ -1288,19 +1422,90 @@ public:
                 DurableFileStatus::EffectMayHaveOccurred,
                 close_error_number);
         }
+        if (!binding_result.succeeded()) {
+            return binding_result;
+        }
         return make_result(DurableFileStatus::Succeeded);
     }
 
 private:
+    DurableFileResult validate_fixed_namespace_binding() const {
+        if (fixed_parent_fd_ < 0) {
+            return make_result(DurableFileStatus::Succeeded);
+        }
+        if (directory_fd_ < 0 || fixed_child_name_.empty()) {
+            return make_result(DurableFileStatus::Unsupported);
+        }
+        struct stat parent_information {};
+        struct stat child_information {};
+        struct stat named_child_information {};
+        if (::fstat(fixed_parent_fd_, &parent_information) != 0 ||
+            ::fstat(directory_fd_, &child_information) != 0 ||
+            ::fstatat(fixed_parent_fd_, fixed_child_name_.c_str(),
+                      &named_child_information, AT_SYMLINK_NOFOLLOW) != 0) {
+            return make_errno_result(DurableFileStatus::Unsupported, errno);
+        }
+        if (!S_ISDIR(parent_information.st_mode) ||
+            !S_ISDIR(child_information.st_mode) ||
+            !S_ISDIR(named_child_information.st_mode) ||
+            parent_information.st_dev != fixed_parent_identity_.device ||
+            parent_information.st_ino != fixed_parent_identity_.inode ||
+            child_information.st_dev != fixed_child_identity_.device ||
+            child_information.st_ino != fixed_child_identity_.inode ||
+            named_child_information.st_dev != fixed_child_identity_.device ||
+            named_child_information.st_ino != fixed_child_identity_.inode) {
+            return make_result(DurableFileStatus::Unsupported);
+        }
+        return make_result(DurableFileStatus::Succeeded);
+    }
+
+    DurableReadResult validate_completed_read(DurableReadResult read) const {
+        if (!read.result.succeeded()) {
+            return read;
+        }
+        auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return {std::move(binding_result), {}, false};
+        }
+        return read;
+    }
+
+    DurableFileResult
+    validate_completed_mutation(DurableFileResult operation_result) const {
+        if (!operation_result.succeeded()) {
+            return operation_result;
+        }
+        const auto binding_result = validate_fixed_namespace_binding();
+        if (!binding_result.succeeded()) {
+            return {DurableFileStatus::EffectMayHaveOccurred,
+                    binding_result.diagnostic};
+        }
+        return operation_result;
+    }
+
+    DurableFileResult release_parent_after_failed_lock(
+        DurableFileResult failure) {
+        if (!fixed_parent_lock_held_) {
+            return failure;
+        }
+        const auto parent_unlock_result =
+            unlock_fixed_namespace_parent_retrying_interrupts(
+                fixed_parent_fd_);
+        fixed_parent_lock_held_ = false;
+        return parent_unlock_result.succeeded() ? failure
+                                                : parent_unlock_result;
+    }
+
     DurableFileResult release_directory_after_failed_lock(
         DurableFileResult failure) {
         const auto directory_unlock_result =
             unlock_directory_retrying_interrupts(directory_fd_);
-        if (!directory_unlock_result.succeeded()) {
-            return directory_unlock_result;
-        }
         directory_lock_held_ = false;
-        return failure;
+        const auto released_parent =
+            release_parent_after_failed_lock(std::move(failure));
+        return directory_unlock_result.succeeded()
+                   ? released_parent
+                   : make_result(DurableFileStatus::EffectMayHaveOccurred);
     }
 
     DurableFileResult close_unlocked_after_failed_lock(
@@ -1322,10 +1527,12 @@ private:
         const auto close_error_number = close_result == 0 ? 0 : errno;
         const auto directory_unlock_result =
             unlock_directory_retrying_interrupts(directory_fd_);
-        if (!directory_unlock_result.succeeded()) {
-            return directory_unlock_result;
-        }
         directory_lock_held_ = false;
+        const auto parent_result = release_parent_after_failed_lock(failure);
+        if (!directory_unlock_result.succeeded() ||
+            parent_result.effect_may_have_occurred()) {
+            return make_result(DurableFileStatus::EffectMayHaveOccurred);
+        }
         if (!unlock_result.succeeded() && close_result != 0) {
             return make_result(DurableFileStatus::EffectMayHaveOccurred);
         }
@@ -1337,12 +1544,17 @@ private:
                 DurableFileStatus::EffectMayHaveOccurred,
                 close_error_number);
         }
-        return failure;
+        return parent_result;
     }
 
     int directory_fd_;
+    int fixed_parent_fd_ = -1;
+    std::string fixed_child_name_;
+    PosixFileIdentity fixed_parent_identity_{};
+    PosixFileIdentity fixed_child_identity_{};
     int lock_fd_ = -1;
     bool directory_lock_held_ = false;
+    bool fixed_parent_lock_held_ = false;
 #ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
     DurableFileResult seed_stage_collision_for_test(
         const std::string &name) noexcept {
@@ -1384,11 +1596,11 @@ private:
 #endif
 };
 
-int bind_fixed_namespace_directory(
+PosixDirectoryBinding bind_fixed_namespace_directory(
     const std::filesystem::path &parent_directory,
     std::string_view child_namespace) {
     if (!durable_fixed_namespace_name_is_valid(child_namespace)) {
-        return -1;
+        return {};
     }
     const std::string child_name(child_namespace);
     int parent_fd;
@@ -1397,20 +1609,20 @@ int bind_fixed_namespace_directory(
                            O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
     } while (parent_fd < 0 && errno == EINTR);
     if (parent_fd < 0) {
-        return -1;
+        return {};
     }
 
     struct stat parent_before {};
     if (::fstat(parent_fd, &parent_before) != 0 ||
         !S_ISDIR(parent_before.st_mode)) {
         close_best_effort(parent_fd);
-        return -1;
+        return {};
     }
     const auto parent_locked =
         lock_directory_retrying_interrupts(parent_fd);
     if (!parent_locked.succeeded()) {
         close_best_effort(parent_fd);
-        return -1;
+        return {};
     }
 
     int create_result;
@@ -1420,7 +1632,7 @@ int bind_fixed_namespace_directory(
     if (create_result != 0 && errno != EEXIST) {
         static_cast<void>(unlock_directory_retrying_interrupts(parent_fd));
         close_best_effort(parent_fd);
-        return -1;
+        return {};
     }
 
     struct stat child_entry {};
@@ -1429,7 +1641,7 @@ int bind_fixed_namespace_directory(
         !S_ISDIR(child_entry.st_mode)) {
         static_cast<void>(unlock_directory_retrying_interrupts(parent_fd));
         close_best_effort(parent_fd);
-        return -1;
+        return {};
     }
 
     int child_fd;
@@ -1440,7 +1652,7 @@ int bind_fixed_namespace_directory(
     if (child_fd < 0) {
         static_cast<void>(unlock_directory_retrying_interrupts(parent_fd));
         close_best_effort(parent_fd);
-        return -1;
+        return {};
     }
 
     struct stat child_bound {};
@@ -1463,13 +1675,17 @@ int bind_fixed_namespace_directory(
         parent_before.st_ino == parent_after.st_ino;
     const auto parent_unlocked =
         unlock_directory_retrying_interrupts(parent_fd);
-    const auto parent_closed = ::close(parent_fd);
     if (!parent_synced.succeeded() || !identities_match ||
-        !parent_unlocked.succeeded() || parent_closed != 0) {
+        !parent_unlocked.succeeded()) {
         close_best_effort(child_fd);
-        return -1;
+        close_best_effort(parent_fd);
+        return {};
     }
-    return child_fd;
+    return {child_fd,
+            parent_fd,
+            std::move(child_name),
+            {parent_before.st_dev, parent_before.st_ino},
+            {child_bound.st_dev, child_bound.st_ino}};
 }
 
 } // namespace

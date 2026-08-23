@@ -8,6 +8,7 @@ from typing import Any
 
 from .contract import (
     EXPECTED_CAPABILITY_LEVELS,
+    EXPECTED_CONSTRAINT_KINDS,
     EXPECTED_DELIVERY_STATES,
     EXPECTED_OPERATION_TEMPLATES,
     OPERATION_LEAVES_BY_TEMPLATE,
@@ -78,17 +79,6 @@ EXPECTED_MODEL_TYPES = {
     "audio-generation",
     "classification",
     "mesh",
-}
-EXPECTED_CONSTRAINT_KINDS = {
-    "gpu_shared_residency",
-    "gpu_provider_resolved_capacity",
-    "host_memavailable_floor",
-    "host_effects_provider_resolved",
-    "model_type_pool",
-    "ownership",
-    "flm_type_slot",
-    "npu_cross_family",
-    "npu_exclusive",
 }
 
 
