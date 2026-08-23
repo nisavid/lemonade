@@ -140,16 +140,16 @@ jobs:
           ctest --test-dir build -C Release --output-on-failure -R "^mcp_client_config$"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build durable residency journal test on Windows
+      - name: Build durable residency tests on Windows
         shell: PowerShell
         run: |
-          cmake --build build --config Release --target test_durable_residency_journal
+          cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Run durable residency journal test on Windows
+      - name: Run durable residency tests on Windows
         shell: PowerShell
         run: |
-          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Lemonade Server Installers

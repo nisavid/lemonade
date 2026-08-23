@@ -6028,6 +6028,33 @@ def require_fixed_namespace_factory_contract(
     if not 0 <= existing_at < stage_at < move_at < published_at:
         raise AssertionError("Windows fixed namespace mishandles concurrent creators")
 
+    binder_opens = call_argument_lists(binder, "CreateFileW")
+    if len(binder_opens) != 1 or len(binder_opens[0]) < 3:
+        raise AssertionError("Windows fixed namespace directory open is ambiguous")
+    share_mode = compact_cpp(binder_opens[0][2])
+    if (
+        "FILE_SHARE_READ" not in share_mode
+        or "FILE_SHARE_WRITE" not in share_mode
+        or "FILE_SHARE_DELETE" in share_mode
+    ):
+        raise AssertionError("Windows fixed namespace does not pin directory renames")
+    release_at = factory.find("if (!release_parent())")
+    publish_at = factory.find("std::make_unique<WindowsDurableFileAdapter>", release_at)
+    if not 0 <= release_at < publish_at:
+        raise AssertionError(
+            "Windows fixed namespace does not release its parent before publication"
+        )
+    assigned_stage_closes = re.findall(
+        r"\b(?:const\s+)?auto\s+[A-Za-z_]\w*\s*=\s*"
+        r"close_windows_directory\s*\(\s*bound_stage\s*\)\s*;",
+        factory,
+    )
+    if len(assigned_stage_closes) < 2 or re.search(
+        r"\|\|\s*!\s*close_windows_directory\s*\(\s*bound_stage\s*\)",
+        factory,
+    ):
+        raise AssertionError("Windows fixed namespace can skip a bound-stage close")
+
 
 def require_windows_bound_directory_factory_mutants(source: str) -> None:
     def rejected(mutant: str, name: str) -> None:
@@ -7475,6 +7502,47 @@ endif()
     require_durable_target_sources(cmake)
     require_private_authority_gate_contract(cmake)
     require_durable_cmake_invocation(cmake)
+    require_local_overlay_ci_registration(
+        cmake,
+        (
+            (
+                "BUILD_TESTING",
+                "AND",
+                "EXISTS",
+                "${CMAKE_CURRENT_SOURCE_DIR}/test/residency/recovery/durable_journal_public_seam.cpp",
+            ),
+            (
+                "EXISTS",
+                "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_durable_local_overlay.cpp",
+            ),
+        ),
+    )
+
+    overlay_ci_control = """
+add_cpp_ci_test(
+    ResidencyDurableLocalOverlay
+    CI ON
+    COMMAND test_durable_local_overlay
+)
+"""
+    require_local_overlay_ci_registration(overlay_ci_control)
+    overlay_ci_mutants = (
+        "",
+        overlay_ci_control.replace("CI ON", "CI OFF"),
+        overlay_ci_control
+        + "\nset_tests_properties(ResidencyDurableLocalOverlay PROPERTIES "
+        "DISABLED TRUE)\n",
+        "if(FALSE)\n" + overlay_ci_control + "\nendif()\n",
+        "function(inert_overlay_test)\n" + overlay_ci_control + "\nendfunction()\n",
+        "return()\n" + overlay_ci_control,
+    )
+    for mutant in overlay_ci_mutants:
+        try:
+            require_local_overlay_ci_registration(mutant)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("local-overlay CTest registration mutant was accepted")
 
     private_gate_control = """
 if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/residency/recovery/durable_journal_public_seam.cpp")
@@ -7532,10 +7600,10 @@ endif()
         "build-lemonade-desktop-installer",
     )
     build_command = re.compile(
-        r"(?m)^\s*cmake\s+--build\s+build\s+--config\s+Release\s+--target\s+test_durable_residency_journal\s*$"
+        r"(?m)^\s*cmake\s+--build\s+build\s+--config\s+Release\s+--target\s+test_durable_residency_journal\s+test_durable_local_overlay\s*$"
     )
     test_command = re.compile(
-        r'(?m)^\s*ctest\s+--test-dir\s+build\s+-C\s+Release\s+--no-tests=error\s+--output-on-failure\s+-R\s+"\^ResidencyDurableJournal\$"\s*$'
+        r'(?m)^\s*ctest\s+--test-dir\s+build\s+-C\s+Release\s+--no-tests=error\s+--output-on-failure\s+-R\s+"\^\(ResidencyDurableJournal\|ResidencyDurableLocalOverlay\)\$"\s*$'
     )
     require_live_windows_workflow_commands(
         windows_job_source, build_command, test_command
@@ -7549,14 +7617,14 @@ endif()
         run: |
           $ErrorActionPreference = "Stop"
           if (-not (Test-Path build)) { throw "build directory missing" }
-          cmake --build build --config Release --target test_durable_residency_journal
+          cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
       - name: Durable test
         shell: PowerShell
         run: |
-          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
           $testExitCode = $LASTEXITCODE
           if ($testExitCode -ne 0) {
             exit $testExitCode
@@ -7565,6 +7633,33 @@ endif()
     require_live_windows_workflow_commands(
         failure_propagation_control, build_command, test_command
     )
+    omitted_windows_target_or_test_mutants = (
+        failure_propagation_control.replace(
+            "test_durable_residency_journal test_durable_local_overlay",
+            "test_durable_residency_journal",
+        ),
+        failure_propagation_control.replace(
+            "test_durable_residency_journal test_durable_local_overlay",
+            "test_durable_local_overlay",
+        ),
+        failure_propagation_control.replace(
+            "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$",
+            "^ResidencyDurableJournal$",
+        ),
+        failure_propagation_control.replace(
+            "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$",
+            "^ResidencyDurableLocalOverlay$",
+        ),
+    )
+    for mutant in omitted_windows_target_or_test_mutants:
+        try:
+            require_live_windows_workflow_commands(mutant, build_command, test_command)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(
+                "workflow scanner accepted an incomplete durable test pair"
+            )
 
     cmake_narration = """
 # test_durable_residency_journal ResidencyDurableJournal add_cpp_ci_test CI ON LEMONADE_RESIDENCY_DURABLE_TESTING
@@ -7589,24 +7684,24 @@ durable_file_adapter_posix.cpp durable_file_adapter_windows.cpp durable_file_ada
     ):
         raise AssertionError("CMake scanner accepted narrated test wiring")
     yaml_narration = """
-# test_durable_residency_journal ctest \"^ResidencyDurableJournal$\"
-name: "test_durable_residency_journal ctest ^ResidencyDurableJournal$"
-run: echo "cmake --build build --config Release --target test_durable_residency_journal ctest --test-dir build -C Release --no-tests=error --output-on-failure -R ^ResidencyDurableJournal$"
+# test_durable_residency_journal test_durable_local_overlay ctest \"^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$\"
+name: "test_durable_residency_journal test_durable_local_overlay ctest ^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
+run: echo "cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay ctest --test-dir build -C Release --no-tests=error --output-on-failure -R ^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
 run: |
-  Write-Host 'cmake --build build --config Release --target test_durable_residency_journal'
-  Write-Host 'ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"'
+  Write-Host 'cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay'
+  Write-Host 'ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"'
 env:
   NARRATION: |
-    cmake --build build --config Release --target test_durable_residency_journal
-    ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+    cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
+    ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
 run: |
   $narration = @'
-  cmake --build build --config Release --target test_durable_residency_journal
-  ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+  cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
+  ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
   '@
   cat <<'TASK020'
-  cmake --build build --config Release --target test_durable_residency_journal
-  ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+  cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
+  ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
   TASK020
 """
     stripped_narration = strip_shell_heredocs(extract_yaml_run_bodies(yaml_narration))
@@ -7622,8 +7717,8 @@ run: |
         if: ${{ false }}
         continue-on-error: true
         run: |
-          cmake --build build --config Release --target test_durable_residency_journal
-          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+          cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
+          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
 """
     disabled_job_mutant = r"""
   build-lemonade-server-installer:
@@ -7633,8 +7728,8 @@ run: |
     steps:
       - name: Durable test
         run: |
-          cmake --build build --config Release --target test_durable_residency_journal
-          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+          cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
+          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
 """
     guarded_commands_mutant = r"""
   build-lemonade-server-installer:
@@ -7643,8 +7738,8 @@ run: |
       - name: Guarded durable test
         run: |
           if ($false) {
-            cmake --build build --config Release --target test_durable_residency_journal
-            ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+            cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
+            ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
           }
 """
     early_control_transfer_mutant = r"""
@@ -7654,11 +7749,11 @@ run: |
       - name: Bypassed durable build
         run: |
           exit 0
-          cmake --build build --config Release --target test_durable_residency_journal
+          cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
       - name: Bypassed durable test
         run: |
           return
-          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
 """
     conditional_control_transfer_mutant = r"""
   build-lemonade-server-installer:
@@ -7667,12 +7762,12 @@ run: |
       - name: Bypassed durable build
         run: |
           if ($true) { return; }
-          cmake --build build --config Release --target test_durable_residency_journal
+          cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Bypassed durable test
         run: |
           if ($true) { return; }
-          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 """
     linux_runner_mutant = r"""
@@ -7681,10 +7776,10 @@ run: |
     steps:
       - name: Durable build
         run: |
-          cmake --build build --config Release --target test_durable_residency_journal
+          cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
       - name: Durable test
         run: |
-          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
 """
     missing_no_tests_error_mutant = r"""
   build-lemonade-server-installer:
@@ -7692,10 +7787,10 @@ run: |
     steps:
       - name: Durable build
         run: |
-          cmake --build build --config Release --target test_durable_residency_journal
+          cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
       - name: Durable test
         run: |
-          ctest --test-dir build -C Release --output-on-failure -R "^ResidencyDurableJournal$"
+          ctest --test-dir build -C Release --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
 """
     missing_exit_propagation_mutant = r"""
   build-lemonade-server-installer:
@@ -7704,11 +7799,11 @@ run: |
       - name: Durable build
         shell: PowerShell
         run: |
-          cmake --build build --config Release --target test_durable_residency_journal
+          cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
       - name: Durable test
         shell: PowerShell
         run: |
-          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
 """
     dead_exit_propagation_mutant = r"""
   build-lemonade-server-installer:
@@ -7717,14 +7812,14 @@ run: |
       - name: Durable build
         shell: PowerShell
         run: |
-          cmake --build build --config Release --target test_durable_residency_journal
+          cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
           if ($false) {
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
       - name: Durable test
         shell: PowerShell
         run: |
-          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^ResidencyDurableJournal$"
+          ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
           if ($false) {
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
@@ -8125,7 +8220,34 @@ def require_durable_cmake_invocation(source: str) -> None:
     require_unmasked_cmake_test(code, "ResidencyDurableJournal")
 
 
-def require_live_cmake_test_enclosure(source: str, call_start: int) -> None:
+def require_local_overlay_ci_registration(
+    source: str,
+    expected_enclosures: tuple[tuple[str, ...], ...] = (),
+) -> None:
+    code = strip_cmake_comments_preserve_arguments(source)
+    matching_calls = [
+        (body, start)
+        for body, start, _end in cmake_command_spans(code, "add_cpp_ci_test")
+        if cmake_tokens(body)[:1] == ("ResidencyDurableLocalOverlay",)
+    ]
+    expected = (
+        "ResidencyDurableLocalOverlay",
+        "CI",
+        "ON",
+        "COMMAND",
+        "test_durable_local_overlay",
+    )
+    if len(matching_calls) != 1 or cmake_tokens(matching_calls[0][0]) != expected:
+        raise AssertionError("local-overlay CTest is not explicitly registered for CI")
+    require_live_cmake_test_enclosure(code, matching_calls[0][1], expected_enclosures)
+    require_unmasked_cmake_test(code, "ResidencyDurableLocalOverlay")
+
+
+def require_live_cmake_test_enclosure(
+    source: str,
+    call_start: int,
+    expected_enclosures: tuple[tuple[str, ...], ...] | None = None,
+) -> None:
     commands: list[tuple[int, str, str]] = []
     for command in ("if", "elseif", "else", "endif"):
         commands.extend(
@@ -8145,13 +8267,16 @@ def require_live_cmake_test_enclosure(source: str, call_start: int) -> None:
             if not stack:
                 raise AssertionError("CMake conditional structure is unbalanced")
             stack.pop()
-    expected = (
-        "BUILD_TESTING",
-        "AND",
-        "EXISTS",
-        "${CMAKE_CURRENT_SOURCE_DIR}/test/residency/recovery/durable_journal_public_seam.cpp",
-    )
-    if len(stack) != 1 or cmake_tokens(stack[0]) != expected:
+    if expected_enclosures is None:
+        expected_enclosures = (
+            (
+                "BUILD_TESTING",
+                "AND",
+                "EXISTS",
+                "${CMAKE_CURRENT_SOURCE_DIR}/test/residency/recovery/durable_journal_public_seam.cpp",
+            ),
+        )
+    if tuple(cmake_tokens(enclosure) for enclosure in stack) != expected_enclosures:
         raise AssertionError("durable CTest does not have its exact live enclosure")
     scope_pairs = {
         "endfunction": "function",
@@ -8532,10 +8657,12 @@ def require_live_windows_workflow_commands(
 ) -> None:
     job_metadata = direct_yaml_metadata(job_source, 4)
     if not yaml_execution_metadata_is_live(job_metadata):
-        raise AssertionError("Windows durable-journal job is disabled or ignored")
+        raise AssertionError(
+            "Windows durable-residency test job is disabled or ignored"
+        )
     runner = job_metadata.get("runs-on", "").strip("'\"").lower()
     if runner != "windows-latest":
-        raise AssertionError("durable-journal job is not bound to Windows")
+        raise AssertionError("durable-residency test job is not bound to Windows")
     live_build = False
     live_test = False
     for block, item_indent in extract_yaml_step_blocks(job_source):
@@ -8556,7 +8683,7 @@ def require_live_windows_workflow_commands(
         live_test |= has_test
     if not (live_build and live_test):
         raise AssertionError(
-            "Windows durable-journal commands are unavailable in live steps"
+            "Windows durable-residency test commands are unavailable in live steps"
         )
 
 

@@ -1677,8 +1677,8 @@ make_platform_durable_file_adapter_in_fixed_namespace(
         }
         const auto empty = windows_directory_is_empty(bound_stage.path);
         const auto bound_stage_path = bound_stage.path;
-        if (!empty.has_value() || !*empty ||
-            !close_windows_directory(bound_stage)) {
+        const auto stage_closed = close_windows_directory(bound_stage);
+        if (!empty.has_value() || !*empty || !stage_closed) {
             return false;
         }
         return ::RemoveDirectoryW(bound_stage_path.c_str()) != 0;
@@ -1725,8 +1725,8 @@ make_platform_durable_file_adapter_in_fixed_namespace(
     }
     const auto empty_stage = windows_directory_is_empty(bound_stage.path);
     const auto stage_identity = bound_stage.identity;
-    if (!empty_stage.has_value() || !*empty_stage ||
-        !close_windows_directory(bound_stage)) {
+    const auto stage_closed = close_windows_directory(bound_stage);
+    if (!empty_stage.has_value() || !*empty_stage || !stage_closed) {
         return reject();
     }
 
