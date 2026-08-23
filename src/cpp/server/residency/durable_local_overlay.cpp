@@ -175,6 +175,8 @@ bool node_references_match(const LoadedOverlayNode &node,
            input.observed_at() <= overlay.qualified_at() &&
            overlay.qualified_at() < input.fresh_until() &&
            overlay.qualified_at() <= root.activated_at() &&
+           (root.transition() != OverlayRootTransition::Qualification ||
+            root.activated_at() < input.fresh_until()) &&
            qualification_claims_are_safe(input, overlay);
 }
 
@@ -1065,6 +1067,7 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
             selected_overlay->qualified_at() >=
                 selected_input->fresh_until() ||
             selected_overlay->qualified_at() > activation.activated_at_ ||
+            activation.activated_at_ >= selected_input->fresh_until() ||
             activation.activated_at_ >= selected_overlay->expires_at() ||
             !qualification_claims_are_safe(*selected_input,
                                            *selected_overlay)) {

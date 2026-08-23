@@ -156,7 +156,9 @@ LocalOverlaySelectorIdentity selector() {
 
 ParsedProfilingInputEnvelope profile_for(std::string deployment_id,
                                          std::uint64_t sequence,
-                                         const ObservationBundle &observations) {
+                                         const ObservationBundle &observations,
+                                         std::string fresh_until =
+                                             "2026-08-23T10:05:00Z") {
     ProfilingInputEnvelopeDraft draft;
     draft.deployment_id = std::move(deployment_id);
     draft.sequence = sequence;
@@ -171,7 +173,7 @@ ParsedProfilingInputEnvelope profile_for(std::string deployment_id,
     draft.observation_contract_sha256 = digest('e');
     draft.predictor_contract_sha256 = digest('f');
     draft.observed_at = "2026-08-23T10:00:00Z";
-    draft.fresh_until = "2026-08-23T10:05:00Z";
+    draft.fresh_until = std::move(fresh_until);
     draft.max_clock_skew_milliseconds = 1000;
     draft.attribution_complete = true;
     draft.external_demand_absent = true;
@@ -765,6 +767,35 @@ void require_qualification_at_fresh_until_fails_before_writes() {
             "qualification at fresh_until caused an object or root write");
 }
 
+void require_activation_at_fresh_until_fails_before_writes() {
+    auto storage = JournalTestStorage::fresh();
+    auto store = storage.make_overlay_store(generous_limits());
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "activation freshness-boundary fixture did not start empty");
+
+    auto observations = observations_for(1);
+    auto profile = profile_for(
+        std::string(empty.authority->deployment_id()), 1, observations);
+    const auto freshness_boundary = std::string(profile.fresh_until());
+    auto overlay = overlay_for(profile);
+    require(overlay.qualified_at() < profile.fresh_until(),
+            "activation freshness-boundary overlay was not qualified while "
+            "the input was fresh");
+
+    storage.reset_observations();
+    auto rejected = activate_qualification(
+        store, std::move(*empty.authority), std::move(profile),
+        std::move(overlay), std::move(observations), '4', freshness_boundary);
+    const auto after = storage.snapshot();
+    require(rejected.status == LocalOverlayStoreStatus::CorruptOrRollback &&
+                !rejected.authority.has_value() &&
+                after.authority_root_bytes.empty() &&
+                !after.authority_mutation_attempted,
+            "activation at fresh_until caused an object or root write");
+}
+
 void require_unreclosable_claims_cannot_seal_or_activate() {
     auto storage = JournalTestStorage::fresh();
     auto store = storage.make_overlay_store(generous_limits());
@@ -854,7 +885,7 @@ void require_rollback_advances_generation_and_preserves_history() {
     auto rolled_back = store.activate(
         std::move(*second.authority),
         LocalOverlayActivation::rollback(first_overlay, digest('6'),
-                                         "2026-08-23T10:05:00Z"));
+                                         "2026-08-23T10:06:00Z"));
     require(rolled_back.status == LocalOverlayStoreStatus::Activated &&
                 rolled_back.authority.has_value() &&
                 rolled_back.authority->generation() == 3 &&
@@ -1232,6 +1263,69 @@ void require_historic_freshness_boundary_fails_closed() {
             "fresh snapshot accepted a historic overlay at fresh_until");
 }
 
+void require_historic_activation_freshness_boundary_fails_closed() {
+    auto storage = JournalTestStorage::fresh();
+    auto store = storage.make_overlay_store(generous_limits());
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "historic activation freshness-boundary fixture did not start "
+            "empty");
+    const auto deployment_id = std::string(empty.authority->deployment_id());
+
+    const auto first_observations = observations_for(1);
+    auto first_input = profile_for(deployment_id, 1, first_observations);
+    auto first_overlay = overlay_for(first_input);
+    require(first_overlay.qualified_at() < first_input.fresh_until(),
+            "historic activation freshness-boundary overlay was not qualified "
+            "while the input was fresh");
+    auto first_root = root_for(
+        deployment_id, 1, std::nullopt, first_overlay, 1, '4',
+        std::string(first_input.fresh_until()));
+
+    const auto second_observations = observations_for(2);
+    auto second_input = profile_for(deployment_id, 2, second_observations,
+                                    "2026-08-23T10:07:00Z");
+    auto second_overlay = overlay_for(second_input);
+    auto second_root = root_for(
+        deployment_id, 2, std::string(first_root.checksum_sha256()),
+        second_overlay, 2, '5', "2026-08-23T10:06:00Z");
+
+    auto persist_node = [&](const ObservationBundle &observations,
+                            const ParsedProfilingInputEnvelope &input,
+                            const ParsedLocalOverlayObject &overlay,
+                            const ParsedOverlayActivationRoot &root) {
+        storage.overwrite_immutable_object(observations.baseline_sha256,
+                                           observations.baseline);
+        storage.overwrite_immutable_object(observations.workload_sha256,
+                                           observations.workload);
+        storage.overwrite_immutable_object(observations.release_sha256,
+                                           observations.release);
+        storage.overwrite_immutable_object(
+            std::string(input.checksum_sha256()),
+            std::string(input.canonical_bytes()));
+        storage.overwrite_immutable_object(
+            std::string(overlay.checksum_sha256()),
+            std::string(overlay.canonical_bytes()));
+        storage.overwrite_immutable_object(
+            std::string(root.checksum_sha256()),
+            std::string(root.canonical_bytes()));
+    };
+    persist_node(first_observations, first_input, first_overlay, first_root);
+    persist_node(second_observations, second_input, second_overlay, second_root);
+    storage.overwrite_fixed_child_bytes(
+        FixedAuthorityChild::Root,
+        std::string(second_root.canonical_bytes()));
+
+    auto reader = storage.make_overlay_store(generous_limits());
+    auto replayed = reader.snapshot(TrustedLocalOverlayReplayFloor::exact_root(
+        std::string(first_root.canonical_bytes())));
+    require(replayed.status == LocalOverlayStoreStatus::CorruptOrRollback &&
+                !replayed.authority.has_value(),
+            "fresh snapshot accepted a historic qualification activated at "
+            "fresh_until");
+}
+
 void require_generation_replay_is_rejected() {
     auto fixture = published_fixture();
     auto parsed = parse_overlay_activation_root(fixture.root_bytes);
@@ -1519,6 +1613,8 @@ int main() {
     require_observation_admission_fails_before_writes();
     require_claim_admission_fails_before_writes();
     require_qualification_at_fresh_until_fails_before_writes();
+    require_historic_activation_freshness_boundary_fails_closed();
+    require_activation_at_fresh_until_fails_before_writes();
     require_unreclosable_claims_cannot_seal_or_activate();
     require_same_observation_digest_is_deduplicated();
     require_rollback_advances_generation_and_preserves_history();
