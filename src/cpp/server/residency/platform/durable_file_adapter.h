@@ -139,6 +139,20 @@ make_platform_durable_file_adapter_in_fixed_namespace(
     std::string_view child_namespace);
 
 #ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
+#ifdef _WIN32
+class DurableFixedNamespaceConvergenceProbe {
+public:
+    virtual ~DurableFixedNamespaceConvergenceProbe() = default;
+    virtual void after_publish_attempt(std::size_t attempt, bool moved) = 0;
+};
+
+std::unique_ptr<DurableFileAdapter>
+make_platform_durable_file_adapter_in_fixed_namespace_for_test(
+    const std::filesystem::path &parent_directory,
+    std::string_view child_namespace,
+    DurableFixedNamespaceConvergenceProbe &probe);
+#endif
+
 enum class DurablePreflightTestFault {
     ProbeIdentityCaptureFailureOnce,
     StageIdentityCaptureFailureOnce,
