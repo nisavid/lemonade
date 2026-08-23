@@ -1124,6 +1124,12 @@
   "allOf": [
     {
       "x-residency-assert": {
+        "field": "qualified_at",
+        "less_than_path": "expires_at"
+      }
+    },
+    {
+      "x-residency-assert": {
         "equals_path": "selector.catalog.operation_kind",
         "field": "method.operation_kind"
       }

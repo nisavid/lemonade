@@ -20,7 +20,7 @@ from .contract import (
 )
 
 EXPECTED_REGISTRY_DIGEST = (
-    "2df686a728a91750120385dbe247aa54fa8bf4290f04318eef14430693ab0104"
+    "cb0fcefcd8fa46b4c600e19ae13144ff7192d43aedcb8cca0901eafd28f8d832"
 )
 EXPECTED_REGISTRY_KEYS = [
     "schema",

@@ -4564,6 +4564,12 @@
         "conditionals": [
           {
             "assert": {
+              "field": "qualified_at",
+              "less_than_path": "expires_at"
+            }
+          },
+          {
+            "assert": {
               "equals_path": "selector.catalog.operation_kind",
               "field": "method.operation_kind"
             }
@@ -4754,6 +4760,12 @@
       "overlay_activation_root": {
         "conditionals": [
           {
+            "assert": {
+              "field": "activated_at",
+              "less_than_path": "expires_at"
+            }
+          },
+          {
             "if": {
               "equals": 1,
               "field": "generation"
@@ -4876,7 +4888,14 @@
         }
       },
       "profiling_input_envelope": {
-        "conditionals": [],
+        "conditionals": [
+          {
+            "assert": {
+              "field": "observed_at",
+              "less_than_path": "fresh_until"
+            }
+          }
+        ],
         "fields": {
           "attributed_claims": {
             "required": true,
@@ -7248,6 +7267,6 @@
     }
   ],
   "schema": "residency.profiles/1.0",
-  "selection_registry_sha256": "5b505272f6f30209ad141ca4fa20da565a9d2f6d5d5720a2d3dd16c2aebe2d19",
+  "selection_registry_sha256": "bd040081cc1286047433bfe14ac6556636620176fd02c2a2c934561ac7e9ed28",
   "source_support_baseline": "a505bbc702cc1fcd44ef73c44defabc98c36d505"
 }

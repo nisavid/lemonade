@@ -1121,6 +1121,14 @@
   "$id": "residency.profiling_input_envelope/1.0",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "x-residency-assert": {
+        "field": "observed_at",
+        "less_than_path": "fresh_until"
+      }
+    }
+  ],
   "properties": {
     "attributed_claims": {
       "$ref": "#/$defs/claim_closure"
@@ -1236,6 +1244,7 @@
   "title": "Profiling Input Envelope",
   "type": "object",
   "x-residency-required-keywords": [
-    "x-max-utf8-bytes"
+    "x-max-utf8-bytes",
+    "x-residency-assert"
   ]
 }
