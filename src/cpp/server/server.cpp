@@ -35,6 +35,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -101,6 +102,41 @@ public:
 
 private:
     Router* router_;
+};
+
+class ProfilingAdmissionGuard {
+public:
+    ProfilingAdmissionGuard(std::mutex& mutex, std::condition_variable& cv,
+                            std::size_t& admissions)
+        : mutex_(mutex), cv_(cv), admissions_(admissions) {}
+
+    ProfilingAdmissionGuard(const ProfilingAdmissionGuard&) = delete;
+    ProfilingAdmissionGuard& operator=(const ProfilingAdmissionGuard&) = delete;
+
+    ~ProfilingAdmissionGuard() { release(); }
+
+    void release_locked() noexcept {
+        if (!active_) return;
+        if (admissions_ > 0) --admissions_;
+        active_ = false;
+        cv_.notify_all();
+    }
+
+    void release() noexcept {
+        if (!active_) return;
+        try {
+            std::lock_guard<std::mutex> lock(mutex_);
+            release_locked();
+        } catch (...) {
+            std::terminate();
+        }
+    }
+
+private:
+    std::mutex& mutex_;
+    std::condition_variable& cv_;
+    std::size_t& admissions_;
+    bool active_ = true;
 };
 
 int hex_value(char c) {
@@ -434,6 +470,8 @@ Server::Server(std::shared_ptr<RuntimeConfig> config, const std::string& cache_d
                                        backend_manager_.get(),
                                        [this]() { return get_vram_usage(); });
     router_->set_cloud_registry(cloud_registry_.get());
+    profiling_transaction_ =
+        std::make_unique<residency::ProfilingTransaction>(*router_);
 
     // When a router collection is added, edited, or removed (via the API or an
     // on-disk edit), reclaim any routing helper no remaining policy references.
@@ -2244,6 +2282,7 @@ void Server::run() {
     warn_if_unsecured(host, ipv4, ipv6);
 
     running_ = true;
+    profiling_accepting_.store(false);
 
     // Start WebSocket server for realtime API and log streaming
     if (websocket_server_) {
@@ -2328,6 +2367,12 @@ void Server::run() {
             break;
         }
 
+        {
+            std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+            if (!shutdown_requested_.load() && !rebind_requested_.load())
+                profiling_accepting_.store(true);
+        }
+
         // Enumerate all RFC1918 interfaces to determine if we can broadcast.
         // The beacon will send per-interface with the correct IP in the payload.
         auto rfc1918Interfaces = udp_beacon_.getLocalRFC1918Interfaces();
@@ -2384,26 +2429,51 @@ void Server::run() {
             break;
         }
 
-        // If rebind was requested, stop() has already been called by apply_config_side_effects().
-        // Just join the threads so they can be restarted with new settings.
-        if (rebind_requested_.load()) {
-            // Wait for threads to finish (stop() was already called)
-            if (http_v4_thread_.joinable())
-                http_v4_thread_.join();
-            if (http_v6_thread_.joinable())
-                http_v6_thread_.join();
-            // Continue to rebind logic below (don't break)
-        } else {
-            // Normal path: threads exited naturally (no shutdown, no rebind)
-            // Join the threads
-            if (http_v4_thread_.joinable())
-                http_v4_thread_.join();
-            if (http_v6_thread_.joinable())
-                http_v6_thread_.join();
+        // Join the listener threads before deciding whether a rebind is still
+        // needed. A config update can arrive during the joins, so the
+        // admission barrier is applied from the final lifecycle snapshot.
+        if (rebind_requested_.load())
+            stop_http_listeners();
+        if (http_v4_thread_.joinable())
+            http_v4_thread_.join();
+        if (http_v6_thread_.joinable())
+            http_v6_thread_.join();
+
+        bool should_rebind = false;
+        uint64_t rebind_epoch = 0;
+        {
+            std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+            should_rebind = rebind_requested_.load() &&
+                            !shutdown_requested_.load();
+            if (should_rebind)
+                rebind_epoch = profiling_lifecycle_epoch_.load();
+        }
+        if (!should_rebind) {
+            std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+            profiling_accepting_.store(false);
+            break;  // Normal exit or shutdown won the lifecycle race.
         }
 
-        if (!rebind_requested_) {
-            break;  // Normal exit (stop() was called)
+        if (profiling_transaction_ &&
+            profiling_transaction_->running_on_current_thread()) {
+            LOG(ERROR, "Server")
+                << "Cannot rebind from the profiling capture thread"
+                << std::endl;
+            stop();
+            break;
+        }
+        {
+            std::unique_lock<std::mutex> lifecycle_lock(lifecycle_mutex_);
+            profiling_admission_cv_.wait(
+                lifecycle_lock, [this] { return profiling_admissions_ == 0; });
+        }
+        if (profiling_transaction_ &&
+            !profiling_transaction_->wait_for_idle()) {
+            LOG(ERROR, "Server")
+                << "Cannot rebind while profiling capture owns the server thread"
+                << std::endl;
+            stop();
+            break;
         }
 
         // Rebind requested: re-resolve host, recreate HTTP servers, loop back to bind+listen
@@ -2412,8 +2482,29 @@ void Server::run() {
         ipv6 = resolve_host_to_ip(AF_INET6, host);
         warn_if_unsecured(host, ipv4, ipv6);
         LOG(INFO, "Server") << "Rebinding to " << host << ":" << port_ << "..." << std::endl;
-        rebind_requested_ = false;
+        std::unique_lock<std::mutex> transition_lock(stop_mutex_);
+        {
+            std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+            if (shutdown_requested_.load() || !rebind_requested_.load()) {
+                profiling_accepting_.store(false);
+                continue;
+            }
+            profiling_accepting_.store(false);
+        }
         setup_http_servers();
+        if (websocket_server_) {
+            websocket_server_->stop();
+            websocket_server_ = std::make_unique<WebSocketServer>(
+                router_.get(), config_->host(), config_->websocket_port());
+            if (running_)
+                websocket_server_->start();
+        }
+        {
+            std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+            profiling_accepting_.store(false);
+            if (profiling_lifecycle_epoch_.load() == rebind_epoch)
+                rebind_requested_ = false;
+        }
     }
 }
 
@@ -2423,7 +2514,89 @@ bool Server::should_shutdown() const {
 }
 
 void Server::set_shutdown_requested(bool requested) {
+    // This setter is also called from the POSIX signal handler. Keep it
+    // limited to an atomic flag; the normal server thread performs the
+    // lifecycle abort before touching Router or synchronization primitives.
     shutdown_requested_.store(requested);
+}
+
+void Server::begin_residency_lifecycle_change() {
+    profiling_accepting_.store(false);
+    profiling_lifecycle_epoch_.fetch_add(1);
+    if (profiling_transaction_)
+        profiling_transaction_->request_abort(
+            residency::ProfilingAbortReason::Restarted);
+}
+
+residency::ProfilingTransactionResult
+Server::run_residency_profiling_transaction(
+    std::string transaction_id,
+    residency::ProfilingTransaction::Capture capture,
+    std::atomic<bool> *cancel) {
+    uint64_t lifecycle_epoch = 0;
+    residency::ProfilingTransaction *transaction = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+        transaction = profiling_transaction_.get();
+        if (transaction == nullptr) {
+            residency::ProfilingTransactionResult result;
+            result.status = residency::ProfilingTransactionStatus::Failed;
+            result.diagnostic = "profiling transaction is unavailable";
+            return result;
+        }
+        if (!profiling_accepting_.load() || shutdown_requested_.load() ||
+            rebind_requested_.load()) {
+            residency::ProfilingTransactionResult result;
+            result.status = residency::ProfilingTransactionStatus::Restarted;
+            result.diagnostic = "server lifecycle is not accepting profiling";
+            return result;
+        }
+        lifecycle_epoch = profiling_lifecycle_epoch_.load();
+        ++profiling_admissions_;
+    }
+
+    ProfilingAdmissionGuard admission_guard(
+        lifecycle_mutex_, profiling_admission_cv_, profiling_admissions_);
+
+    auto finish = [this, lifecycle_epoch, &admission_guard](
+                      residency::ProfilingTransactionResult value) {
+        std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+        const bool lifecycle_changed =
+            profiling_lifecycle_epoch_.load() != lifecycle_epoch ||
+            !profiling_accepting_.load() || shutdown_requested_.load() ||
+            rebind_requested_.load();
+        if (lifecycle_changed) {
+            value.status = residency::ProfilingTransactionStatus::Restarted;
+            value.diagnostic = "profiling lifecycle changed before publication";
+            value.candidate.reset();
+        } else if (value.status ==
+                       residency::ProfilingTransactionStatus::Accepted &&
+                   !value.candidate.has_value()) {
+            value.status = residency::ProfilingTransactionStatus::InvalidEvidence;
+            value.diagnostic = "profiling transaction returned no candidate";
+        }
+        if (value.status != residency::ProfilingTransactionStatus::Accepted)
+            value.candidate.reset();
+        admission_guard.release_locked();
+        return value;
+    };
+
+    residency::ProfilingTransactionResult result;
+    try {
+        result = transaction->run(
+            std::move(transaction_id), std::move(capture), cancel,
+            [this, lifecycle_epoch] {
+                return !profiling_accepting_.load() ||
+                       shutdown_requested_.load() || rebind_requested_.load() ||
+                       profiling_lifecycle_epoch_.load() != lifecycle_epoch;
+            });
+    } catch (...) {
+        residency::ProfilingTransactionResult failed;
+        failed.status = residency::ProfilingTransactionStatus::Failed;
+        failed.diagnostic = "profiling transaction failed";
+        return finish(std::move(failed));
+    }
+    return finish(std::move(result));
 }
 
 bool Server::is_running() const {
@@ -2435,7 +2608,36 @@ bool Server::startup_failed() const {
 }
 
 void Server::stop() {
+    if (profiling_transaction_ &&
+        profiling_transaction_->running_on_current_thread()) {
+        shutdown_requested_ = true;
+        begin_residency_lifecycle_change();
+        LOG(WARNING, "Server")
+            << "Shutdown requested by the profiling capture thread;"
+               " cleanup is deferred"
+            << std::endl;
+        return;
+    }
+
+    std::lock_guard<std::mutex> stop_lock(stop_mutex_);
+    std::unique_lock<std::mutex> lifecycle_lock(lifecycle_mutex_);
     shutdown_requested_ = true;
+    begin_residency_lifecycle_change();
+
+    // Close the admission boundary before waiting. A caller that already
+    // reserved an admission may still be about to enter the transaction; it
+    // must finish that handoff before Router teardown can begin.
+    profiling_admission_cv_.wait(
+        lifecycle_lock, [this] { return profiling_admissions_ == 0; });
+    lifecycle_lock.unlock();
+
+    if (profiling_transaction_ && !profiling_transaction_->wait_for_idle()) {
+        LOG(WARNING, "Server")
+            << "Deferring shutdown cleanup until the profiling capture thread"
+               " releases the Router gate"
+            << std::endl;
+        return;
+    }
 
     if (running_) {
         LOG(INFO, "Server") << "Stopping HTTP server..." << std::endl;
@@ -2477,7 +2679,10 @@ void Server::stop() {
         pinned_model_loading_thread_.join();
     }
 
-    shutdown_requested_ = false;  // Reset for potential future use
+    {
+        std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+        shutdown_requested_ = false;  // Permit an explicit later run() restart.
+    }
 }
 
 // Generates an actionable error message for model loading failures.
@@ -7386,29 +7591,21 @@ void Server::handle_jobs_delete(const httplib::Request& req, httplib::Response& 
 void Server::handle_shutdown(const httplib::Request& req, httplib::Response& res) {
     LOG(INFO, "Server") << "Shutdown request received" << std::endl;
 
-    // Unload all models SYNCHRONOUSLY before sending the response.
-    // This ensures child processes (llama-server, etc.) are terminated
-    // before the caller proceeds, avoiding zombie processes.
-    if (router_) {
-        LOG(INFO, "Server") << "Unloading models and stopping backend servers..." << std::endl;
-        try {
-            router_->unload_model();
-            LOG(INFO, "Server") << "All models unloaded" << std::endl;
-        } catch (const std::exception& e) {
-            LOG(ERROR, "Server") << "Error during unload: " << e.what() << std::endl;
-        }
+    // Close profiling admission before the asynchronous stop path tears down
+    // Router. A capture provider that owns this request thread cannot be
+    // waited on here; stop() performs the cleanup after the callback returns.
+    set_shutdown_requested(true);
+    {
+        std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+        begin_residency_lifecycle_change();
     }
 
     nlohmann::json response = {{"status", "shutting down"}};
     res.set_content(response.dump(), "application/json");
 
-    // Stop the HTTP listener and exit asynchronously (allows response to be sent first)
-    std::thread([this]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        cancel_download_jobs();
-        stop();
-        std::exit(0);
-    }).detach();
+    // The serving thread observes shutdown_requested_ and owns listener/model
+    // teardown. Keeping cleanup on that thread avoids retaining a raw Server
+    // pointer in a detached callback after an embedded Server is destroyed.
 }
 
 void Server::handle_config_set(const httplib::Request& req, httplib::Response& res) {
@@ -7489,6 +7686,39 @@ void Server::handle_bin_change(const std::string& section,
         return;
     }
 
+    // A capture provider may run on the server thread. It cannot synchronously
+    // wait for its own Router lease to end, so leave the configured value in
+    // place and let the operator retry the hot-swap after the capture exits.
+    if (profiling_transaction_ &&
+        profiling_transaction_->running_on_current_thread()) {
+        begin_residency_lifecycle_change();
+        LOG(WARNING, "Server")
+            << "Deferring backend hot-swap until profiling capture exits"
+            << std::endl;
+        return;
+    }
+
+    std::unique_lock<std::mutex> transition_lock(stop_mutex_);
+    bool restore_profiling_admission = false;
+    uint64_t lifecycle_epoch = 0;
+    {
+        std::unique_lock<std::mutex> lifecycle_lock(lifecycle_mutex_);
+        restore_profiling_admission = profiling_accepting_.load() &&
+                                      running_.load() &&
+                                      !shutdown_requested_.load() &&
+                                      !rebind_requested_.load();
+        begin_residency_lifecycle_change();
+        lifecycle_epoch = profiling_lifecycle_epoch_.load();
+        profiling_admission_cv_.wait(
+            lifecycle_lock, [this] { return profiling_admissions_ == 0; });
+    }
+    if (profiling_transaction_ && !profiling_transaction_->wait_for_idle()) {
+        LOG(WARNING, "Server")
+            << "Deferring backend hot-swap until profiling capture exits"
+            << std::endl;
+        return;
+    }
+
     LOG(INFO, "Server") << "*_bin config changed: " << section << "." << bin_key
                         << " = '" << new_value << "' — hot-swapping "
                         << recipe << ":" << backend << std::endl;
@@ -7556,6 +7786,14 @@ void Server::handle_bin_change(const std::string& section,
 
     SystemInfoCache::invalidate_recipes();
     model_manager_->invalidate_models_cache();
+
+    if (restore_profiling_admission) {
+        std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+        if (profiling_lifecycle_epoch_.load() == lifecycle_epoch &&
+            !shutdown_requested_.load() && !rebind_requested_.load()) {
+            profiling_accepting_.store(true);
+        }
+    }
 }
 
 void Server::apply_config_side_effects(const json& applied_changes) {
@@ -7566,26 +7804,23 @@ void Server::apply_config_side_effects(const json& applied_changes) {
             if (new_port != current_port) {
                 LOG(INFO, "Server") << "Port change requested: " << current_port << " -> " << new_port << std::endl;
                 port_.store(new_port);
-                rebind_requested_ = true;
+                std::lock_guard<std::mutex> transition_lock(stop_mutex_);
+                {
+                    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+                    rebind_requested_ = true;
+                    begin_residency_lifecycle_change();
+                }
                 udp_beacon_.stopBroadcasting();
-                stop_http_listeners();
             }
         } else if (key == "host") {
             LOG(INFO, "Server") << "Host change requested to: " << config_->host() << std::endl;
-            rebind_requested_ = true;
-            udp_beacon_.stopBroadcasting();
-            stop_http_listeners();
-            // Restart websocket server with new host
-            if (websocket_server_) {
-                websocket_server_->stop();
-                websocket_server_ = std::make_unique<WebSocketServer>(
-                    router_.get(),
-                    config_->host(),
-                    config_->websocket_port());
-                if (running_) {
-                    websocket_server_->start();
-                }
+            std::lock_guard<std::mutex> transition_lock(stop_mutex_);
+            {
+                std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+                rebind_requested_ = true;
+                begin_residency_lifecycle_change();
             }
+            udp_beacon_.stopBroadcasting();
         } else if (key == "websocket_port") {
             if (websocket_server_) {
                 LOG(INFO, "Server") << "Restarting WebSocket server on requested port "
