@@ -5673,14 +5673,17 @@ constexpr bool should_block_fixed_namespace_publish_attempt(
 class FixedNamespacePublishBarrier final
     : public lemon::residency::detail::DurableFixedNamespaceConvergenceProbe {
 public:
+    void creator_started() {
+        std::lock_guard lock(mutex_);
+        ++started_creators_;
+        condition_.notify_all();
+    }
+
     void after_publish_attempt(std::size_t attempt, bool moved) override {
         const bool block =
             should_block_fixed_namespace_publish_attempt(attempt, moved);
         std::unique_lock lock(mutex_);
         ++publish_attempts_;
-        if (block) {
-            ++blocked_publishers_;
-        }
         condition_.notify_all();
         if (!block) {
             return;
@@ -5688,12 +5691,16 @@ public:
         condition_.wait(lock, [&] { return released_; });
     }
 
-    bool wait_for_publish_attempts(std::size_t expected,
+    bool wait_for_publish_attempts(std::size_t expected_creators,
+                                   std::size_t expected_attempts,
                                    std::uint64_t timeout_milliseconds) {
         std::unique_lock lock(mutex_);
         return condition_.wait_for(
             lock, std::chrono::milliseconds(timeout_milliseconds),
-            [&] { return publish_attempts_ >= expected; });
+            [&] {
+                return started_creators_ >= expected_creators &&
+                       publish_attempts_ >= expected_attempts;
+            });
     }
 
     void release() {
@@ -5705,8 +5712,8 @@ public:
 private:
     std::mutex mutex_;
     std::condition_variable condition_;
+    std::size_t started_creators_ = 0;
     std::size_t publish_attempts_ = 0;
-    std::size_t blocked_publishers_ = 0;
     bool released_ = false;
 };
 #endif
@@ -5810,14 +5817,16 @@ void require_native_fixed_namespace_factory() {
         std::vector<std::thread> converging_creators;
         for (std::size_t index = 0; index < converged_adapters.size(); ++index) {
             converging_creators.emplace_back([&, index] {
+                barrier.creator_started();
                 converged_adapters[index] = lemon::residency::detail::
                     make_platform_durable_file_adapter_in_fixed_namespace_for_test(
                         convergence_parent.path(), child_name, barrier);
             });
         }
-        require(barrier.wait_for_publish_attempts(1, 5000),
-                "Windows concurrent creators did not reach a held-stage "
-                "publication attempt");
+        require(
+            barrier.wait_for_publish_attempts(converged_adapters.size(), 1, 5000),
+            "Windows concurrent creators did not reach a held-stage "
+            "publication attempt after both creators started");
         require(::CloseHandle(held_stage) != 0,
                 "Windows convergence stage handle did not close");
         barrier.release();

@@ -6074,16 +6074,23 @@ def require_fixed_namespace_factory_contract(
 def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
     factories = function_bodies(source, "make_windows_fixed_namespace_adapter")
     binders = function_bodies(source, "bind_windows_directory")
+    generic_helpers = function_bodies(source, "fixed_namespace_error_is_retryable")
     stage_helpers = [
         body
         for body in function_bodies(source, "fixed_namespace_stage_error_is_retryable")
         if "ERROR_ACCESS_DENIED" in body
     ]
-    if len(factories) != 1 or len(binders) != 1 or len(stage_helpers) != 1:
+    if (
+        len(factories) != 1
+        or len(binders) != 1
+        or len(generic_helpers) != 1
+        or len(stage_helpers) != 1
+    ):
         raise AssertionError("Windows fixed-namespace convergence seam is not unique")
     factory = factories[0]
     compact = compact_cpp(factory)
     binder = compact_cpp(binders[0])
+    generic_helper = compact_cpp(generic_helpers[0])
     stage_helper = compact_cpp(stage_helpers[0])
     required = (
         "fixed_namespace_convergence_attempts",
@@ -6124,6 +6131,10 @@ def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
     ):
         raise AssertionError(
             "Windows stage retry classifier does not include its bounded access-denied case"
+        )
+    if "ERROR_ACCESS_DENIED" in generic_helper:
+        raise AssertionError(
+            "Windows generic retry classifier broadens access-denied retries"
         )
     if re.search(
         r"bind_windows_directory\s*\([^)]*retry_access_denied\s*=\s*true",
@@ -6234,6 +6245,18 @@ def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
             ),
         ),
         "stage-access-denied-classifier-body",
+    )
+    rejected(
+        replace_unique_bool_function_body(
+            source,
+            "fixed_namespace_error_is_retryable",
+            lambda body: body.replace(
+                "error == ERROR_ALREADY_EXISTS;",
+                "error == ERROR_ALREADY_EXISTS || error == ERROR_ACCESS_DENIED;",
+                1,
+            ),
+        ),
+        "generic-access-denied-classifier",
     )
     rejected(
         replace_unique_function_body(
