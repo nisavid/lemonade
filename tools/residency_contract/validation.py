@@ -13,15 +13,12 @@ from jsonschema import Draft202012Validator, validators
 from jsonschema.exceptions import SchemaError, ValidationError
 from referencing import Registry
 from referencing.jsonschema import DRAFT202012
+from residency_inventory.path import _PATH_INDEX, _PATH_SEGMENT, _path_tokens
 
 REQUIRED_KEYWORDS_FIELD = "x-residency-required-keywords"
 SUPPORTED_REQUIRED_KEYWORDS = frozenset(
     {"x-max-utf8-bytes", "x-nfc", "x-residency-assert"}
 )
-_PATH_SEGMENT = re.compile(
-    r"(?P<field>[A-Za-z_][A-Za-z0-9_]*)(?P<indexes>(?:\[(?:0|[1-9][0-9]*)\])*)"
-)
-_PATH_INDEX = re.compile(r"\[(0|[1-9][0-9]*)\]")
 _MISSING = object()
 
 
@@ -59,19 +56,6 @@ def _validate_utf8_bytes(
         return
     if len(encoded) > maximum:
         yield from _validation_error(f"string exceeds {maximum} UTF-8 bytes")
-
-
-def _path_tokens(path: str) -> tuple[str | int, ...] | None:
-    tokens: list[str | int] = []
-    for segment in path.split("."):
-        match = _PATH_SEGMENT.fullmatch(segment)
-        if match is None:
-            return None
-        tokens.append(match.group("field"))
-        tokens.extend(
-            int(index) for index in _PATH_INDEX.findall(match.group("indexes"))
-        )
-    return tuple(tokens)
 
 
 def _resolve_path(instance: Any, path: str) -> Any:

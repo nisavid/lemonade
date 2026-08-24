@@ -5722,7 +5722,8 @@ void require_fixed_namespace_publish_barrier_tracks_retries() {
     require(should_block_fixed_namespace_publish_attempt(2, false) &&
                 should_block_fixed_namespace_publish_attempt(7, false) &&
                 !should_block_fixed_namespace_publish_attempt(3, true),
-            "fixed-namespace publish barrier depends on the retry ordinal");
+            "fixed-namespace publish barrier did not block solely on an "
+            "unmoved stage, independent of the retry ordinal");
 }
 
 void require_native_fixed_namespace_factory() {

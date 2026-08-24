@@ -147,17 +147,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run durable residency tests on Windows
+        id: run-durable-residency-tests
         shell: PowerShell
         run: |
           ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Diagnose durable residency test failure on Windows
-        if: failure()
+        if: failure() && steps.run-durable-residency-tests.outcome == 'failure'
         shell: PowerShell
         run: |
-          & "$PWD/build/Release/test_durable_residency_journal.exe"
-          $diagnostic_exit = $LASTEXITCODE
+          $diagnostic_exit = 0
+          $diagnostics = @(
+            "$PWD/build/Release/test_durable_residency_journal.exe",
+            "$PWD/build/Release/test_durable_local_overlay.exe"
+          )
+          foreach ($diagnostic in $diagnostics) {
+            if (-not (Test-Path $diagnostic)) {
+              $diagnostic_exit = 1
+              continue
+            }
+            & $diagnostic
+            if ($LASTEXITCODE -ne 0) {
+              $diagnostic_exit = $LASTEXITCODE
+            }
+          }
           if ($diagnostic_exit -ne 0) { exit $diagnostic_exit }
 
       - name: Upload Lemonade Server Installers

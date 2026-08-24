@@ -18,6 +18,7 @@ from .contract import (
     require_string,
     require_string_list,
 )
+from .path import _path_tokens
 
 EXPECTED_REGISTRY_DIGEST = (
     "cb0fcefcd8fa46b4c600e19ae13144ff7192d43aedcb8cca0901eafd28f8d832"
@@ -1175,14 +1176,7 @@ def _validate_schema_predicate(
         field_name = require_string(predicate["field"], f"{label}.field")
         field_root = field_name
         if allow_field_path:
-            if (
-                re.fullmatch(
-                    r"[A-Za-z_][A-Za-z0-9_]*(?:\[(?:0|[1-9][0-9]*)\])*"
-                    r"(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[(?:0|[1-9][0-9]*)\])*)*",
-                    field_name,
-                )
-                is None
-            ):
+            if _path_tokens(field_name) is None:
                 fail(f"{label}.field is not a valid schema path")
             field_root = field_name.split(".", maxsplit=1)[0].split("[", maxsplit=1)[0]
         if field_root not in fields and field_root != "detail_schema_id":
