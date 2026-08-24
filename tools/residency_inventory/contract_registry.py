@@ -1151,6 +1151,14 @@ def _validate_schema_predicate(
     *,
     allow_field_path: bool = False,
 ) -> None:
+    def require_schema_path_root(path: str, path_label: str) -> str:
+        if _path_tokens(path) is None:
+            fail(f"{path_label} is not a valid schema path")
+        root = path.split(".", maxsplit=1)[0].split("[", maxsplit=1)[0]
+        if root not in fields and root != "detail_schema_id":
+            fail(f"{path_label} references unknown schema field {path}")
+        return root
+
     allowed = {
         "cause",
         "contexts",
@@ -1176,9 +1184,7 @@ def _validate_schema_predicate(
         field_name = require_string(predicate["field"], f"{label}.field")
         field_root = field_name
         if allow_field_path:
-            if _path_tokens(field_name) is None:
-                fail(f"{label}.field is not a valid schema path")
-            field_root = field_name.split(".", maxsplit=1)[0].split("[", maxsplit=1)[0]
+            field_root = require_schema_path_root(field_name, f"{label}.field")
         if field_root not in fields and field_root != "detail_schema_id":
             fail(f"{label}.field references unknown schema field {field_name}")
     if "selected_by" in predicate:
@@ -1201,7 +1207,8 @@ def _validate_schema_predicate(
             require_string_list(predicate[key], f"{label}.{key}")
     for key in ("equals_path", "less_than_path", "less_than_or_equal_path"):
         if key in predicate:
-            require_string(predicate[key], f"{label}.{key}")
+            path = require_string(predicate[key], f"{label}.{key}")
+            require_schema_path_root(path, f"{label}.{key}")
 
 
 def _schema_predicate_is_translatable(predicate: dict[str, Any]) -> bool:

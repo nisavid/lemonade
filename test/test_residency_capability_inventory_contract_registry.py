@@ -176,6 +176,30 @@ class ResidencyCapabilityInventoryContractRegistryTest(
 
         self.assert_invalid(self._run_cli(), "assert cannot include consequences")
 
+    def test_135_schema_assertion_rejects_unknown_comparison_root(self) -> None:
+        def use_unknown_comparison_root(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            conditional = registry["schema_registry"][
+                "deployment_local_overlay_object"
+            ]["conditionals"][0]
+            conditional["assert"]["less_than_path"] = "unknown_field"
+
+        self._replace_inventory(use_unknown_comparison_root)
+
+        self.assert_invalid(self._run_cli(), "references unknown schema field")
+
+    def test_136_schema_assertion_rejects_malformed_comparison_path(self) -> None:
+        def use_malformed_comparison_path(inventory: dict[str, object]) -> None:
+            registry = inventory["contract_registry"]
+            conditional = registry["schema_registry"][
+                "deployment_local_overlay_object"
+            ]["conditionals"][0]
+            conditional["assert"]["less_than_path"] = "not a schema path"
+
+        self._replace_inventory(use_malformed_comparison_path)
+
+        self.assert_invalid(self._run_cli(), "is not a valid schema path")
+
     def test_140_resource_vocabulary_is_closed(self) -> None:
         def add_writer_state(inventory: dict[str, object]) -> None:
             registry = inventory["contract_registry"]
