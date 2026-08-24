@@ -5664,12 +5664,17 @@ void require_native_immutable_objects() {
             "native immutable-object authority unlock failed");
 }
 
+constexpr bool should_block_fixed_namespace_publish_attempt(
+    std::size_t, bool moved) {
+    return !moved;
+}
+
 #ifdef _WIN32
 class FixedNamespacePublishBarrier final
     : public lemon::residency::detail::DurableFixedNamespaceConvergenceProbe {
 public:
     void after_publish_attempt(std::size_t attempt, bool moved) override {
-        if (attempt != 0 || moved) {
+        if (!should_block_fixed_namespace_publish_attempt(attempt, moved)) {
             return;
         }
         std::unique_lock lock(mutex_);
@@ -5699,6 +5704,13 @@ private:
     bool released_ = false;
 };
 #endif
+
+void require_fixed_namespace_publish_barrier_tracks_retries() {
+    require(should_block_fixed_namespace_publish_attempt(2, false) &&
+                should_block_fixed_namespace_publish_attempt(7, false) &&
+                !should_block_fixed_namespace_publish_attempt(3, true),
+            "fixed-namespace publish barrier depends on the retry ordinal");
+}
 
 void require_native_fixed_namespace_factory() {
     using lemon::residency::detail::make_platform_durable_file_adapter_in_fixed_namespace;
@@ -6644,6 +6656,7 @@ int main(int argc, char **argv) {
     require_native_relative_directory_binding();
     require_native_unbound_adapter_preserves_working_directory();
     require_native_immutable_objects();
+    require_fixed_namespace_publish_barrier_tracks_retries();
     require_native_fixed_namespace_factory();
     require_native_bounded_read_boundaries();
     require_native_literal_children();
