@@ -157,6 +157,8 @@ jobs:
         shell: PowerShell
         run: |
           & "$PWD/build/Release/test_durable_residency_journal.exe"
+          $diagnostic_exit = $LASTEXITCODE
+          if ($diagnostic_exit -ne 0) { exit $diagnostic_exit }
 
       - name: Upload Lemonade Server Installers
         id: upload-unsigned-msi

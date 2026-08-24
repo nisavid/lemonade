@@ -5674,21 +5674,26 @@ class FixedNamespacePublishBarrier final
     : public lemon::residency::detail::DurableFixedNamespaceConvergenceProbe {
 public:
     void after_publish_attempt(std::size_t attempt, bool moved) override {
-        if (!should_block_fixed_namespace_publish_attempt(attempt, moved)) {
+        const bool block =
+            should_block_fixed_namespace_publish_attempt(attempt, moved);
+        std::unique_lock lock(mutex_);
+        ++publish_attempts_;
+        if (block) {
+            ++blocked_publishers_;
+        }
+        condition_.notify_all();
+        if (!block) {
             return;
         }
-        std::unique_lock lock(mutex_);
-        ++blocked_publishers_;
-        condition_.notify_all();
         condition_.wait(lock, [&] { return released_; });
     }
 
-    bool wait_for_publishers(std::size_t expected,
-                             std::uint64_t timeout_milliseconds) {
+    bool wait_for_publish_attempts(std::size_t expected,
+                                   std::uint64_t timeout_milliseconds) {
         std::unique_lock lock(mutex_);
         return condition_.wait_for(
             lock, std::chrono::milliseconds(timeout_milliseconds),
-            [&] { return blocked_publishers_ == expected; });
+            [&] { return publish_attempts_ >= expected; });
     }
 
     void release() {
@@ -5700,6 +5705,7 @@ public:
 private:
     std::mutex mutex_;
     std::condition_variable condition_;
+    std::size_t publish_attempts_ = 0;
     std::size_t blocked_publishers_ = 0;
     bool released_ = false;
 };
@@ -5809,9 +5815,9 @@ void require_native_fixed_namespace_factory() {
                         convergence_parent.path(), child_name, barrier);
             });
         }
-        require(barrier.wait_for_publishers(converged_adapters.size(), 5000),
-                "Windows concurrent creators did not reach the held-stage "
-                "publication conflict");
+        require(barrier.wait_for_publish_attempts(1, 5000),
+                "Windows concurrent creators did not reach a held-stage "
+                "publication attempt");
         require(::CloseHandle(held_stage) != 0,
                 "Windows convergence stage handle did not close");
         barrier.release();
@@ -5821,6 +5827,8 @@ void require_native_fixed_namespace_factory() {
 
         std::optional<std::string> winning_identity;
         for (auto &adapter : converged_adapters) {
+            require(adapter != nullptr,
+                    "Windows held-stage creator returned no adapter");
             require(adapter->lock_authority().succeeded() &&
                         adapter->preflight_capabilities().succeeded(),
                     "Windows held-stage creator did not converge on the "

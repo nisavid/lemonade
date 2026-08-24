@@ -6073,20 +6073,66 @@ def require_fixed_namespace_factory_contract(
 
 def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
     factories = function_bodies(source, "make_windows_fixed_namespace_adapter")
-    if len(factories) != 1:
+    binders = function_bodies(source, "bind_windows_directory")
+    stage_helpers = [
+        body
+        for body in function_bodies(source, "fixed_namespace_stage_error_is_retryable")
+        if "ERROR_ACCESS_DENIED" in body
+    ]
+    if len(factories) != 1 or len(binders) != 1 or len(stage_helpers) != 1:
         raise AssertionError("Windows fixed-namespace convergence seam is not unique")
     factory = factories[0]
     compact = compact_cpp(factory)
+    binder = compact_cpp(binders[0])
+    stage_helper = compact_cpp(stage_helpers[0])
     required = (
         "fixed_namespace_convergence_attempts",
         "yield_fixed_namespace_convergence",
         "WindowsDirectoryBindStatus::Retry",
         "WindowsStageCleanupStatus::Retry",
+        "fixed_namespace_stage_error_is_retryable(error)",
         "fixed_namespace_move_error_is_retryable(move_error)",
         "after_publish_attempt(attempt,moved)",
     )
     if not all(token in compact for token in required):
         raise AssertionError("Windows fixed namespace omits bounded convergence")
+    if compact.count("fixed_namespace_stage_error_is_retryable(error)") < 2:
+        raise AssertionError(
+            "Windows fixed namespace does not classify stage errors narrowly"
+        )
+    if compact.count("bind_windows_directory(stage,true)") < 2:
+        raise AssertionError(
+            "Windows fixed namespace does not retry access-denied stage binds"
+        )
+    if (
+        "bind_windows_directory(parent_directory,true)" in compact
+        or "bind_windows_directory(child,true)" in compact
+    ):
+        raise AssertionError(
+            "Windows fixed namespace broadens access-denied retries beyond stages"
+        )
+    if (
+        "retry_access_denied" not in binder
+        or "retry_access_denied&&error==ERROR_ACCESS_DENIED" not in binder
+    ):
+        raise AssertionError(
+            "Windows directory binding lacks stage-only access-denied policy"
+        )
+    if (
+        "fixed_namespace_error_is_retryable(error)" not in stage_helper
+        or "error==ERROR_ACCESS_DENIED" not in stage_helper
+    ):
+        raise AssertionError(
+            "Windows stage retry classifier does not include its bounded access-denied case"
+        )
+    if re.search(
+        r"bind_windows_directory\s*\([^)]*retry_access_denied\s*=\s*true",
+        source,
+        re.DOTALL,
+    ):
+        raise AssertionError(
+            "Windows directory binding defaults to broad access-denied retries"
+        )
     if (
         re.search(
             r"for\s*\([^;]*\battempt\b[^;]*;\s*"
@@ -6142,6 +6188,52 @@ def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
             lambda body: body.replace("yield_fixed_namespace_convergence();", ""),
         ),
         "busy-spin",
+    )
+    rejected(
+        replace_unique_function_body(
+            source,
+            "make_windows_fixed_namespace_adapter",
+            lambda body: body.replace(
+                "fixed_namespace_stage_error_is_retryable(error)",
+                "fixed_namespace_error_is_retryable(error)",
+            ),
+        ),
+        "stage-access-denied-classifier",
+    )
+    rejected(
+        replace_unique_function_body(
+            source,
+            "make_windows_fixed_namespace_adapter",
+            lambda body: body.replace(
+                "bind_windows_directory(stage, true)",
+                "bind_windows_directory(stage)",
+            ),
+        ),
+        "stage-bind-access-denied-policy",
+    )
+    rejected(
+        replace_unique_function_body(
+            source,
+            "bind_windows_directory",
+            lambda body: body.replace(
+                "retry_access_denied && error == ERROR_ACCESS_DENIED",
+                "true",
+                1,
+            ),
+        ),
+        "broad-access-denied-bind-policy",
+    )
+    rejected(
+        replace_unique_bool_function_body(
+            source,
+            "fixed_namespace_stage_error_is_retryable",
+            lambda body: body.replace(
+                "error == ERROR_ACCESS_DENIED",
+                "false",
+                1,
+            ),
+        ),
+        "stage-access-denied-classifier-body",
     )
     rejected(
         replace_unique_function_body(

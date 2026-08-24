@@ -463,9 +463,13 @@ bool fixed_namespace_error_is_retryable(DWORD error) {
            error == ERROR_ALREADY_EXISTS;
 }
 
-bool fixed_namespace_move_error_is_retryable(DWORD error) {
+bool fixed_namespace_stage_error_is_retryable(DWORD error) {
     return fixed_namespace_error_is_retryable(error) ||
            error == ERROR_ACCESS_DENIED;
+}
+
+bool fixed_namespace_move_error_is_retryable(DWORD error) {
+    return fixed_namespace_stage_error_is_retryable(error);
 }
 
 void yield_fixed_namespace_convergence() {
@@ -480,7 +484,8 @@ struct WindowsDirectoryBinding {
 };
 
 WindowsDirectoryBinding
-bind_windows_directory(const std::filesystem::path &directory) {
+bind_windows_directory(const std::filesystem::path &directory,
+                       bool retry_access_denied = false) {
     const auto handle = ::CreateFileW(
         directory.c_str(), FILE_READ_ATTRIBUTES | SYNCHRONIZE,
         FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
@@ -490,7 +495,8 @@ bind_windows_directory(const std::filesystem::path &directory) {
         const auto status =
             error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND
                 ? WindowsDirectoryBindStatus::NotFound
-                : fixed_namespace_error_is_retryable(error)
+                : (fixed_namespace_error_is_retryable(error) ||
+                   (retry_access_denied && error == ERROR_ACCESS_DENIED))
                       ? WindowsDirectoryBindStatus::Retry
                       : WindowsDirectoryBindStatus::Unsafe;
         return {status,
@@ -1694,7 +1700,7 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
                        (L"." + child_name + L".directory-stage");
 
     const auto cleanup_stage = [&](std::optional<FILE_ID_INFO> expected) {
-        auto bound_stage = bind_windows_directory(stage);
+        auto bound_stage = bind_windows_directory(stage, true);
         if (bound_stage.status == WindowsDirectoryBindStatus::NotFound) {
             return WindowsStageCleanupStatus::Clean;
         }
@@ -1720,7 +1726,7 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
         if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
             return WindowsStageCleanupStatus::Clean;
         }
-        return fixed_namespace_error_is_retryable(error)
+        return fixed_namespace_stage_error_is_retryable(error)
                    ? WindowsStageCleanupStatus::Retry
                    : WindowsStageCleanupStatus::Unsafe;
     };
@@ -1771,14 +1777,14 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
         if (!::CreateDirectoryW(stage.c_str(), nullptr)) {
             const auto error = ::GetLastError();
             if (error != ERROR_ALREADY_EXISTS && error != ERROR_FILE_EXISTS) {
-                if (fixed_namespace_error_is_retryable(error)) {
+                if (fixed_namespace_stage_error_is_retryable(error)) {
                     yield_fixed_namespace_convergence();
                     continue;
                 }
                 return reject();
             }
         }
-        auto bound_stage = bind_windows_directory(stage);
+        auto bound_stage = bind_windows_directory(stage, true);
         if (bound_stage.status == WindowsDirectoryBindStatus::Retry ||
             bound_stage.status == WindowsDirectoryBindStatus::NotFound) {
             yield_fixed_namespace_convergence();
