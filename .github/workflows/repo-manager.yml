@@ -19,6 +19,7 @@ permissions:
 
 jobs:
   repo-manager:
+    if: ${{ github.repository == 'lemonade-sdk/lemonade' }}
     runs-on: [self-hosted, linux, repo-manager]
     timeout-minutes: 30
     env:
