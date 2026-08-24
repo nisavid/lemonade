@@ -463,6 +463,11 @@ bool fixed_namespace_error_is_retryable(DWORD error) {
            error == ERROR_ALREADY_EXISTS;
 }
 
+bool fixed_namespace_move_error_is_retryable(DWORD error) {
+    return fixed_namespace_error_is_retryable(error) ||
+           error == ERROR_ACCESS_DENIED;
+}
+
 void yield_fixed_namespace_convergence() {
     ::Sleep(1);
 }
@@ -1827,7 +1832,8 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
         }
         if (published_child.status == WindowsDirectoryBindStatus::Retry ||
             (published_child.status == WindowsDirectoryBindStatus::NotFound &&
-             (moved || fixed_namespace_error_is_retryable(move_error)))) {
+             (moved ||
+              fixed_namespace_move_error_is_retryable(move_error)))) {
             yield_fixed_namespace_convergence();
             continue;
         }
