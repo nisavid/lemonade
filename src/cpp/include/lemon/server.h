@@ -7,16 +7,18 @@
 #define CPPHTTPLIB_THREAD_POOL_COUNT 64
 #endif
 
-#include <string>
-#include <thread>
-#include <memory>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
+#include <string>
+#include <thread>
 #include <vector>
 #include <httplib.h>
 #include "runtime_config.h"
@@ -25,6 +27,7 @@
 #include "alias_manager.h"
 #include "model_manager.h"
 #include "lemon/model_load_tracker.h"
+#include "lemon/residency/profiling_transaction.h"
 #include "backend_manager.h"
 #include "cloud_provider_registry.h"
 #include "upgradable_http_server.h"
@@ -73,6 +76,16 @@ public:
     bool startup_failed() const;
 
 private:
+    void begin_residency_lifecycle_change();
+
+    // This trusted internal seam does not publish. Its caller must be a
+    // Server-owned provider that binds every observation attestation before
+    // the result reaches durable overlay activation or a transport.
+    residency::ProfilingTransactionResult run_residency_profiling_transaction(
+        std::string transaction_id,
+        residency::ProfilingTransaction::Capture capture,
+        std::atomic<bool> *cancel = nullptr);
+
     std::string resolve_host_to_ip(int ai_family, const std::string& host);
     void setup_routes(httplib::Server &web_server);
     void setup_static_files(httplib::Server &web_server);
@@ -382,6 +395,7 @@ private:
     std::unique_ptr<UpgradableFrontServer> http_front_v6_;
 
     std::unique_ptr<Router> router_;
+    std::unique_ptr<residency::ProfilingTransaction> profiling_transaction_;
     std::unique_ptr<AliasManager> alias_manager_;
     std::unique_ptr<ModelManager> model_manager_;
     std::unique_ptr<BackendManager> backend_manager_;
@@ -392,11 +406,17 @@ private:
     std::mutex downloads_mutex_;
     std::map<std::string, std::shared_ptr<DownloadJob>> download_jobs_;
 
-    bool running_;
+    std::atomic<bool> running_{false};
     bool startup_failed_ = false;
     std::atomic<bool> shutdown_requested_{false};
     std::atomic<bool> rebind_requested_{false};
+    std::atomic<bool> profiling_accepting_{false};
+    std::atomic<uint64_t> profiling_lifecycle_epoch_{0};
     std::atomic<bool> metrics_access_logged_{false};
+    std::mutex lifecycle_mutex_;
+    std::mutex stop_mutex_;
+    std::condition_variable profiling_admission_cv_;
+    std::size_t profiling_admissions_ = 0;
 
     std::string api_key_;
     std::string admin_api_key_;
