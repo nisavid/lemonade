@@ -2447,6 +2447,7 @@ void Server::run() {
             http_v6_thread_.join();
 
         bool should_rebind = false;
+        bool terminal = false;
         uint64_t rebind_epoch = 0;
         {
             std::lock_guard<std::mutex> transition_lock(stop_mutex_);
@@ -2457,9 +2458,13 @@ void Server::run() {
                 rebind_epoch = profiling_lifecycle_epoch_.load();
             if (!should_rebind) {
                 profiling_accepting_.store(false);
-                running_ = false;
-                break;  // Normal exit or shutdown won the lifecycle race.
+                shutdown_requested_ = true;
+                terminal = true;
             }
+        }
+        if (terminal) {
+            stop();
+            break;  // Normal exit or shutdown won the lifecycle race.
         }
 
         if (profiling_transaction_ &&
