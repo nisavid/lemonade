@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 from residency_capability_inventory_cli_case import ResidencyCapabilityInventoryCliCase
 
 
@@ -199,6 +201,37 @@ class ResidencyCapabilityInventoryContractRegistryTest(
         self._replace_inventory(use_malformed_comparison_path)
 
         self.assert_invalid(self._run_cli(), "is not a valid schema path")
+
+    def test_137_schema_if_rejects_path_comparisons(self) -> None:
+        baseline = copy.deepcopy(self.inventory)
+        for key in ("equals_path", "less_than_path", "less_than_or_equal_path"):
+            with self.subTest(key=key):
+                self.inventory = copy.deepcopy(baseline)
+                conditional = self.inventory["contract_registry"]["schema_registry"][
+                    "operation_revision"
+                ]["conditionals"][0]
+                conditional["if"][key] = "phase"
+                self._write_inventory()
+
+                self.assert_invalid(
+                    self._run_cli(), "path comparisons require an assert predicate"
+                )
+
+    def test_138_schema_unless_rejects_path_comparisons(self) -> None:
+        baseline = copy.deepcopy(self.inventory)
+        for key in ("equals_path", "less_than_path", "less_than_or_equal_path"):
+            with self.subTest(key=key):
+                self.inventory = copy.deepcopy(baseline)
+                conditional = self.inventory["contract_registry"]["schema_registry"][
+                    "operation_revision"
+                ]["conditionals"][0]
+                conditional["unless"] = conditional.pop("if")
+                conditional["unless"][key] = "phase"
+                self._write_inventory()
+
+                self.assert_invalid(
+                    self._run_cli(), "path comparisons require an assert predicate"
+                )
 
     def test_140_resource_vocabulary_is_closed(self) -> None:
         def add_writer_state(inventory: dict[str, object]) -> None:

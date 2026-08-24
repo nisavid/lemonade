@@ -1151,6 +1151,12 @@ def _validate_schema_predicate(
     *,
     allow_field_path: bool = False,
 ) -> None:
+    path_comparison_keys = (
+        "equals_path",
+        "less_than_path",
+        "less_than_or_equal_path",
+    )
+
     def require_schema_path_root(path: str, path_label: str) -> str:
         if _path_tokens(path) is None:
             fail(f"{path_label} is not a valid schema path")
@@ -1180,6 +1186,10 @@ def _validate_schema_predicate(
     unknown = set(predicate) - allowed
     if unknown:
         fail(f"{label} has unknown predicate fields: {sorted(unknown)}")
+    if not allow_field_path:
+        unsupported = set(predicate).intersection(path_comparison_keys)
+        if unsupported:
+            fail(f"{label} path comparisons require an assert predicate")
     if "field" in predicate:
         field_name = require_string(predicate["field"], f"{label}.field")
         field_root = field_name
@@ -1205,7 +1215,7 @@ def _validate_schema_predicate(
     for key in ("in", "not_in", "result_not_in"):
         if key in predicate:
             require_string_list(predicate[key], f"{label}.{key}")
-    for key in ("equals_path", "less_than_path", "less_than_or_equal_path"):
+    for key in path_comparison_keys:
         if key in predicate:
             path = require_string(predicate[key], f"{label}.{key}")
             require_schema_path_root(path, f"{label}.{key}")
