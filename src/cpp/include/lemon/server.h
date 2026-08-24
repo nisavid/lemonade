@@ -21,19 +21,19 @@
 #include <thread>
 #include <vector>
 #include <httplib.h>
-#include "runtime_config.h"
-#include "router.h"
-#include "routing_policy.h"
 #include "alias_manager.h"
-#include "model_manager.h"
-#include "lemon/model_load_tracker.h"
-#include "lemon/residency/profiling_transaction.h"
 #include "backend_manager.h"
 #include "cloud_provider_registry.h"
+#include "lemon/model_load_tracker.h"
+#include "lemon/residency/profiling_transaction.h"
+#include "lemon/system_metrics_platform.h"
+#include "lemon/utils/network_beacon.h"
+#include "model_manager.h"
+#include "router.h"
+#include "routing_policy.h"
+#include "runtime_config.h"
 #include "upgradable_http_server.h"
 #include "websocket_server.h"
-#include "lemon/utils/network_beacon.h"
-#include "lemon/system_metrics_platform.h"
 
 namespace lemon {
 

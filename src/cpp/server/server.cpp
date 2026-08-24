@@ -36,8 +36,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
-#include <iostream>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <fstream>
 #include <map>
@@ -2213,6 +2213,18 @@ void Server::setup_http_logger(httplib::Server &web_server) {
 void Server::run() {
     std::string host = config_->host();
     LOG(INFO, "Server") << "Starting HTTP server on " << host << ":" << port_ << std::endl;
+
+    // Recreate the WebSocket endpoint from the current host before a stopped
+    // server starts again; a host update received during shutdown cannot
+    // replace the serving object until the serving thread has returned.
+    {
+        std::lock_guard<std::mutex> transition_lock(stop_mutex_);
+        if (websocket_server_) {
+            websocket_server_->stop();
+        }
+        websocket_server_ = std::make_unique<WebSocketServer>(
+            router_.get(), config_->host(), config_->websocket_port());
+    }
 
     std::string ipv4 = resolve_host_to_ip(AF_INET, host);
     std::string ipv6 = resolve_host_to_ip(AF_INET6, host);
@@ -7608,9 +7620,9 @@ void Server::handle_jobs_delete(const httplib::Request& req, httplib::Response& 
 void Server::handle_shutdown(const httplib::Request& req, httplib::Response& res) {
     LOG(INFO, "Server") << "Shutdown request received" << std::endl;
 
-    // Close profiling admission before the asynchronous stop path tears down
-    // Router. A capture provider that owns this request thread cannot be
-    // waited on here; stop() performs the cleanup after the callback returns.
+    // Close profiling admission before the serving thread tears down Router.
+    // A capture provider that owns this request thread cannot be waited on here;
+    // stop() completes cleanup after the callback returns.
     set_shutdown_requested(true);
     {
         std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
@@ -7840,9 +7852,22 @@ void Server::apply_config_side_effects(const json& applied_changes) {
             std::lock_guard<std::mutex> transition_lock(stop_mutex_);
             {
                 std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
-                if (!running_.load() || shutdown_requested_.load()) {
+                if (!running_.load()) {
+                    if (websocket_server_) {
+                        websocket_server_->stop();
+                    }
+                    websocket_server_ = std::make_unique<WebSocketServer>(
+                        router_.get(),
+                        config_->host(),
+                        config_->websocket_port());
                     LOG(INFO, "Server")
                         << "Host change will apply on the next server run"
+                        << std::endl;
+                    continue;
+                }
+                if (shutdown_requested_.load()) {
+                    LOG(INFO, "Server")
+                        << "Host change deferred while server shutdown is in progress"
                         << std::endl;
                     continue;
                 }
