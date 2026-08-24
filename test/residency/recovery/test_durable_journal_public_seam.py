@@ -6082,6 +6082,7 @@ def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
         "yield_fixed_namespace_convergence",
         "WindowsDirectoryBindStatus::Retry",
         "WindowsStageCleanupStatus::Retry",
+        "fixed_namespace_move_error_is_retryable(move_error)",
         "after_publish_attempt(attempt,moved)",
     )
     if not all(token in compact for token in required):
@@ -6141,6 +6142,17 @@ def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
             lambda body: body.replace("yield_fixed_namespace_convergence();", ""),
         ),
         "busy-spin",
+    )
+    rejected(
+        replace_unique_function_body(
+            source,
+            "make_windows_fixed_namespace_adapter",
+            lambda body: body.replace(
+                "fixed_namespace_move_error_is_retryable(move_error)",
+                "fixed_namespace_error_is_retryable(move_error)",
+            ),
+        ),
+        "move-access-denied-classifier",
     )
 
     def skip_winner_rebind(body: str) -> str:
