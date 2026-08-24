@@ -2519,6 +2519,14 @@ void Server::run() {
                 rebind_requested_ = false;
         }
     }
+
+    // Keep shutdown latched while an external stop is still unwinding the
+    // serving thread; only the serving thread may reopen a completed run.
+    {
+        std::lock_guard<std::mutex> transition_lock(stop_mutex_);
+        std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+        shutdown_requested_ = false;
+    }
 }
 
 
@@ -2692,10 +2700,6 @@ void Server::stop() {
         pinned_model_loading_thread_.join();
     }
 
-    {
-        std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
-        shutdown_requested_ = false;  // Permit an explicit later run() restart.
-    }
 }
 
 // Generates an actionable error message for model loading failures.
