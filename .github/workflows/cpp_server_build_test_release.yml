@@ -152,6 +152,12 @@ jobs:
           ctest --test-dir build -C Release --no-tests=error --output-on-failure -R "^(ResidencyDurableJournal|ResidencyDurableLocalOverlay)$"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Diagnose durable residency test failure on Windows
+        if: failure()
+        shell: PowerShell
+        run: |
+          & "$PWD/build/Release/test_durable_residency_journal.exe"
+
       - name: Upload Lemonade Server Installers
         id: upload-unsigned-msi
         uses: actions/upload-artifact@v7
