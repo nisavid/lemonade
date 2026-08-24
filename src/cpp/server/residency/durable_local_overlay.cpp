@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -34,8 +35,10 @@ LocalOverlayStoreResult store_result(LocalOverlayStoreStatus status) {
     return {status, std::nullopt};
 }
 
-std::optional<std::string>
-deployment_id_for_storage(std::string_view storage_identity) {
+using Sha256Digest = std::array<unsigned char, 32>;
+
+std::optional<Sha256Digest>
+sha256_digest(std::initializer_list<std::string_view> parts) {
     const auto *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     if (info == nullptr) {
         return std::nullopt;
@@ -43,26 +46,29 @@ deployment_id_for_storage(std::string_view storage_identity) {
 
     mbedtls_md_context_t context;
     mbedtls_md_init(&context);
-    std::array<unsigned char, 32> digest{};
-    const auto directory = detail::directory_identity(storage_identity);
-    const bool failed =
-        mbedtls_md_setup(&context, info, 0) != 0 ||
-        mbedtls_md_starts(&context) != 0 ||
-        mbedtls_md_update(
-            &context,
-            reinterpret_cast<const unsigned char *>(
-                deployment_identity_domain),
-            sizeof(deployment_identity_domain) - 1) != 0 ||
-        mbedtls_md_update(
-            &context,
-            reinterpret_cast<const unsigned char *>(directory.data()),
-            directory.size()) != 0 ||
-        mbedtls_md_finish(&context, digest.data()) != 0;
+    Sha256Digest digest{};
+    bool failed = mbedtls_md_setup(&context, info, 0) != 0 ||
+                  mbedtls_md_starts(&context) != 0;
+    for (const auto part : parts) {
+        if (!failed &&
+            mbedtls_md_update(
+                &context,
+                reinterpret_cast<const unsigned char *>(part.data()),
+                part.size()) != 0) {
+            failed = true;
+        }
+    }
+    if (!failed && mbedtls_md_finish(&context, digest.data()) != 0) {
+        failed = true;
+    }
     mbedtls_md_free(&context);
     if (failed) {
         return std::nullopt;
     }
+    return digest;
+}
 
+std::string hex_encode(const Sha256Digest &digest) {
     static constexpr char hex[] = "0123456789abcdef";
     std::string result;
     result.reserve(64);
@@ -73,36 +79,21 @@ deployment_id_for_storage(std::string_view storage_identity) {
     return result;
 }
 
+std::optional<std::string>
+deployment_id_for_storage(std::string_view storage_identity) {
+    const auto directory = detail::directory_identity(storage_identity);
+    const auto digest = sha256_digest(
+        {std::string_view(deployment_identity_domain,
+                          sizeof(deployment_identity_domain) - 1),
+         directory});
+    return digest.has_value() ? std::optional<std::string>(hex_encode(*digest))
+                              : std::nullopt;
+}
+
 std::optional<std::string> raw_sha256(std::string_view bytes) {
-    const auto *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (info == nullptr) {
-        return std::nullopt;
-    }
-
-    mbedtls_md_context_t context;
-    mbedtls_md_init(&context);
-    std::array<unsigned char, 32> digest{};
-    const bool failed =
-        mbedtls_md_setup(&context, info, 0) != 0 ||
-        mbedtls_md_starts(&context) != 0 ||
-        mbedtls_md_update(
-            &context,
-            reinterpret_cast<const unsigned char *>(bytes.data()),
-            bytes.size()) != 0 ||
-        mbedtls_md_finish(&context, digest.data()) != 0;
-    mbedtls_md_free(&context);
-    if (failed) {
-        return std::nullopt;
-    }
-
-    static constexpr char hex[] = "0123456789abcdef";
-    std::string result;
-    result.reserve(64);
-    for (const auto byte : digest) {
-        result.push_back(hex[(byte >> 4) & 0x0f]);
-        result.push_back(hex[byte & 0x0f]);
-    }
-    return result;
+    const auto digest = sha256_digest({bytes});
+    return digest.has_value() ? std::optional<std::string>(hex_encode(*digest))
+                              : std::nullopt;
 }
 
 LocalOverlayStoreStatus
@@ -360,6 +351,16 @@ public:
         auto released = adapter->unlock_authority();
         lock_held = false;
         return released;
+    }
+
+    LocalOverlayStoreResult release_with_status(
+        std::string_view identity, LocalOverlayStoreStatus status) {
+        const auto unlocked = release_lock();
+        if (!unlocked.succeeded()) {
+            detail::fence_identity(identity);
+            return store_result(LocalOverlayStoreStatus::RecoveryRequired);
+        }
+        return store_result(status);
     }
 
     LocalOverlayStoreStatus inspect_namespace(bool &root_present) {
@@ -840,12 +841,7 @@ LocalOverlayStore::snapshot(TrustedLocalOverlayReplayFloor floor) {
         return store_result(acquired);
     }
     auto release_with_status = [&](LocalOverlayStoreStatus status) {
-        const auto unlocked = impl_->release_lock();
-        if (!unlocked.succeeded()) {
-            detail::fence_identity(identity);
-            return store_result(LocalOverlayStoreStatus::RecoveryRequired);
-        }
-        return store_result(status);
+        return impl_->release_with_status(identity, status);
     };
     const auto retained_fence = detail::identity_fence(identity);
     bool root_present = false;
@@ -941,12 +937,7 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
         return store_result(acquired);
     }
     auto release_with_status = [&](LocalOverlayStoreStatus status) {
-        const auto unlocked = impl_->release_lock();
-        if (!unlocked.succeeded()) {
-            detail::fence_identity(identity);
-            return store_result(LocalOverlayStoreStatus::RecoveryRequired);
-        }
-        return store_result(status);
+        return impl_->release_with_status(identity, status);
     };
     if (identity != expected_state->storage_identity) {
         const auto status =

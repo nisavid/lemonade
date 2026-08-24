@@ -43,6 +43,28 @@ struct ObservationBundle {
     std::string release_sha256;
 };
 
+void persist_node(
+    JournalTestStorage &storage, const ObservationBundle &observations,
+    const ParsedProfilingInputEnvelope &input,
+    const ParsedLocalOverlayObject &overlay,
+    const ParsedOverlayActivationRoot &root) {
+    storage.overwrite_immutable_object(observations.baseline_sha256,
+                                       observations.baseline);
+    storage.overwrite_immutable_object(observations.workload_sha256,
+                                       observations.workload);
+    storage.overwrite_immutable_object(observations.release_sha256,
+                                       observations.release);
+    storage.overwrite_immutable_object(
+        std::string(input.checksum_sha256()),
+        std::string(input.canonical_bytes()));
+    storage.overwrite_immutable_object(
+        std::string(overlay.checksum_sha256()),
+        std::string(overlay.canonical_bytes()));
+    storage.overwrite_immutable_object(
+        std::string(root.checksum_sha256()),
+        std::string(root.canonical_bytes()));
+}
+
 ObservationBundle observations_for(std::uint64_t sequence) {
     switch (sequence) {
     case 1:
@@ -1165,28 +1187,10 @@ void require_historic_under_bound_overlay_fails_closed() {
         deployment_id, 2, std::string(first_root.checksum_sha256()),
         second_overlay, 2, '5', "2026-08-23T10:04:00Z");
 
-    auto persist_node = [&](const ObservationBundle &observations,
-                            const ParsedProfilingInputEnvelope &input,
-                            const ParsedLocalOverlayObject &overlay,
-                            const ParsedOverlayActivationRoot &root) {
-        storage.overwrite_immutable_object(observations.baseline_sha256,
-                                           observations.baseline);
-        storage.overwrite_immutable_object(observations.workload_sha256,
-                                           observations.workload);
-        storage.overwrite_immutable_object(observations.release_sha256,
-                                           observations.release);
-        storage.overwrite_immutable_object(
-            std::string(input.checksum_sha256()),
-            std::string(input.canonical_bytes()));
-        storage.overwrite_immutable_object(
-            std::string(overlay.checksum_sha256()),
-            std::string(overlay.canonical_bytes()));
-        storage.overwrite_immutable_object(
-            std::string(root.checksum_sha256()),
-            std::string(root.canonical_bytes()));
-    };
-    persist_node(first_observations, first_input, first_overlay, first_root);
-    persist_node(second_observations, second_input, second_overlay, second_root);
+    persist_node(storage, first_observations, first_input, first_overlay,
+                 first_root);
+    persist_node(storage, second_observations, second_input, second_overlay,
+                 second_root);
     storage.overwrite_fixed_child_bytes(
         FixedAuthorityChild::Root,
         std::string(second_root.canonical_bytes()));
@@ -1229,28 +1233,10 @@ void require_historic_freshness_boundary_fails_closed() {
         deployment_id, 2, std::string(first_root.checksum_sha256()),
         second_overlay, 2, '5', "2026-08-23T10:06:00Z");
 
-    auto persist_node = [&](const ObservationBundle &observations,
-                            const ParsedProfilingInputEnvelope &input,
-                            const ParsedLocalOverlayObject &overlay,
-                            const ParsedOverlayActivationRoot &root) {
-        storage.overwrite_immutable_object(observations.baseline_sha256,
-                                           observations.baseline);
-        storage.overwrite_immutable_object(observations.workload_sha256,
-                                           observations.workload);
-        storage.overwrite_immutable_object(observations.release_sha256,
-                                           observations.release);
-        storage.overwrite_immutable_object(
-            std::string(input.checksum_sha256()),
-            std::string(input.canonical_bytes()));
-        storage.overwrite_immutable_object(
-            std::string(overlay.checksum_sha256()),
-            std::string(overlay.canonical_bytes()));
-        storage.overwrite_immutable_object(
-            std::string(root.checksum_sha256()),
-            std::string(root.canonical_bytes()));
-    };
-    persist_node(first_observations, first_input, first_overlay, first_root);
-    persist_node(second_observations, second_input, second_overlay, second_root);
+    persist_node(storage, first_observations, first_input, first_overlay,
+                 first_root);
+    persist_node(storage, second_observations, second_input, second_overlay,
+                 second_root);
     storage.overwrite_fixed_child_bytes(
         FixedAuthorityChild::Root,
         std::string(second_root.canonical_bytes()));
@@ -1291,28 +1277,10 @@ void require_historic_activation_freshness_boundary_fails_closed() {
         deployment_id, 2, std::string(first_root.checksum_sha256()),
         second_overlay, 2, '5', "2026-08-23T10:06:00Z");
 
-    auto persist_node = [&](const ObservationBundle &observations,
-                            const ParsedProfilingInputEnvelope &input,
-                            const ParsedLocalOverlayObject &overlay,
-                            const ParsedOverlayActivationRoot &root) {
-        storage.overwrite_immutable_object(observations.baseline_sha256,
-                                           observations.baseline);
-        storage.overwrite_immutable_object(observations.workload_sha256,
-                                           observations.workload);
-        storage.overwrite_immutable_object(observations.release_sha256,
-                                           observations.release);
-        storage.overwrite_immutable_object(
-            std::string(input.checksum_sha256()),
-            std::string(input.canonical_bytes()));
-        storage.overwrite_immutable_object(
-            std::string(overlay.checksum_sha256()),
-            std::string(overlay.canonical_bytes()));
-        storage.overwrite_immutable_object(
-            std::string(root.checksum_sha256()),
-            std::string(root.canonical_bytes()));
-    };
-    persist_node(first_observations, first_input, first_overlay, first_root);
-    persist_node(second_observations, second_input, second_overlay, second_root);
+    persist_node(storage, first_observations, first_input, first_overlay,
+                 first_root);
+    persist_node(storage, second_observations, second_input, second_overlay,
+                 second_root);
     storage.overwrite_fixed_child_bytes(
         FixedAuthorityChild::Root,
         std::string(second_root.canonical_bytes()));

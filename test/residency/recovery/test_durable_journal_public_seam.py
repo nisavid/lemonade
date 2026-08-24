@@ -117,6 +117,19 @@ def native_adapter_source() -> Path:
     return ADAPTER_POSIX
 
 
+PUBLIC_SEAM_SOURCES = (
+    JOURNAL_SOURCE,
+    CLAIMS_SOURCE,
+    DURABLE_SOURCE,
+    DURABLE_LOCAL_OVERLAY_SOURCE,
+    LOCAL_OVERLAY_SOURCE,
+    ADAPTER_COMMON,
+    native_adapter_source(),
+    TEST_SUPPORT,
+    PUBLIC_SEAM,
+)
+
+
 def compiler_command(
     output: Path,
     *,
@@ -132,17 +145,7 @@ def compiler_command(
     nlohmann_include = environment.get("NLOHMANN_JSON_INCLUDE_DIR")
     mbedtls_include = environment.get("MBEDTLS_INCLUDE_DIR")
     mbedcrypto_library = environment.get("MBEDCRYPTO_LIBRARY")
-    sources = [
-        JOURNAL_SOURCE,
-        CLAIMS_SOURCE,
-        DURABLE_SOURCE,
-        DURABLE_LOCAL_OVERLAY_SOURCE,
-        LOCAL_OVERLAY_SOURCE,
-        ADAPTER_COMMON,
-        native_adapter_source(),
-        TEST_SUPPORT,
-        PUBLIC_SEAM,
-    ]
+    sources = list(PUBLIC_SEAM_SOURCES)
 
     if executable in {"cl", "cl.exe", "clang-cl", "clang-cl.exe"}:
         command = [
@@ -5345,7 +5348,7 @@ def replace_unique_function_body(
     transform,
 ) -> str:
     declaration = re.compile(
-        rf"\b{re.escape(function)}\s*\([^;{{}}]*\)\s*"
+        rf"(?<!\()\b{re.escape(function)}\s*\([^;{{}}]*\)\s*"
         r"(?:const\s*)?(?:noexcept\s*)?(?:override\s*)?\{"
     )
     matches = tuple(declaration.finditer(source))
@@ -5416,6 +5419,15 @@ def compact_cpp(expression: str) -> str:
 
 def cpp_object_expression(expression: str) -> str:
     return re.sub(r"\.(?:data|c_str)\(\)$", "", compact_cpp(expression))
+
+
+def propagated_verifier_result_pattern(platform: str) -> str:
+    if platform == "posix":
+        return (
+            r"\breturn\s+validate_completed_mutation\s*\(\s*"
+            r"verify_replaced_target\s*\([^;]*\)\s*\)\s*;"
+        )
+    return r"\breturn\s+verify_replaced_target\s*\([^;]*\)\s*;"
 
 
 def require_post_replace_verification(
@@ -5575,12 +5587,7 @@ def require_post_replace_verification(
         verify_at = body.find("verify_replaced_target")
         if write_at < 0 or not write_at < replace_at < verify_at:
             raise AssertionError(f"{label} {entry} verifies before replacement")
-        propagated_result = (
-            r"\breturn\s+validate_completed_mutation\s*\(\s*"
-            r"verify_replaced_target\s*\([^;]*\)\s*\)\s*;"
-            if platform == "posix"
-            else r"\breturn\s+verify_replaced_target\s*\([^;]*\)\s*;"
-        )
+        propagated_result = propagated_verifier_result_pattern(platform)
         if re.search(propagated_result, body, re.DOTALL) is None:
             raise AssertionError(f"{label} {entry} ignores verifier result")
         verify = tuple(compact_cpp(value) for value in verifier_calls[0])
@@ -5659,12 +5666,7 @@ def require_post_replace_verification_mutants(
             return
         raise AssertionError(f"{label} verifier accepted {name} mutant")
 
-    propagated_result = (
-        r"\breturn\s+validate_completed_mutation\s*\(\s*"
-        r"verify_replaced_target\s*\([^;]*\)\s*\)\s*;"
-        if platform == "posix"
-        else r"\breturn\s+verify_replaced_target\s*\([^;]*\)\s*;"
-    )
+    propagated_result = propagated_verifier_result_pattern(platform)
 
     def missing(body: str) -> str:
         return re.sub(
@@ -6035,17 +6037,12 @@ def require_fixed_namespace_factory_contract(
     ):
         raise AssertionError("Windows fixed namespace replaces an existing child")
     compact_factory = compact_cpp(factory)
-    child_bind_matches = list(
-        re.finditer(r"bind_windows_directory\(child(?:,true)?\)", compact_factory)
-    )
+    child_bind_matches = windows_child_bind_matches(compact_factory)
     child_bind_positions = [match.start() for match in child_bind_matches]
     stage_at = compact_factory.find("CreateDirectoryW")
     move_at = compact_factory.find("MoveFileExW")
     if (
-        len(child_bind_matches) != 2
-        or child_bind_matches[0].group() != "bind_windows_directory(child)"
-        or child_bind_matches[-1].group() != "bind_windows_directory(child,true)"
-        or not 0 <= child_bind_positions[0] < stage_at < move_at
+        not 0 <= child_bind_positions[0] < stage_at < move_at
         or not move_at < child_bind_positions[-1]
     ):
         raise AssertionError("Windows fixed namespace mishandles concurrent creators")
@@ -6060,9 +6057,17 @@ def require_fixed_namespace_factory_contract(
         or "FILE_SHARE_DELETE" in share_mode
     ):
         raise AssertionError("Windows fixed namespace does not pin directory renames")
-    release_at = factory.find("if (!release_parent())")
-    publish_at = factory.find("std::make_unique<WindowsDurableFileAdapter>", release_at)
-    if not 0 <= release_at < publish_at:
+    compact_release = compact_cpp(factory)
+    release_match = re.search(r"if\(!release_parent\(\)\)", compact_release)
+    publish_match = (
+        re.search(
+            r"(?:std::)?make_unique<WindowsDurableFileAdapter>",
+            compact_release[release_match.end() :],
+        )
+        if release_match is not None
+        else None
+    )
+    if release_match is None or publish_match is None:
         raise AssertionError(
             "Windows fixed namespace does not release its parent before publication"
         )
@@ -6078,6 +6083,21 @@ def require_fixed_namespace_factory_contract(
         raise AssertionError("Windows fixed namespace can skip a bound-stage close")
 
     require_windows_fixed_namespace_convergence_contract(windows)
+
+
+def windows_child_bind_matches(compact_factory: str) -> list[re.Match[str]]:
+    matches = list(
+        re.finditer(r"bind_windows_directory\(child(?:,true)?\)", compact_factory)
+    )
+    if (
+        len(matches) != 2
+        or matches[0].group() != "bind_windows_directory(child)"
+        or matches[-1].group() != "bind_windows_directory(child,true)"
+    ):
+        raise AssertionError(
+            "Windows fixed namespace mis-scopes child convergence retries"
+        )
+    return matches
 
 
 def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
@@ -6124,17 +6144,7 @@ def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
         raise AssertionError(
             "Windows fixed namespace broadens access-denied retries to its parent"
         )
-    child_bind_matches = list(
-        re.finditer(r"bind_windows_directory\(child(?:,true)?\)", compact)
-    )
-    if (
-        len(child_bind_matches) != 2
-        or child_bind_matches[0].group() != "bind_windows_directory(child)"
-        or child_bind_matches[-1].group() != "bind_windows_directory(child,true)"
-    ):
-        raise AssertionError(
-            "Windows fixed namespace mis-scopes child convergence retries"
-        )
+    windows_child_bind_matches(compact)
     if (
         "retry_access_denied" not in binder
         or "retry_access_denied&&error==ERROR_ACCESS_DENIED" not in binder
@@ -6252,18 +6262,25 @@ def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
         ),
         "child-bind-access-denied-policy",
     )
+
+    def swap_child_bind_policy(body: str) -> str:
+        relaxed = body.replace(
+            "bind_windows_directory(child, true)",
+            "bind_windows_directory(child)",
+        )
+        swapped, replacements = re.subn(
+            r"bind_windows_directory\(child\);",
+            "bind_windows_directory(child, true);",
+            relaxed,
+            count=1,
+        )
+        if replacements != 1 or swapped == body:
+            raise AssertionError("child-bind policy-swap mutant drifted")
+        return swapped
+
     rejected(
         replace_unique_function_body(
-            source,
-            "make_windows_fixed_namespace_adapter",
-            lambda body: body.replace(
-                "bind_windows_directory(child, true)",
-                "bind_windows_directory(child)",
-            ).replace(
-                "bind_windows_directory(child);",
-                "bind_windows_directory(child, true);",
-                1,
-            ),
+            source, "make_windows_fixed_namespace_adapter", swap_child_bind_policy
         ),
         "child-bind-policy-swap",
     )
@@ -6373,7 +6390,11 @@ def require_test_storage_identity_capture_contract(source: str) -> None:
         raise AssertionError("fake storage identity capture seam is not unique")
     helper = helpers[0]
     compact_helper = compact_cpp(helper)
-    lock_at = compact_helper.find("std::lock_guardlock(state->mutex)")
+    lock_match = re.search(
+        r"(?:std::)?lock_guard(?:<[^>]*>)?[A-Za-z_]\w*\(state->mutex\)",
+        compact_helper,
+    )
+    lock_at = lock_match.start() if lock_match is not None else -1
     named_at = compact_helper.find("state->named_directory_identity")
     directory_at = compact_helper.find("state->directory_identity")
     if not 0 <= lock_at < named_at < directory_at:
@@ -6388,14 +6409,21 @@ def require_test_storage_identity_capture_contract(source: str) -> None:
 
 
 def require_test_storage_identity_capture_mutant(source: str) -> None:
-    mutant, replacements = re.subn(
-        r"std::lock_guard\s+lock\s*\(\s*state->mutex\s*\)\s*;",
-        "",
-        source,
-        count=1,
+    def drop_lock(body: str) -> str:
+        mutant, replacements = re.subn(
+            r"(?:std::)?lock_guard(?:\s*<[^;{}>]+>)?\s+[A-Za-z_]\w*\s*"
+            r"\(\s*state->mutex\s*\)\s*;",
+            "",
+            body,
+            count=1,
+        )
+        if replacements != 1:
+            raise AssertionError("fake storage identity lock mutation target drifted")
+        return mutant
+
+    mutant = replace_unique_function_body(
+        source, "capture_bound_directory_identity", drop_lock
     )
-    if replacements != 1:
-        raise AssertionError("fake storage identity lock mutation target drifted")
     try:
         require_test_storage_identity_capture_contract(mutant)
     except AssertionError:
@@ -9647,14 +9675,7 @@ def require_existing_executable_contract() -> None:
             command[0] != str(compiler) for command in compile_commands
         ):
             raise AssertionError("hosted mode ignored its explicit compiler")
-        forbidden_full_seam_inputs = {
-            str(JOURNAL_SOURCE),
-            str(DURABLE_SOURCE),
-            str(ADAPTER_COMMON),
-            str(native_adapter_source()),
-            str(TEST_SUPPORT),
-            str(PUBLIC_SEAM),
-        }
+        forbidden_full_seam_inputs = {str(source) for source in PUBLIC_SEAM_SOURCES}
         if any(
             forbidden_full_seam_inputs.intersection(command)
             for command in compile_commands
