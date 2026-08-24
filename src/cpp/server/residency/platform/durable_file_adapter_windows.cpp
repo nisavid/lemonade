@@ -1809,7 +1809,7 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
             probe->after_publish_attempt(attempt, moved);
         }
 #endif
-        auto published_child = bind_windows_directory(child);
+        auto published_child = bind_windows_directory(child, true);
         if (published_child.status == WindowsDirectoryBindStatus::Bound) {
             if (moved &&
                 !same_file_identity(published_child.identity, stage_identity)) {

@@ -6034,11 +6034,20 @@ def require_fixed_namespace_factory_contract(
         or "MOVEFILE_REPLACE_EXISTING" in "".join(moves[0])
     ):
         raise AssertionError("Windows fixed namespace replaces an existing child")
-    existing_at = factory.find("bind_windows_directory(child)")
-    stage_at = factory.find("CreateDirectoryW")
-    move_at = factory.find("MoveFileExW")
-    published_at = factory.rfind("bind_windows_directory(child)")
-    if not 0 <= existing_at < stage_at < move_at < published_at:
+    compact_factory = compact_cpp(factory)
+    child_bind_positions = [
+        match.start()
+        for match in re.finditer(
+            r"bind_windows_directory\(child(?:,true)?\)", compact_factory
+        )
+    ]
+    stage_at = compact_factory.find("CreateDirectoryW")
+    move_at = compact_factory.find("MoveFileExW")
+    if (
+        len(child_bind_positions) < 2
+        or not 0 <= child_bind_positions[0] < stage_at < move_at
+        or not move_at < child_bind_positions[-1]
+    ):
         raise AssertionError("Windows fixed namespace mishandles concurrent creators")
 
     binder_opens = call_argument_lists(binder, "CreateFileW")
@@ -6111,19 +6120,20 @@ def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
         raise AssertionError(
             "Windows fixed namespace does not retry access-denied stage binds"
         )
-    if (
-        "bind_windows_directory(parent_directory,true)" in compact
-        or "bind_windows_directory(child,true)" in compact
-    ):
+    if "bind_windows_directory(parent_directory,true)" in compact:
         raise AssertionError(
-            "Windows fixed namespace broadens access-denied retries beyond stages"
+            "Windows fixed namespace broadens access-denied retries to its parent"
+        )
+    if compact.count("bind_windows_directory(child,true)") < 1:
+        raise AssertionError(
+            "Windows fixed namespace does not retry access-denied child convergence"
         )
     if (
         "retry_access_denied" not in binder
         or "retry_access_denied&&error==ERROR_ACCESS_DENIED" not in binder
     ):
         raise AssertionError(
-            "Windows directory binding lacks stage-only access-denied policy"
+            "Windows post-publish child binding lacks scoped access-denied policy"
         )
     if (
         "fixed_namespace_error_is_retryable(error)" not in stage_helper
@@ -6153,8 +6163,10 @@ def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
         is None
     ):
         raise AssertionError("Windows fixed namespace does not bound its retries")
-    if factory.count("bind_windows_directory(child)") < 2:
-        raise AssertionError("Windows fixed namespace does not bind the winner")
+    if compact.count("bind_windows_directory(child,true)") < 1:
+        raise AssertionError(
+            "Windows fixed namespace does not bind post-publish convergence children"
+        )
     if factory.count("yield_fixed_namespace_convergence();") < 2:
         raise AssertionError("Windows fixed namespace spins during convergence")
     if (
@@ -6225,6 +6237,17 @@ def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
     rejected(
         replace_unique_function_body(
             source,
+            "make_windows_fixed_namespace_adapter",
+            lambda body: body.replace(
+                "bind_windows_directory(child, true)",
+                "bind_windows_directory(child)",
+            ),
+        ),
+        "child-bind-access-denied-policy",
+    )
+    rejected(
+        replace_unique_function_body(
+            source,
             "bind_windows_directory",
             lambda body: body.replace(
                 "retry_access_denied && error == ERROR_ACCESS_DENIED",
@@ -6271,7 +6294,7 @@ def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
     )
 
     def skip_winner_rebind(body: str) -> str:
-        target = "bind_windows_directory(child)"
+        target = "bind_windows_directory(child, true)"
         occurrence = body.rfind(target)
         if occurrence < 0:
             return body
