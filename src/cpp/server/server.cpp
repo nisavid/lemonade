@@ -2368,6 +2368,9 @@ void Server::run() {
         }
 
         {
+            // Config and backend transitions use the same lock order. Keep the
+            // bind-success admission transition atomic with respect to them.
+            std::lock_guard<std::mutex> transition_lock(stop_mutex_);
             std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
             if (!shutdown_requested_.load() && !rebind_requested_.load())
                 profiling_accepting_.store(true);
@@ -2432,8 +2435,12 @@ void Server::run() {
         // Join the listener threads before deciding whether a rebind is still
         // needed. A config update can arrive during the joins, so the
         // admission barrier is applied from the final lifecycle snapshot.
-        if (rebind_requested_.load())
+        if (rebind_requested_.load()) {
+            // Only the serving thread closes these fronts during a rebind, but
+            // serialize that close with stop() and config transitions.
+            std::lock_guard<std::mutex> transition_lock(stop_mutex_);
             stop_http_listeners();
+        }
         if (http_v4_thread_.joinable())
             http_v4_thread_.join();
         if (http_v6_thread_.joinable())
@@ -2442,16 +2449,17 @@ void Server::run() {
         bool should_rebind = false;
         uint64_t rebind_epoch = 0;
         {
+            std::lock_guard<std::mutex> transition_lock(stop_mutex_);
             std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
             should_rebind = rebind_requested_.load() &&
                             !shutdown_requested_.load();
             if (should_rebind)
                 rebind_epoch = profiling_lifecycle_epoch_.load();
-        }
-        if (!should_rebind) {
-            std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
-            profiling_accepting_.store(false);
-            break;  // Normal exit or shutdown won the lifecycle race.
+            if (!should_rebind) {
+                profiling_accepting_.store(false);
+                running_ = false;
+                break;  // Normal exit or shutdown won the lifecycle race.
+            }
         }
 
         if (profiling_transaction_ &&
@@ -7807,6 +7815,12 @@ void Server::apply_config_side_effects(const json& applied_changes) {
                 std::lock_guard<std::mutex> transition_lock(stop_mutex_);
                 {
                     std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+                    if (!running_.load() || shutdown_requested_.load()) {
+                        LOG(INFO, "Server")
+                            << "Port change will apply on the next server run"
+                            << std::endl;
+                        continue;
+                    }
                     rebind_requested_ = true;
                     begin_residency_lifecycle_change();
                 }
@@ -7817,6 +7831,12 @@ void Server::apply_config_side_effects(const json& applied_changes) {
             std::lock_guard<std::mutex> transition_lock(stop_mutex_);
             {
                 std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+                if (!running_.load() || shutdown_requested_.load()) {
+                    LOG(INFO, "Server")
+                        << "Host change will apply on the next server run"
+                        << std::endl;
+                    continue;
+                }
                 rebind_requested_ = true;
                 begin_residency_lifecycle_change();
             }
