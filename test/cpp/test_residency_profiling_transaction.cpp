@@ -442,14 +442,23 @@ void test_latched_abort_pulses(TestState &state, Router &router) {
                   "server lifecycle abort has no candidate");
 
     std::promise<void> precedence_entered;
+    std::promise<void> precedence_poll;
+    std::promise<void> precedence_observed;
     std::promise<void> precedence_release;
+    auto precedence_poll_signal = precedence_poll.get_future().share();
+    auto precedence_observed_signal = precedence_observed.get_future();
     auto precedence_signal = precedence_release.get_future().share();
     std::atomic<bool> precedence_cancel{false};
+    std::atomic<bool> precedence_cancel_observed{false};
     auto precedence_run = std::async(std::launch::async, [&] {
         return transaction.run(
             "profile/1",
-            [&](Router &, const ProfilingCancellationCheck &) {
+            [&](Router &, const ProfilingCancellationCheck &should_abort) {
                 precedence_entered.set_value();
+                precedence_poll_signal.wait();
+                if (should_abort())
+                    precedence_cancel_observed.store(true);
+                precedence_observed.set_value();
                 precedence_signal.wait();
                 return capture(draft());
             },
@@ -460,6 +469,13 @@ void test_latched_abort_pulses(TestState &state, Router &router) {
                       std::future_status::ready,
                   "abort precedence capture starts");
     precedence_cancel.store(true);
+    precedence_poll.set_value();
+    const bool cancellation_observed =
+        precedence_observed_signal.wait_for(1s) == std::future_status::ready;
+    state.require(cancellation_observed,
+                  "precedence capture observes cancellation before restart");
+    state.require(precedence_cancel_observed.load(),
+                  "precedence capture latches cancellation before restart");
     transaction.request_abort(ProfilingAbortReason::Restarted);
     precedence_release.set_value();
     auto precedence_result = precedence_run.get();
