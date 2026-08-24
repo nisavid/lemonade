@@ -6035,16 +6035,16 @@ def require_fixed_namespace_factory_contract(
     ):
         raise AssertionError("Windows fixed namespace replaces an existing child")
     compact_factory = compact_cpp(factory)
-    child_bind_positions = [
-        match.start()
-        for match in re.finditer(
-            r"bind_windows_directory\(child(?:,true)?\)", compact_factory
-        )
-    ]
+    child_bind_matches = list(
+        re.finditer(r"bind_windows_directory\(child(?:,true)?\)", compact_factory)
+    )
+    child_bind_positions = [match.start() for match in child_bind_matches]
     stage_at = compact_factory.find("CreateDirectoryW")
     move_at = compact_factory.find("MoveFileExW")
     if (
-        len(child_bind_positions) < 2
+        len(child_bind_matches) != 2
+        or child_bind_matches[0].group() != "bind_windows_directory(child)"
+        or child_bind_matches[-1].group() != "bind_windows_directory(child,true)"
         or not 0 <= child_bind_positions[0] < stage_at < move_at
         or not move_at < child_bind_positions[-1]
     ):
@@ -6124,9 +6124,16 @@ def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
         raise AssertionError(
             "Windows fixed namespace broadens access-denied retries to its parent"
         )
-    if compact.count("bind_windows_directory(child,true)") < 1:
+    child_bind_matches = list(
+        re.finditer(r"bind_windows_directory\(child(?:,true)?\)", compact)
+    )
+    if (
+        len(child_bind_matches) != 2
+        or child_bind_matches[0].group() != "bind_windows_directory(child)"
+        or child_bind_matches[-1].group() != "bind_windows_directory(child,true)"
+    ):
         raise AssertionError(
-            "Windows fixed namespace does not retry access-denied child convergence"
+            "Windows fixed namespace mis-scopes child convergence retries"
         )
     if (
         "retry_access_denied" not in binder
@@ -6244,6 +6251,21 @@ def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
             ),
         ),
         "child-bind-access-denied-policy",
+    )
+    rejected(
+        replace_unique_function_body(
+            source,
+            "make_windows_fixed_namespace_adapter",
+            lambda body: body.replace(
+                "bind_windows_directory(child, true)",
+                "bind_windows_directory(child)",
+            ).replace(
+                "bind_windows_directory(child);",
+                "bind_windows_directory(child, true);",
+                1,
+            ),
+        ),
+        "child-bind-policy-swap",
     )
     rejected(
         replace_unique_function_body(
