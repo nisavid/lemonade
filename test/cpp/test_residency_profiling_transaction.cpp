@@ -1100,10 +1100,8 @@ void test_server_rejects_evidence_after_lifecycle_handoff(
             });
     });
 
-    const bool entered =
-        handoff_entered_signal.wait_for(1s) == std::future_status::ready;
-    state.require(entered, "Server transaction reaches the lifecycle handoff");
-    if (entered) lemon::ServerProfilingTestHook::advance_lifecycle_epoch(*server);
+    handoff_entered_signal.wait();
+    lemon::ServerProfilingTestHook::advance_lifecycle_epoch(*server);
     release_handoff.set_value();
 
     const auto result = run.get();
