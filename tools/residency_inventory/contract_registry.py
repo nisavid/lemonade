@@ -21,7 +21,7 @@ from .contract import (
 from .path import _path_tokens
 
 EXPECTED_REGISTRY_DIGEST = (
-    "cb0fcefcd8fa46b4c600e19ae13144ff7192d43aedcb8cca0901eafd28f8d832"
+    "76dfa0d84a4367e242b536bc5edbaa12cb117280320674d7d5ac92f8ded1d481"
 )
 EXPECTED_REGISTRY_KEYS = [
     "schema",
@@ -71,6 +71,7 @@ EXPECTED_SCHEMA_KEYS = [
     "operation_revision",
     "overlay_activation_root",
     "profiling_input_envelope",
+    "profiling_phase_attestation",
     "reason",
     "request_error",
     "residency_profiles",
@@ -339,9 +340,14 @@ SCHEMA_FIELD_TYPES = {
     "local_overlay_deployment_identity",
     "local_overlay_expiry",
     "local_overlay_method_identity",
+    "local_overlay_nonnegative_uint64",
     "local_overlay_object_status",
     "local_overlay_previous_root_reference",
     "local_overlay_positive_uint64",
+    "local_overlay_profiling_health",
+    "local_overlay_profiling_lifecycle_state",
+    "local_overlay_profiling_owner_coverage",
+    "local_overlay_profiling_phase",
     "local_overlay_required_true",
     "local_overlay_root_transition",
     "local_overlay_safety_margin_claim_closure",
@@ -349,6 +355,7 @@ SCHEMA_FIELD_TYPES = {
     "local_overlay_selector_identity",
     "local_overlay_source_generations",
     "local_overlay_timestamp",
+    "local_overlay_zero_claim_closure",
     "nullable_enum_ref",
     "nullable_opaque",
     "nullable_reason_code",

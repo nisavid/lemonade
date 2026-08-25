@@ -135,6 +135,50 @@ ProfilingInputEnvelopeDraft profiling_draft() {
     return draft;
 }
 
+ProfilingPhaseAttestationDraft phase_draft(
+    ProfilingPhase phase, std::string selector_sha256) {
+    ProfilingPhaseAttestationDraft draft;
+    draft.schema = supported_local_overlay_schema;
+    draft.phase = phase;
+    draft.deployment_id = digest('b');
+    draft.profiling_transaction_id = "profiling/1";
+    draft.selector_sha256 = std::move(selector_sha256);
+    draft.provider_id = "provider/system-residency";
+    draft.provider_revision_sha256 = digest('1');
+    draft.provenance_sha256 = digest('2');
+    draft.observation_contract_sha256 = digest('f');
+    draft.predictor_contract_sha256 = digest('0');
+    draft.generations = OverlaySourceGenerations{1, 2, 3, 4, 5, 6, 7};
+    draft.observation_generation =
+        phase == ProfilingPhase::Baseline
+            ? 1
+            : phase == ProfilingPhase::Workload ? 2 : 3;
+    draft.observed_at =
+        phase == ProfilingPhase::Baseline
+            ? "2026-08-23T10:00:00Z"
+            : phase == ProfilingPhase::Workload
+                ? "2026-08-23T10:01:00Z"
+                : "2026-08-23T10:02:00Z";
+    draft.fresh_until = "2026-08-23T10:05:00Z";
+    draft.source_skew_milliseconds = 10;
+    draft.max_source_skew_milliseconds = 1000;
+    draft.health = ProfilingObservationHealth::Valid;
+    draft.owner_coverage = ProfilingOwnerCoverage::Complete;
+    draft.observed_claims = claims(4096);
+    draft.attributed_claims = claims(4096);
+    draft.external_change_claims = claims(0);
+    draft.unattributed_claims = claims(0);
+    draft.uncertainty_claims = claims(512);
+    draft.safety_margin_claims = claims(256);
+    draft.lifecycle_state =
+        phase == ProfilingPhase::Baseline
+            ? ProfilingLifecycleState::BaselineQuiescent
+            : phase == ProfilingPhase::Workload
+                ? ProfilingLifecycleState::WorkloadComplete
+                : ProfilingLifecycleState::ReleaseVerified;
+    return draft;
+}
+
 LocalOverlayMethodIdentity method() {
     return LocalOverlayMethodIdentity{
         "method/exact-profile",
@@ -275,6 +319,10 @@ void require_generated_schema_compatibility(
     const std::filesystem::path &repository_root) {
     auto profile = seal_profiling_input(profiling_draft());
     require(profile.accepted(), "schema fixture profile was rejected");
+    auto phase = seal_profiling_phase_attestation(
+        phase_draft(ProfilingPhase::Workload,
+                    std::string(profile.candidate->selector_sha256())));
+    require(phase.accepted(), "schema fixture phase was rejected");
     auto overlay = seal_local_overlay(overlay_draft(*profile.candidate));
     require(overlay.accepted(), "schema fixture overlay was rejected");
     auto root = seal_overlay_activation_root(root_draft(*overlay.candidate));
@@ -284,18 +332,24 @@ void require_generated_schema_compatibility(
         repository_root / "docs/api/schemas/residency";
     const auto profile_schema = load_json(
         schema_directory / "profiling_input_envelope.schema.json");
+    const auto phase_schema = load_json(
+        schema_directory / "profiling_phase_attestation.schema.json");
     const auto overlay_schema = load_json(
         schema_directory / "deployment_local_overlay_object.schema.json");
     const auto root_schema = load_json(
         schema_directory / "overlay_activation_root.schema.json");
     const auto profile_document =
         json::parse(profile.candidate->canonical_bytes());
+    const auto phase_document =
+        json::parse(phase.candidate->canonical_bytes());
     const auto overlay_document =
         json::parse(overlay.candidate->canonical_bytes());
     const auto root_document = json::parse(root.candidate->canonical_bytes());
 
     require_document_matches_schema(profile_document, profile_schema,
                                     "profiling input");
+    require_document_matches_schema(phase_document, phase_schema,
+                                    "profiling phase attestation");
     require_document_matches_schema(overlay_document, overlay_schema,
                                     "local overlay");
     require_document_matches_schema(root_document, root_schema,
@@ -309,6 +363,10 @@ void require_generated_schema_compatibility(
         profile_schema.at("$defs").at("source_generations"),
         "profiling source generations");
     require_document_matches_schema(
+        phase_document.at("generations"),
+        phase_schema.at("$defs").at("source_generations"),
+        "profiling phase source generations");
+    require_document_matches_schema(
         overlay_document.at("selector"),
         overlay_schema.at("$defs").at("selector_identity"),
         "overlay selector");
@@ -321,6 +379,10 @@ void require_generated_schema_compatibility(
 void emit_schema_validation_corpus() {
     auto profile = seal_profiling_input(profiling_draft());
     require(profile.accepted(), "schema corpus profile was rejected");
+    auto phase = seal_profiling_phase_attestation(
+        phase_draft(ProfilingPhase::Workload,
+                    std::string(profile.candidate->selector_sha256())));
+    require(phase.accepted(), "schema corpus phase was rejected");
 
     auto maximum_confidence_draft = overlay_draft(*profile.candidate);
     maximum_confidence_draft.confidence_basis_points = 10000;
@@ -342,6 +404,8 @@ void emit_schema_validation_corpus() {
          {{"deployment_local_overlay_object",
            overlay.candidate->canonical_bytes()},
           {"overlay_activation_root", root.candidate->canonical_bytes()},
+          {"profiling_phase_attestation",
+           phase.candidate->canonical_bytes()},
           {"profiling_input_envelope",
            profile.candidate->canonical_bytes()}}},
         {"confidence_basis_points_boundary",
@@ -371,12 +435,113 @@ std::string without_positive_safety_margin(std::string bytes) {
 void require_public_shape() {
     static_assert(
         !std::is_default_constructible_v<ParsedProfilingInputEnvelope>);
+    static_assert(
+        !std::is_default_constructible_v<ParsedProfilingPhaseAttestation>);
     static_assert(!std::is_default_constructible_v<ParsedLocalOverlayObject>);
     static_assert(
         !std::is_default_constructible_v<ParsedOverlayActivationRoot>);
     static_assert(std::is_copy_constructible_v<ParsedProfilingInputEnvelope>);
+    static_assert(
+        std::is_copy_constructible_v<ParsedProfilingPhaseAttestation>);
     static_assert(std::is_copy_constructible_v<ParsedLocalOverlayObject>);
     static_assert(std::is_copy_constructible_v<ParsedOverlayActivationRoot>);
+}
+
+void require_phase_attestation_codec() {
+    auto profile = seal_profiling_input(profiling_draft());
+    require(profile.accepted(), "phase fixture profile was rejected");
+    auto sealed = seal_profiling_phase_attestation(phase_draft(
+        ProfilingPhase::Workload,
+        std::string(profile.candidate->selector_sha256())));
+    require(sealed.accepted(), sealed.diagnostic);
+    require(sealed.candidate->phase() == ProfilingPhase::Workload &&
+                sealed.candidate->lifecycle_state() ==
+                    ProfilingLifecycleState::WorkloadComplete &&
+                sealed.candidate->selector_sha256() ==
+                    profile.candidate->selector_sha256() &&
+                sealed.candidate->provider_id() ==
+                    "provider/system-residency" &&
+                sealed.candidate->provenance_sha256() == digest('2') &&
+                sealed.candidate->observation_generation() == 2 &&
+                amount(sealed.candidate->uncertainty_claims(),
+                       ClaimFamily::ConsumableCapacity, "gpu/gtt") == 512 &&
+                amount(sealed.candidate->safety_margin_claims(),
+                       ClaimFamily::ConsumableCapacity, "gpu/gtt") == 256,
+            "phase attestation lost serialized evidence");
+
+    const auto canonical = std::string(sealed.candidate->canonical_bytes());
+    auto reparsed = parse_profiling_phase_attestation(canonical);
+    require(reparsed.accepted(), reparsed.diagnostic);
+    require(reparsed.candidate->canonical_bytes() == canonical &&
+                reparsed.candidate->checksum_sha256() ==
+                    sealed.candidate->checksum_sha256(),
+            "phase attestation round-trip changed canonical identity");
+    require_rejected(
+        parse_profiling_phase_attestation(with_unknown_root_field(canonical)),
+        OverlayContractStatus::UnknownField,
+        "phase attestation accepted an unknown field");
+
+    auto unhealthy = phase_draft(
+        ProfilingPhase::Workload,
+        std::string(profile.candidate->selector_sha256()));
+    unhealthy.health = ProfilingObservationHealth::Unhealthy;
+    require_rejected(seal_profiling_phase_attestation(std::move(unhealthy)),
+                     OverlayContractStatus::InvalidValue,
+                     "phase attestation accepted unhealthy evidence");
+
+    auto contaminated = phase_draft(
+        ProfilingPhase::Workload,
+        std::string(profile.candidate->selector_sha256()));
+    contaminated.external_change_claims = claims(1);
+    require_rejected(
+        seal_profiling_phase_attestation(std::move(contaminated)),
+        OverlayContractStatus::InvalidClaimClosure,
+        "phase attestation accepted external-demand contamination");
+
+    auto incomplete_owner = phase_draft(
+        ProfilingPhase::Workload,
+        std::string(profile.candidate->selector_sha256()));
+    incomplete_owner.owner_coverage = ProfilingOwnerCoverage::Incomplete;
+    require_rejected(
+        seal_profiling_phase_attestation(std::move(incomplete_owner)),
+        OverlayContractStatus::IncompleteIdentity,
+        "phase attestation accepted incomplete owner coverage");
+
+    auto wrong_lifecycle = phase_draft(
+        ProfilingPhase::Workload,
+        std::string(profile.candidate->selector_sha256()));
+    wrong_lifecycle.lifecycle_state = ProfilingLifecycleState::ReleaseVerified;
+    require_rejected(
+        seal_profiling_phase_attestation(std::move(wrong_lifecycle)),
+        OverlayContractStatus::InvalidValue,
+        "phase attestation accepted a mismatched lifecycle state");
+
+    auto excessive_skew = phase_draft(
+        ProfilingPhase::Workload,
+        std::string(profile.candidate->selector_sha256()));
+    excessive_skew.source_skew_milliseconds = 1001;
+    require_rejected(
+        seal_profiling_phase_attestation(std::move(excessive_skew)),
+        OverlayContractStatus::InvalidValue,
+        "phase attestation accepted excessive source skew");
+
+    auto unattributed = phase_draft(
+        ProfilingPhase::Workload,
+        std::string(profile.candidate->selector_sha256()));
+    unattributed.unattributed_claims = claims(1);
+    require_rejected(
+        seal_profiling_phase_attestation(std::move(unattributed)),
+        OverlayContractStatus::InvalidClaimClosure,
+        "phase attestation accepted unattributed demand");
+
+    auto no_margin = phase_draft(
+        ProfilingPhase::Workload,
+        std::string(profile.candidate->selector_sha256()));
+    no_margin.safety_margin_claims = claims(0);
+    require_rejected(
+        seal_profiling_phase_attestation(std::move(no_margin)),
+        OverlayContractStatus::InvalidClaimClosure,
+        "phase attestation accepted a zero safety margin");
 }
 
 void require_profiling_input_codec() {
@@ -433,6 +598,7 @@ void require_profiling_input_codec() {
     require_rejected(seal_profiling_input(std::move(unknown_claims)),
                      OverlayContractStatus::IncompleteClaimClosure,
                      "profiling input accepted an unknown claim family");
+
 }
 
 void require_overlay_object_codec() {
@@ -632,6 +798,7 @@ int main(int argc, char **argv) {
         argc == 2 ? std::filesystem::path(argv[1])
                   : std::filesystem::current_path();
     require_public_shape();
+    require_phase_attestation_codec();
     require_profiling_input_codec();
     require_overlay_object_codec();
     require_activation_root_codec();

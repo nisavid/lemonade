@@ -4983,6 +4983,163 @@
           }
         ]
       },
+      "profiling_phase_attestation": {
+        "version": {
+          "major": 1,
+          "minor": 0
+        },
+        "output": "docs/api/schemas/residency/profiling_phase_attestation.schema.json",
+        "schema_type": "residency.profiling_phase_attestation/1.0",
+        "fields": {
+          "schema": {
+            "type": "local_overlay_schema_version",
+            "required": true
+          },
+          "phase": {
+            "type": "local_overlay_profiling_phase",
+            "required": true
+          },
+          "deployment_id": {
+            "type": "local_overlay_deployment_identity",
+            "required": true
+          },
+          "profiling_transaction_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "selector_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "provider_id": {
+            "type": "opaque",
+            "required": true,
+            "max_bytes": 128
+          },
+          "provider_revision_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "provenance_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "observation_contract_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "predictor_contract_sha256": {
+            "type": "sha256",
+            "required": true
+          },
+          "generations": {
+            "type": "local_overlay_source_generations",
+            "required": true
+          },
+          "observation_generation": {
+            "type": "local_overlay_positive_uint64",
+            "required": true
+          },
+          "observed_at": {
+            "type": "local_overlay_timestamp",
+            "required": true
+          },
+          "fresh_until": {
+            "type": "local_overlay_expiry",
+            "required": true
+          },
+          "source_skew_milliseconds": {
+            "type": "local_overlay_nonnegative_uint64",
+            "required": true
+          },
+          "max_source_skew_milliseconds": {
+            "type": "local_overlay_positive_uint64",
+            "required": true
+          },
+          "health": {
+            "type": "local_overlay_profiling_health",
+            "required": true
+          },
+          "owner_coverage": {
+            "type": "local_overlay_profiling_owner_coverage",
+            "required": true
+          },
+          "observed_claims": {
+            "type": "local_overlay_claim_closure",
+            "required": true
+          },
+          "attributed_claims": {
+            "type": "local_overlay_claim_closure",
+            "required": true
+          },
+          "external_change_claims": {
+            "type": "local_overlay_zero_claim_closure",
+            "required": true
+          },
+          "unattributed_claims": {
+            "type": "local_overlay_zero_claim_closure",
+            "required": true
+          },
+          "uncertainty_claims": {
+            "type": "local_overlay_claim_closure",
+            "required": true
+          },
+          "safety_margin_claims": {
+            "type": "local_overlay_safety_margin_claim_closure",
+            "required": true
+          },
+          "lifecycle_state": {
+            "type": "local_overlay_profiling_lifecycle_state",
+            "required": true
+          },
+          "checksum_sha256": {
+            "type": "sha256",
+            "required": true
+          }
+        },
+        "conditionals": [
+          {
+            "assert": {
+              "field": "observed_at",
+              "less_than_path": "fresh_until"
+            }
+          },
+          {
+            "assert": {
+              "field": "source_skew_milliseconds",
+              "less_than_or_equal_path": "max_source_skew_milliseconds"
+            }
+          },
+          {
+            "if": {
+              "field": "phase",
+              "equals": "baseline"
+            },
+            "require_values": {
+              "lifecycle_state": "baseline_quiescent"
+            }
+          },
+          {
+            "if": {
+              "field": "phase",
+              "equals": "workload"
+            },
+            "require_values": {
+              "lifecycle_state": "workload_complete"
+            }
+          },
+          {
+            "if": {
+              "field": "phase",
+              "equals": "release"
+            },
+            "require_values": {
+              "lifecycle_state": "release_verified"
+            }
+          }
+        ]
+      },
       "reason": {
         "version": {
           "major": 1,

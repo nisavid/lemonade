@@ -23,6 +23,7 @@ SCHEMA_KEYS = (
     "operation_revision",
     "overlay_activation_root",
     "profiling_input_envelope",
+    "profiling_phase_attestation",
     "reason",
     "request_error",
     "residency_profiles",
@@ -35,6 +36,7 @@ LOCAL_OVERLAY_SCHEMA_KEYS = frozenset(
         "deployment_local_overlay_object",
         "overlay_activation_root",
         "profiling_input_envelope",
+        "profiling_phase_attestation",
     }
 )
 LOCAL_OVERLAY_TEMPLATE_OPERATIONS = {
@@ -439,10 +441,39 @@ def _local_overlay_field_schema(
     del name, registry, catalog
     if spec["type"] == "local_overlay_positive_uint64":
         return {"type": "integer", "minimum": 1, "maximum": UINT64_MAX}
+    if spec["type"] == "local_overlay_nonnegative_uint64":
+        return {"type": "integer", "minimum": 0, "maximum": UINT64_MAX}
     if spec["type"] == "local_overlay_confidence_basis_points":
         return {"type": "integer", "minimum": 1, "maximum": 10000}
     if spec["type"] == "local_overlay_required_true":
         return {"const": True}
+    if spec["type"] == "local_overlay_profiling_phase":
+        return _string_schema(
+            values=("baseline", "workload", "release"),
+            max_length=len("baseline"),
+        )
+    if spec["type"] == "local_overlay_profiling_health":
+        return {"const": "valid"}
+    if spec["type"] == "local_overlay_profiling_owner_coverage":
+        return {"const": "complete"}
+    if spec["type"] == "local_overlay_profiling_lifecycle_state":
+        values = ("baseline_quiescent", "workload_complete", "release_verified")
+        return _string_schema(values=values, max_length=max(map(len, values)))
+    if spec["type"] == "local_overlay_zero_claim_closure":
+        return {
+            "allOf": [
+                {"$ref": "#/$defs/claim_closure"},
+                {
+                    "not": {
+                        "contains": {
+                            "type": "object",
+                            "properties": {"completeness": {"const": "bounded"}},
+                            "required": ["completeness"],
+                        }
+                    }
+                },
+            ]
+        }
     definitions = {
         "local_overlay_authority_status": "authority_status",
         "local_overlay_claim_closure": "claim_closure",
@@ -1408,6 +1439,8 @@ def _local_overlay_field_example(
     field_type = spec["type"]
     if field_type == "local_overlay_positive_uint64":
         return True, 1
+    if field_type == "local_overlay_nonnegative_uint64":
+        return True, 0
     if field_type == "local_overlay_confidence_basis_points":
         return True, 9900
     if field_type == "local_overlay_required_true":
@@ -1429,6 +1462,10 @@ def _local_overlay_field_example(
         "local_overlay_object_status": "qualified",
         "local_overlay_previous_root_reference": None,
         "local_overlay_root_transition": "qualification",
+        "local_overlay_profiling_health": "valid",
+        "local_overlay_profiling_lifecycle_state": "baseline_quiescent",
+        "local_overlay_profiling_owner_coverage": "complete",
+        "local_overlay_profiling_phase": "baseline",
         "local_overlay_safety_margin_claim_closure": _local_overlay_claim_example(),
         "local_overlay_schema_version": {"major": 1, "minor": 0},
         "local_overlay_selector_identity": _local_overlay_selector_example(),
@@ -1442,6 +1479,28 @@ def _local_overlay_field_example(
             "workload": 7,
         },
         "local_overlay_timestamp": "2026-01-01T00:00:00Z",
+        "local_overlay_zero_claim_closure": [
+            {
+                "completeness": "known_zero",
+                "entries": [],
+                "family": "consumable_capacity",
+            },
+            {
+                "completeness": "known_zero",
+                "entries": [],
+                "family": "safety_floor",
+            },
+            {
+                "completeness": "known_zero",
+                "entries": [],
+                "family": "cardinality_pool",
+            },
+            {
+                "completeness": "not_applicable",
+                "entries": [],
+                "family": "compatibility_exclusivity",
+            },
+        ],
     }
     if field_type not in examples:
         return False, None

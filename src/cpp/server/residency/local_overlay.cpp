@@ -26,6 +26,8 @@ using json = nlohmann::json;
 
 constexpr char profiling_input_domain[] =
     "lemonade.residency.local-overlay-profiling-input/v1\0";
+constexpr char profiling_phase_attestation_domain[] =
+    "lemonade.residency.profiling-phase-attestation/v1\0";
 constexpr char local_overlay_domain[] =
     "lemonade.residency.local-overlay-object/v1\0";
 constexpr char activation_root_domain[] =
@@ -886,6 +888,376 @@ OverlaySourceGenerations parse_generations(const json &value) {
     };
 }
 
+std::string canonical_document(json payload, std::string_view checksum);
+
+std::string_view profiling_phase_wire(ProfilingPhase phase) noexcept {
+    switch (phase) {
+    case ProfilingPhase::Baseline:
+        return "baseline";
+    case ProfilingPhase::Workload:
+        return "workload";
+    case ProfilingPhase::Release:
+        return "release";
+    }
+    return {};
+}
+
+ProfilingPhase parse_profiling_phase(std::string_view wire) {
+    if (wire == "baseline") {
+        return ProfilingPhase::Baseline;
+    }
+    if (wire == "workload") {
+        return ProfilingPhase::Workload;
+    }
+    if (wire == "release") {
+        return ProfilingPhase::Release;
+    }
+    reject(OverlayContractStatus::UnknownValue, "profiling phase is unknown");
+}
+
+std::string_view
+profiling_health_wire(ProfilingObservationHealth health) noexcept {
+    switch (health) {
+    case ProfilingObservationHealth::Valid:
+        return "valid";
+    case ProfilingObservationHealth::Missing:
+        return "missing";
+    case ProfilingObservationHealth::Stale:
+        return "stale";
+    case ProfilingObservationHealth::Unhealthy:
+        return "unhealthy";
+    case ProfilingObservationHealth::Incoherent:
+        return "incoherent";
+    case ProfilingObservationHealth::Superseded:
+        return "superseded";
+    }
+    return {};
+}
+
+ProfilingObservationHealth parse_profiling_health(std::string_view wire) {
+    if (wire == "valid") {
+        return ProfilingObservationHealth::Valid;
+    }
+    if (wire == "missing") {
+        return ProfilingObservationHealth::Missing;
+    }
+    if (wire == "stale") {
+        return ProfilingObservationHealth::Stale;
+    }
+    if (wire == "unhealthy") {
+        return ProfilingObservationHealth::Unhealthy;
+    }
+    if (wire == "incoherent") {
+        return ProfilingObservationHealth::Incoherent;
+    }
+    if (wire == "superseded") {
+        return ProfilingObservationHealth::Superseded;
+    }
+    reject(OverlayContractStatus::UnknownValue,
+           "profiling observation health is unknown");
+}
+
+std::string_view
+profiling_owner_coverage_wire(ProfilingOwnerCoverage coverage) noexcept {
+    switch (coverage) {
+    case ProfilingOwnerCoverage::Complete:
+        return "complete";
+    case ProfilingOwnerCoverage::Incomplete:
+        return "incomplete";
+    case ProfilingOwnerCoverage::Unknown:
+        return "unknown";
+    }
+    return {};
+}
+
+ProfilingOwnerCoverage parse_profiling_owner_coverage(std::string_view wire) {
+    if (wire == "complete") {
+        return ProfilingOwnerCoverage::Complete;
+    }
+    if (wire == "incomplete") {
+        return ProfilingOwnerCoverage::Incomplete;
+    }
+    if (wire == "unknown") {
+        return ProfilingOwnerCoverage::Unknown;
+    }
+    reject(OverlayContractStatus::UnknownValue,
+           "profiling owner coverage is unknown");
+}
+
+std::string_view
+profiling_lifecycle_state_wire(ProfilingLifecycleState state) noexcept {
+    switch (state) {
+    case ProfilingLifecycleState::BaselineQuiescent:
+        return "baseline_quiescent";
+    case ProfilingLifecycleState::WorkloadComplete:
+        return "workload_complete";
+    case ProfilingLifecycleState::ReleaseVerified:
+        return "release_verified";
+    }
+    return {};
+}
+
+ProfilingLifecycleState
+parse_profiling_lifecycle_state(std::string_view wire) {
+    if (wire == "baseline_quiescent") {
+        return ProfilingLifecycleState::BaselineQuiescent;
+    }
+    if (wire == "workload_complete") {
+        return ProfilingLifecycleState::WorkloadComplete;
+    }
+    if (wire == "release_verified") {
+        return ProfilingLifecycleState::ReleaseVerified;
+    }
+    reject(OverlayContractStatus::UnknownValue,
+           "profiling lifecycle state is unknown");
+}
+
+ProfilingLifecycleState expected_lifecycle_state(ProfilingPhase phase) {
+    switch (phase) {
+    case ProfilingPhase::Baseline:
+        return ProfilingLifecycleState::BaselineQuiescent;
+    case ProfilingPhase::Workload:
+        return ProfilingLifecycleState::WorkloadComplete;
+    case ProfilingPhase::Release:
+        return ProfilingLifecycleState::ReleaseVerified;
+    }
+    reject(OverlayContractStatus::UnknownValue, "profiling phase is unknown");
+}
+
+std::vector<ClaimFamilyClosure>
+normalize_phase_claims(std::vector<ClaimFamilyClosure> closure) {
+    return claim_closure(checked_claims(std::move(closure)));
+}
+
+bool has_positive_claim(
+    const std::vector<ClaimFamilyClosure> &closure) noexcept {
+    for (const auto &family : closure) {
+        for (const auto &entry : family.entries) {
+            if (entry.amount > 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void normalize_profiling_phase_draft(ProfilingPhaseAttestationDraft &draft) {
+    if (!schema_is_supported(draft.schema)) {
+        reject(OverlayContractStatus::UnsupportedSchema,
+               "profiling phase attestation schema is unsupported");
+    }
+    if (profiling_phase_wire(draft.phase).empty()) {
+        reject(OverlayContractStatus::UnknownValue,
+               "profiling phase is unknown");
+    }
+    require_digest(draft.deployment_id, "deployment ID");
+    require_identifier(draft.profiling_transaction_id,
+                       "profiling transaction ID");
+    require_digest(draft.selector_sha256, "selector digest");
+    require_identifier(draft.provider_id, "provider ID");
+    require_digest(draft.provider_revision_sha256,
+                   "provider revision digest");
+    require_digest(draft.provenance_sha256, "provenance digest");
+    require_digest(draft.observation_contract_sha256,
+                   "observation contract digest");
+    require_digest(draft.predictor_contract_sha256,
+                   "predictor contract digest");
+    normalize_generations(draft.generations);
+    if (draft.observation_generation == 0) {
+        reject(OverlayContractStatus::IncompleteIdentity,
+               "observation generation must be nonzero");
+    }
+    require_advancing_time(draft.observed_at, draft.fresh_until,
+                           "fresh-until timestamp");
+    if (draft.max_source_skew_milliseconds == 0 ||
+        draft.source_skew_milliseconds >
+            draft.max_source_skew_milliseconds) {
+        reject(OverlayContractStatus::InvalidValue,
+               "source skew exceeds the accepted bound");
+    }
+    if (draft.health != ProfilingObservationHealth::Valid) {
+        reject(OverlayContractStatus::InvalidValue,
+               "profiling observation health is not valid");
+    }
+    if (draft.owner_coverage != ProfilingOwnerCoverage::Complete) {
+        reject(OverlayContractStatus::IncompleteIdentity,
+               "profiling owner coverage is incomplete");
+    }
+    if (draft.lifecycle_state != expected_lifecycle_state(draft.phase)) {
+        reject(OverlayContractStatus::InvalidValue,
+               "profiling phase and lifecycle state do not match");
+    }
+
+    draft.observed_claims =
+        normalize_phase_claims(std::move(draft.observed_claims));
+    draft.attributed_claims =
+        normalize_phase_claims(std::move(draft.attributed_claims));
+    draft.external_change_claims =
+        normalize_phase_claims(std::move(draft.external_change_claims));
+    draft.unattributed_claims =
+        normalize_phase_claims(std::move(draft.unattributed_claims));
+    draft.uncertainty_claims =
+        normalize_phase_claims(std::move(draft.uncertainty_claims));
+    draft.safety_margin_claims =
+        normalize_phase_claims(std::move(draft.safety_margin_claims));
+
+    if (has_positive_claim(draft.external_change_claims) ||
+        has_positive_claim(draft.unattributed_claims)) {
+        reject(OverlayContractStatus::InvalidClaimClosure,
+               "profiling evidence contains external or unattributed change");
+    }
+    if (!has_positive_claim(draft.safety_margin_claims)) {
+        reject(OverlayContractStatus::InvalidClaimClosure,
+               "safety-margin claims must contain positive bounded slack");
+    }
+}
+
+json profiling_phase_payload(const ProfilingPhaseAttestationDraft &draft) {
+    return json{
+        {"attributed_claims", claim_closure_document(draft.attributed_claims)},
+        {"deployment_id", draft.deployment_id},
+        {"external_change_claims",
+         claim_closure_document(draft.external_change_claims)},
+        {"fresh_until", draft.fresh_until},
+        {"generations", generations_document(draft.generations)},
+        {"health", profiling_health_wire(draft.health)},
+        {"lifecycle_state",
+         profiling_lifecycle_state_wire(draft.lifecycle_state)},
+        {"max_source_skew_milliseconds",
+         draft.max_source_skew_milliseconds},
+        {"observation_contract_sha256",
+         draft.observation_contract_sha256},
+        {"observation_generation", draft.observation_generation},
+        {"observed_at", draft.observed_at},
+        {"observed_claims", claim_closure_document(draft.observed_claims)},
+        {"owner_coverage",
+         profiling_owner_coverage_wire(draft.owner_coverage)},
+        {"phase", profiling_phase_wire(draft.phase)},
+        {"predictor_contract_sha256", draft.predictor_contract_sha256},
+        {"profiling_transaction_id", draft.profiling_transaction_id},
+        {"provenance_sha256", draft.provenance_sha256},
+        {"provider_id", draft.provider_id},
+        {"provider_revision_sha256", draft.provider_revision_sha256},
+        {"safety_margin_claims",
+         claim_closure_document(draft.safety_margin_claims)},
+        {"schema", schema_document(draft.schema)},
+        {"selector_sha256", draft.selector_sha256},
+        {"source_skew_milliseconds", draft.source_skew_milliseconds},
+        {"unattributed_claims",
+         claim_closure_document(draft.unattributed_claims)},
+        {"uncertainty_claims",
+         claim_closure_document(draft.uncertainty_claims)},
+    };
+}
+
+struct SealedProfilingPhaseData {
+    ProfilingPhaseAttestationDraft draft;
+    std::string checksum;
+    std::string canonical;
+};
+
+SealedProfilingPhaseData
+seal_profiling_phase_data(ProfilingPhaseAttestationDraft draft) {
+    normalize_profiling_phase_draft(draft);
+    const auto payload = profiling_phase_payload(draft);
+    const auto payload_bytes = payload.dump();
+    const auto checksum = sha256_hex(
+        std::string_view(profiling_phase_attestation_domain,
+                         sizeof(profiling_phase_attestation_domain) - 1),
+        payload_bytes);
+    auto canonical = canonical_document(payload, checksum);
+    if (canonical.size() > max_local_overlay_input_bytes) {
+        reject(OverlayContractStatus::LimitExceeded,
+               "sealed profiling phase attestation exceeds the input limit");
+    }
+    return SealedProfilingPhaseData{std::move(draft), checksum,
+                                    std::move(canonical)};
+}
+
+struct ParsedProfilingPhaseDocument {
+    ProfilingPhaseAttestationDraft draft;
+    std::string checksum;
+};
+
+ParsedProfilingPhaseDocument
+parse_profiling_phase_document(const json &document) {
+    require_exact_keys(
+        document,
+        {"attributed_claims", "checksum_sha256", "deployment_id",
+         "external_change_claims", "fresh_until", "generations", "health",
+         "lifecycle_state", "max_source_skew_milliseconds",
+         "observation_contract_sha256", "observation_generation",
+         "observed_at", "observed_claims", "owner_coverage", "phase",
+         "predictor_contract_sha256", "profiling_transaction_id",
+         "provenance_sha256", "provider_id", "provider_revision_sha256",
+         "safety_margin_claims", "schema", "selector_sha256",
+         "source_skew_milliseconds", "unattributed_claims",
+         "uncertainty_claims"},
+        "profiling phase attestation");
+    ProfilingPhaseAttestationDraft draft;
+    draft.schema = parse_schema(required(document, "schema"));
+    draft.phase = parse_profiling_phase(
+        require_string(required(document, "phase"), "profiling phase"));
+    draft.deployment_id =
+        require_string(required(document, "deployment_id"), "deployment ID");
+    draft.profiling_transaction_id =
+        require_string(required(document, "profiling_transaction_id"),
+                       "profiling transaction ID");
+    draft.selector_sha256 = require_string(
+        required(document, "selector_sha256"), "selector digest");
+    draft.provider_id =
+        require_string(required(document, "provider_id"), "provider ID");
+    draft.provider_revision_sha256 = require_string(
+        required(document, "provider_revision_sha256"),
+        "provider revision digest");
+    draft.provenance_sha256 = require_string(
+        required(document, "provenance_sha256"), "provenance digest");
+    draft.observation_contract_sha256 = require_string(
+        required(document, "observation_contract_sha256"),
+        "observation contract digest");
+    draft.predictor_contract_sha256 = require_string(
+        required(document, "predictor_contract_sha256"),
+        "predictor contract digest");
+    draft.generations = parse_generations(required(document, "generations"));
+    draft.observation_generation =
+        require_u64(required(document, "observation_generation"),
+                    "observation generation");
+    draft.observed_at =
+        require_string(required(document, "observed_at"), "observed timestamp");
+    draft.fresh_until = require_string(required(document, "fresh_until"),
+                                       "fresh-until timestamp");
+    draft.source_skew_milliseconds =
+        require_u64(required(document, "source_skew_milliseconds"),
+                    "source skew");
+    draft.max_source_skew_milliseconds =
+        require_u64(required(document, "max_source_skew_milliseconds"),
+                    "maximum source skew");
+    draft.health = parse_profiling_health(require_string(
+        required(document, "health"), "profiling observation health"));
+    draft.owner_coverage = parse_profiling_owner_coverage(require_string(
+        required(document, "owner_coverage"), "profiling owner coverage"));
+    draft.observed_claims = parse_claim_closure(
+        required(document, "observed_claims"), "observed claims");
+    draft.attributed_claims = parse_claim_closure(
+        required(document, "attributed_claims"), "attributed claims");
+    draft.external_change_claims = parse_claim_closure(
+        required(document, "external_change_claims"),
+        "external-change claims");
+    draft.unattributed_claims = parse_claim_closure(
+        required(document, "unattributed_claims"), "unattributed claims");
+    draft.uncertainty_claims = parse_claim_closure(
+        required(document, "uncertainty_claims"), "uncertainty claims");
+    draft.safety_margin_claims = parse_claim_closure(
+        required(document, "safety_margin_claims"), "safety-margin claims");
+    draft.lifecycle_state = parse_profiling_lifecycle_state(require_string(
+        required(document, "lifecycle_state"), "profiling lifecycle state"));
+    return ParsedProfilingPhaseDocument{
+        std::move(draft),
+        require_string(required(document, "checksum_sha256"),
+                       "profiling phase attestation checksum"),
+    };
+}
+
 void normalize_profiling_draft(ProfilingInputEnvelopeDraft &draft) {
     if (!schema_is_supported(draft.schema)) {
         reject(OverlayContractStatus::UnsupportedSchema,
@@ -1460,6 +1832,12 @@ rejected_profiling(const OverlayFailure &failure) {
         failure.status(), bounded_diagnostic(failure.what()), std::nullopt};
 }
 
+ParsedProfilingPhaseAttestationResult
+rejected_profiling_phase(const OverlayFailure &failure) {
+    return ParsedProfilingPhaseAttestationResult{
+        failure.status(), bounded_diagnostic(failure.what()), std::nullopt};
+}
+
 ParsedLocalOverlayObjectResult rejected_overlay(const OverlayFailure &failure) {
     return ParsedLocalOverlayObjectResult{
         failure.status(), bounded_diagnostic(failure.what()), std::nullopt};
@@ -1573,6 +1951,145 @@ ParsedProfilingInputEnvelope::checksum_sha256() const noexcept {
 
 std::string_view
 ParsedProfilingInputEnvelope::canonical_bytes() const noexcept {
+    return canonical_bytes_;
+}
+
+ParsedProfilingPhaseAttestation::ParsedProfilingPhaseAttestation(
+    ProfilingPhaseAttestationDraft draft, std::string checksum_sha256,
+    std::string canonical_bytes)
+    : draft_(std::move(draft)), checksum_sha256_(std::move(checksum_sha256)),
+      canonical_bytes_(std::move(canonical_bytes)) {}
+
+SchemaVersion ParsedProfilingPhaseAttestation::schema() const noexcept {
+    return draft_.schema;
+}
+
+ProfilingPhase ParsedProfilingPhaseAttestation::phase() const noexcept {
+    return draft_.phase;
+}
+
+std::string_view
+ParsedProfilingPhaseAttestation::deployment_id() const noexcept {
+    return draft_.deployment_id;
+}
+
+std::string_view
+ParsedProfilingPhaseAttestation::profiling_transaction_id() const noexcept {
+    return draft_.profiling_transaction_id;
+}
+
+std::string_view
+ParsedProfilingPhaseAttestation::selector_sha256() const noexcept {
+    return draft_.selector_sha256;
+}
+
+std::string_view
+ParsedProfilingPhaseAttestation::provider_id() const noexcept {
+    return draft_.provider_id;
+}
+
+std::string_view
+ParsedProfilingPhaseAttestation::provider_revision_sha256() const noexcept {
+    return draft_.provider_revision_sha256;
+}
+
+std::string_view
+ParsedProfilingPhaseAttestation::provenance_sha256() const noexcept {
+    return draft_.provenance_sha256;
+}
+
+std::string_view ParsedProfilingPhaseAttestation::observation_contract_sha256()
+    const noexcept {
+    return draft_.observation_contract_sha256;
+}
+
+std::string_view ParsedProfilingPhaseAttestation::predictor_contract_sha256()
+    const noexcept {
+    return draft_.predictor_contract_sha256;
+}
+
+const OverlaySourceGenerations &
+ParsedProfilingPhaseAttestation::generations() const noexcept {
+    return draft_.generations;
+}
+
+std::uint64_t
+ParsedProfilingPhaseAttestation::observation_generation() const noexcept {
+    return draft_.observation_generation;
+}
+
+std::string_view
+ParsedProfilingPhaseAttestation::observed_at() const noexcept {
+    return draft_.observed_at;
+}
+
+std::string_view
+ParsedProfilingPhaseAttestation::fresh_until() const noexcept {
+    return draft_.fresh_until;
+}
+
+std::uint64_t
+ParsedProfilingPhaseAttestation::source_skew_milliseconds() const noexcept {
+    return draft_.source_skew_milliseconds;
+}
+
+std::uint64_t ParsedProfilingPhaseAttestation::max_source_skew_milliseconds()
+    const noexcept {
+    return draft_.max_source_skew_milliseconds;
+}
+
+ProfilingObservationHealth
+ParsedProfilingPhaseAttestation::health() const noexcept {
+    return draft_.health;
+}
+
+ProfilingOwnerCoverage
+ParsedProfilingPhaseAttestation::owner_coverage() const noexcept {
+    return draft_.owner_coverage;
+}
+
+const std::vector<ClaimFamilyClosure> &
+ParsedProfilingPhaseAttestation::observed_claims() const noexcept {
+    return draft_.observed_claims;
+}
+
+const std::vector<ClaimFamilyClosure> &
+ParsedProfilingPhaseAttestation::attributed_claims() const noexcept {
+    return draft_.attributed_claims;
+}
+
+const std::vector<ClaimFamilyClosure> &
+ParsedProfilingPhaseAttestation::external_change_claims() const noexcept {
+    return draft_.external_change_claims;
+}
+
+const std::vector<ClaimFamilyClosure> &
+ParsedProfilingPhaseAttestation::unattributed_claims() const noexcept {
+    return draft_.unattributed_claims;
+}
+
+const std::vector<ClaimFamilyClosure> &
+ParsedProfilingPhaseAttestation::uncertainty_claims() const noexcept {
+    return draft_.uncertainty_claims;
+}
+
+const std::vector<ClaimFamilyClosure> &
+ParsedProfilingPhaseAttestation::safety_margin_claims() const noexcept {
+    return draft_.safety_margin_claims;
+}
+
+ProfilingLifecycleState
+ParsedProfilingPhaseAttestation::lifecycle_state() const noexcept {
+    return draft_.lifecycle_state;
+}
+
+std::string_view
+ParsedProfilingPhaseAttestation::checksum_sha256() const noexcept {
+    return checksum_sha256_;
+}
+
+std::string_view
+ParsedProfilingPhaseAttestation::canonical_bytes() const noexcept {
     return canonical_bytes_;
 }
 
@@ -1755,6 +2272,10 @@ bool ParsedProfilingInputEnvelopeResult::accepted() const noexcept {
     return status == OverlayContractStatus::Accepted && candidate.has_value();
 }
 
+bool ParsedProfilingPhaseAttestationResult::accepted() const noexcept {
+    return status == OverlayContractStatus::Accepted && candidate.has_value();
+}
+
 bool ParsedLocalOverlayObjectResult::accepted() const noexcept {
     return status == OverlayContractStatus::Accepted && candidate.has_value();
 }
@@ -1802,6 +2323,49 @@ parse_profiling_input(std::string_view bytes) {
         };
     } catch (const OverlayFailure &failure) {
         return rejected_profiling(failure);
+    }
+}
+
+ParsedProfilingPhaseAttestationResult seal_profiling_phase_attestation(
+    ProfilingPhaseAttestationDraft draft) {
+    try {
+        auto sealed = seal_profiling_phase_data(std::move(draft));
+        return ParsedProfilingPhaseAttestationResult{
+            OverlayContractStatus::Accepted,
+            {},
+            ParsedProfilingPhaseAttestation(
+                std::move(sealed.draft), std::move(sealed.checksum),
+                std::move(sealed.canonical)),
+        };
+    } catch (const OverlayFailure &failure) {
+        return rejected_profiling_phase(failure);
+    }
+}
+
+ParsedProfilingPhaseAttestationResult
+parse_profiling_phase_attestation(std::string_view bytes) {
+    try {
+        auto parsed = parse_profiling_phase_document(parse_json(bytes));
+        require_digest(parsed.checksum,
+                       "profiling phase attestation checksum");
+        auto sealed = seal_profiling_phase_data(std::move(parsed.draft));
+        if (parsed.checksum != sealed.checksum) {
+            reject(OverlayContractStatus::DigestMismatch,
+                   "profiling phase attestation checksum does not match");
+        }
+        if (bytes != sealed.canonical) {
+            reject(OverlayContractStatus::NonCanonical,
+                   "profiling phase attestation is not canonical JSON");
+        }
+        return ParsedProfilingPhaseAttestationResult{
+            OverlayContractStatus::Accepted,
+            {},
+            ParsedProfilingPhaseAttestation(
+                std::move(sealed.draft), std::move(sealed.checksum),
+                std::move(sealed.canonical)),
+        };
+    } catch (const OverlayFailure &failure) {
+        return rejected_profiling_phase(failure);
     }
 }
 

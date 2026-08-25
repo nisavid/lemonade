@@ -28,6 +28,7 @@ GENERATED_PATHS = {
     "docs/api/schemas/residency/operation_revision.schema.json",
     "docs/api/schemas/residency/overlay_activation_root.schema.json",
     "docs/api/schemas/residency/profiling_input_envelope.schema.json",
+    "docs/api/schemas/residency/profiling_phase_attestation.schema.json",
     "docs/api/schemas/residency/reason.schema.json",
     "docs/api/schemas/residency/request_error.schema.json",
     "docs/api/schemas/residency/residency_profiles.schema.json",
@@ -139,7 +140,7 @@ def require_catalog_contract(files: dict[str, bytes]) -> None:
         "reason_envelope_registry": 8,
         "reason_registry": 87,
         "request_context_registry": 37,
-        "schema_registry": 15,
+        "schema_registry": 16,
     }
     for key, expected in expected_counts.items():
         require(len(registry[key]) == expected, f"{key} count drifted")
@@ -690,6 +691,7 @@ def require_cpp_codec_schema_seam(
         "deployment_local_overlay_object",
         "overlay_activation_root",
         "profiling_input_envelope",
+        "profiling_phase_attestation",
     }
     require(
         set(documents) == expected_documents,
@@ -1006,6 +1008,7 @@ def require_local_overlay_schemas(
 ) -> None:
     names = {
         "profiling_input_envelope",
+        "profiling_phase_attestation",
         "deployment_local_overlay_object",
         "overlay_activation_root",
     }
@@ -1024,14 +1027,81 @@ def require_local_overlay_schemas(
     profiling = contract_validator(
         schemas["profiling_input_envelope"], registry=resources
     )
+    phase = contract_validator(
+        schemas["profiling_phase_attestation"], registry=resources
+    )
     overlay = contract_validator(
         schemas["deployment_local_overlay_object"], registry=resources
     )
     root = contract_validator(schemas["overlay_activation_root"], registry=resources)
 
+    profiling_input_fields = {
+        "schema",
+        "deployment_id",
+        "sequence",
+        "profiling_transaction_id",
+        "selector",
+        "generations",
+        "attributed_claims",
+        "baseline_observation_sha256",
+        "workload_observation_sha256",
+        "release_observation_sha256",
+        "observation_contract_sha256",
+        "predictor_contract_sha256",
+        "observed_at",
+        "fresh_until",
+        "max_clock_skew_milliseconds",
+        "attribution_complete",
+        "external_demand_absent",
+        "lifecycle_release_verified",
+        "checksum_sha256",
+    }
+    require(
+        set(schemas["profiling_input_envelope"]["properties"])
+        == profiling_input_fields,
+        "profiling-input envelope field roster drifted",
+    )
+    profiling_phase_fields = {
+        "schema",
+        "phase",
+        "deployment_id",
+        "profiling_transaction_id",
+        "selector_sha256",
+        "provider_id",
+        "provider_revision_sha256",
+        "provenance_sha256",
+        "observation_contract_sha256",
+        "predictor_contract_sha256",
+        "generations",
+        "observation_generation",
+        "observed_at",
+        "fresh_until",
+        "source_skew_milliseconds",
+        "max_source_skew_milliseconds",
+        "health",
+        "owner_coverage",
+        "observed_claims",
+        "attributed_claims",
+        "external_change_claims",
+        "unattributed_claims",
+        "uncertainty_claims",
+        "safety_margin_claims",
+        "lifecycle_state",
+        "checksum_sha256",
+    }
+    require(
+        set(schemas["profiling_phase_attestation"]["properties"])
+        == profiling_phase_fields,
+        "profiling phase-attestation field roster drifted",
+    )
+
     timestamp_validators = {
         "profiling_input_envelope": (
             profiling,
+            ("observed_at", "fresh_until"),
+        ),
+        "profiling_phase_attestation": (
+            phase,
             ("observed_at", "fresh_until"),
         ),
         "deployment_local_overlay_object": (
@@ -1148,6 +1218,67 @@ def require_local_overlay_schemas(
     require(
         not profiling.is_valid(unknown_claim),
         "profiling schema accepted an incomplete claim closure",
+    )
+
+    unhealthy_phase = copy.deepcopy(examples["profiling_phase_attestation"])
+    unhealthy_phase["health"] = "stale"
+    require(
+        not phase.is_valid(unhealthy_phase),
+        "phase attestation accepted non-valid observation health",
+    )
+    incomplete_owner_coverage = copy.deepcopy(examples["profiling_phase_attestation"])
+    incomplete_owner_coverage["owner_coverage"] = "incomplete"
+    require(
+        not phase.is_valid(incomplete_owner_coverage),
+        "phase attestation accepted incomplete owner coverage",
+    )
+    lifecycle_by_phase = {
+        "baseline": "baseline_quiescent",
+        "workload": "workload_complete",
+        "release": "release_verified",
+    }
+    for phase_name, expected_lifecycle in lifecycle_by_phase.items():
+        for lifecycle in lifecycle_by_phase.values():
+            candidate = copy.deepcopy(examples["profiling_phase_attestation"])
+            candidate["phase"] = phase_name
+            candidate["lifecycle_state"] = lifecycle
+            require(
+                phase.is_valid(candidate) == (lifecycle == expected_lifecycle),
+                "phase attestation phase/lifecycle mapping drifted",
+            )
+    skew_at_limit = copy.deepcopy(examples["profiling_phase_attestation"])
+    skew_at_limit["source_skew_milliseconds"] = 1000
+    skew_at_limit["max_source_skew_milliseconds"] = 1000
+    require(
+        phase.is_valid(skew_at_limit),
+        "phase attestation rejected source skew at the accepted limit",
+    )
+    skew_over_limit = copy.deepcopy(skew_at_limit)
+    skew_over_limit["source_skew_milliseconds"] = 1001
+    require(
+        not phase.is_valid(skew_over_limit),
+        "phase attestation accepted source skew above the limit",
+    )
+    zero_maximum_skew = copy.deepcopy(examples["profiling_phase_attestation"])
+    zero_maximum_skew["max_source_skew_milliseconds"] = 0
+    require(
+        not phase.is_valid(zero_maximum_skew),
+        "phase attestation accepted a zero maximum source skew",
+    )
+    for claim_field in ("external_change_claims", "unattributed_claims"):
+        contaminated = copy.deepcopy(examples["profiling_phase_attestation"])
+        contaminated[claim_field][0] = copy.deepcopy(contaminated["observed_claims"][0])
+        require(
+            not phase.is_valid(contaminated),
+            f"phase attestation accepted bounded {claim_field}",
+        )
+    zero_phase_safety_margin = copy.deepcopy(examples["profiling_phase_attestation"])
+    for family in zero_phase_safety_margin["safety_margin_claims"]:
+        family["completeness"] = "known_zero"
+        family["entries"] = []
+    require(
+        not phase.is_valid(zero_phase_safety_margin),
+        "phase attestation accepted a zero safety margin",
     )
 
     wrong_status = copy.deepcopy(examples["deployment_local_overlay_object"])
