@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef __linux__
+
 #include "lemon/residency/profiling_provider.h"
 #include "lemon/utils/process_containment.h"
 
@@ -75,3 +77,5 @@ private:
 };
 
 } // namespace lemon::residency::internal
+
+#endif

@@ -1,3 +1,5 @@
+#ifdef __linux__
+
 #include <lemon/residency/profiling_provider.h>
 #include <lemon/utils/process_containment.h>
 #include <lemon/utils/process_manager.h>
@@ -129,12 +131,12 @@ static_assert(linux_amd_gtt_point_sensor_id ==
               std::string_view{
                   "linux.amdgpu.mem_info_gtt_used.bytes.v1"});
 
-constexpr std::string_view kExpectedContainmentDigest =
+constexpr std::string_view expected_containment_digest =
     "af6902e41989bbf69dfea988995f278c73234df08db107175ee70a3015925bf6";
-constexpr std::string_view kExpectedOwnerSetDigest =
+constexpr std::string_view expected_owner_set_digest =
     "47d48a09485723ad082ab990cedb11c52d2c7e9572f8fbc0b9bf7edd8bbdc25f";
-constexpr std::string_view kPdev = "0000:c6:00.0";
-constexpr int kPid = 4312;
+constexpr std::string_view drm_pdev = "0000:c6:00.0";
+constexpr int fixture_pid = 4312;
 
 struct TestState {
     int failures = 0;
@@ -275,9 +277,9 @@ ProcessContainmentIdentity containment_identity() {
             std::string(64, 'a')};
 }
 
-ProcessBirthIdentity birth(int pid = kPid,
+ProcessBirthIdentity birth(int process_id = fixture_pid,
                            std::uint64_t start_time = 997) {
-    return {"01234567-89ab-cdef-0123-456789abcdef", pid, start_time};
+    return {"01234567-89ab-cdef-0123-456789abcdef", process_id, start_time};
 }
 
 ProcessContainmentSnapshotResult successful_snapshot(
@@ -369,7 +371,7 @@ PreparedProcessContainment make_prepared(
 std::string fdinfo(std::string_view resident,
                    std::string_view shared = "drm-shared-gtt:\t0 KiB\n",
                    std::string_view client = "7",
-                   std::string_view pdev = kPdev,
+                   std::string_view device = drm_pdev,
                    std::string_view driver = "amdgpu") {
     std::string value =
         "pos:\t0\nflags:\t0100002\nmnt_id:\t24\n"
@@ -379,7 +381,7 @@ std::string fdinfo(std::string_view resident,
         "drm-client-id:\t";
     value += client;
     value += "\ndrm-pdev:\t";
-    value += pdev;
+    value += device;
     value += '\n';
     value += resident;
     value += shared;
@@ -401,11 +403,11 @@ public:
 
     Scenario()
         : proc_root(tree.root() / "proc"),
-          device_directory(tree.root() / "sys" / std::string(kPdev)),
+          device_directory(tree.root() / "sys" / std::string(drm_pdev)),
           identity(containment_identity()),
           control(std::make_shared<FakeContainmentControl>()),
           containment(make_prepared(control)) {
-        add_member(kPid, 997);
+        add_member(fixture_pid, 997);
         std::error_code error;
         std::filesystem::create_directories(device_directory, error);
         if (error) setup_failure("could not create fake sysfs tree");
@@ -423,7 +425,7 @@ public:
     }
 
     LinuxAmdGttPointObservationSourceBinding binding() const {
-        return {device_directory, std::string(kPdev), identity, 50ms};
+        return {device_directory, std::string(drm_pdev), identity, 50ms};
     }
 
     void reset_snapshots(
@@ -448,13 +450,14 @@ public:
                    process_stat(pid, start_time));
     }
 
-    void write_fd(int fd, std::string_view contents, int pid = kPid) {
+    void write_fd(int fd, std::string_view contents,
+                  int pid = fixture_pid) {
         write_file(proc_root / std::to_string(pid) / "fdinfo" /
                        std::to_string(fd),
                    contents);
     }
 
-    void write_ignored_fds(std::size_t count, int pid = kPid) {
+    void write_ignored_fds(std::size_t count, int pid = fixture_pid) {
         if (count == 0) return;
         const auto directory =
             proc_root / std::to_string(pid) / "fdinfo";
@@ -537,7 +540,7 @@ void require_success(TestState &state,
             std::optional<std::string>{"owner/model-alpha"} &&
         result.samples[1].value == target &&
         result.samples[1].source_generation == 72 &&
-        result.owner_scope_set_sha256 == kExpectedOwnerSetDigest &&
+        result.owner_scope_set_sha256 == expected_owner_set_digest &&
         result.diagnostic.empty();
     state.require(matches, message);
 }
@@ -566,12 +569,12 @@ void test_binding_identity(TestState &state) {
     state.require(binding.has_value() &&
                       binding->owner_scope_id == identity.owner_scope_id &&
                       binding->containment_identity_sha256 ==
-                          kExpectedContainmentDigest,
+                          expected_containment_digest,
                   "containment binding uses the exact canonical digest");
     if (!binding) return;
     const auto owner_set = profiling_owner_scope_set_sha256({*binding});
     state.require(owner_set.has_value() &&
-                      *owner_set == kExpectedOwnerSetDigest,
+                      *owner_set == expected_owner_set_digest,
                   "the exact one-owner request digest is canonical");
 }
 
@@ -600,7 +603,7 @@ void test_binding_is_acquired_from_a_normalized_snapshot(TestState &state) {
     };
     LinuxAmdGttPointObservationSourceBinding source_binding{
         scenario.device_directory,
-        std::string(kPdev),
+        std::string(drm_pdev),
         acquired.snapshot->identity,
         50ms,
     };
@@ -835,7 +838,7 @@ void test_fdinfo_device_selection(TestState &state) {
         Scenario scenario;
         scenario.write_fd(
             3, fdinfo("drm-resident-gtt:\t4 KiB\n",
-                      "drm-shared-gtt:\t0 KiB\n", "7", kPdev, "i915"));
+                      "drm-shared-gtt:\t0 KiB\n", "7", drm_pdev, "i915"));
         require_unavailable(
             state, scenario.read(), scenario.tree.root(),
             "the target pdev under a non-amdgpu record fails closed");
@@ -884,22 +887,22 @@ void test_fdinfo_completeness_failures(TestState &state) {
         Scenario scenario;
         std::error_code error;
         std::filesystem::remove_all(
-            scenario.proc_root / std::to_string(kPid), error);
+            scenario.proc_root / std::to_string(fixture_pid), error);
         if (error) setup_failure("could not remove fake member proc entry");
         require_unavailable(state, scenario.read(), scenario.tree.root(),
                             "a missing member proc entry cannot prove zero");
     }
     {
         Scenario scenario;
-        const auto directory = scenario.proc_root / std::to_string(kPid) /
-                               "fdinfo";
+        const auto directory =
+            scenario.proc_root / std::to_string(fixture_pid) / "fdinfo";
         write_file(directory, "not a directory\n");
         require_unavailable(state, scenario.read(), scenario.tree.root(),
                             "a failed fdinfo directory access blocks zero");
     }
     {
         Scenario scenario;
-        const auto entry = scenario.proc_root / std::to_string(kPid) /
+        const auto entry = scenario.proc_root / std::to_string(fixture_pid) /
                            "fdinfo" / "3";
         std::error_code error;
         std::filesystem::create_directory(entry, error);
@@ -909,7 +912,7 @@ void test_fdinfo_completeness_failures(TestState &state) {
     }
     {
         Scenario scenario;
-        const auto entry = scenario.proc_root / std::to_string(kPid) /
+        const auto entry = scenario.proc_root / std::to_string(fixture_pid) /
                            "fdinfo" / "3";
         std::error_code error;
         std::filesystem::create_symlink(
@@ -1038,7 +1041,7 @@ void test_between_pass_churn_fails_closed(TestState &state) {
     const auto target_contents =
         fdinfo("drm-resident-gtt:\t4 KiB\n");
     const auto fd_path = [](Scenario &scenario, int fd) {
-        return scenario.proc_root / std::to_string(kPid) / "fdinfo" /
+        return scenario.proc_root / std::to_string(fixture_pid) / "fdinfo" /
                std::to_string(fd);
     };
 
@@ -1877,3 +1880,5 @@ int main() {
     }
     return state.failures == 0 ? 0 : 1;
 }
+
+#endif

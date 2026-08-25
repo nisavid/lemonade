@@ -1,5 +1,7 @@
 #include "linux_amd_gtt_point_observation_source.h"
 
+#ifdef __linux__
+
 #include "lemon/utils/process_manager.h"
 
 #include <linux/magic.h>
@@ -1037,11 +1039,10 @@ ProfilingRawReadResult LinuxAmdGttPointObservationSource::read(
     try {
         return impl_->read(request, should_abort);
     } catch (...) {
-        return {ProfilingSourceError::Unavailable,
-                {},
-                {},
-                "linux AMD GTT point observation is unavailable"};
+        return unavailable_result();
     }
 }
 
 } // namespace lemon::residency::internal
+
+#endif
