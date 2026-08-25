@@ -34,7 +34,7 @@ using profiling_internal::elapsed_between;
 using profiling_internal::sha256_hex;
 
 struct SensorValues {
-    std::optional<std::uint64_t> total;
+    std::optional<std::uint64_t> domain_used_total;
     std::map<std::string, std::uint64_t> owners;
     std::uint64_t attributed_total = 0;
 };
@@ -405,7 +405,7 @@ derivation_contract_digest(const ProfilingDerivationContract &contract) {
         owner_scope_set_digest(contract.owner_scopes);
     if (!owner_scope_set_sha256) return std::nullopt;
 
-    std::string bytes = "lemonade/profiling-derivation-contract/v2";
+    std::string bytes = "lemonade/profiling-derivation-contract/v3";
     append_string(bytes, contract.provider_id);
     append_string(bytes, contract.provider_revision_sha256);
     append_u64(bytes, static_cast<std::uint64_t>(sensors.size()));
@@ -449,7 +449,7 @@ raw_provenance_digest(const ProfilingTransactionContext &context,
                             right.source_generation);
         });
 
-    std::string bytes = "lemonade/profiling-raw-observation/v1";
+    std::string bytes = "lemonade/profiling-raw-observation/v2";
     append_string(bytes, context.deployment_id);
     append_string(bytes, context.profiling_transaction_id);
     append_string(bytes, context.selector_sha256);
@@ -539,8 +539,8 @@ reconcile_samples(const ProfilingDerivationContract &contract,
         if (sensor == sensor_indices.end()) return std::nullopt;
         auto &sensor_values = values[sensor->second];
         if (!sample.owner_scope_id) {
-            if (sensor_values.total.has_value()) return std::nullopt;
-            sensor_values.total = sample.value;
+            if (sensor_values.domain_used_total.has_value()) return std::nullopt;
+            sensor_values.domain_used_total = sample.value;
             continue;
         }
         if (expected_owner_scope_id_set.count(*sample.owner_scope_id) == 0 ||
@@ -551,7 +551,7 @@ reconcile_samples(const ProfilingDerivationContract &contract,
     }
 
     for (auto &sensor_values : values) {
-        if (!sensor_values.total ||
+        if (!sensor_values.domain_used_total ||
             sensor_values.owners.size() != expected_owner_scope_ids.size()) {
             return std::nullopt;
         }
@@ -564,7 +564,7 @@ reconcile_samples(const ProfilingDerivationContract &contract,
             }
             sensor_values.attributed_total += owner->second;
         }
-        if (sensor_values.attributed_total != *sensor_values.total) {
+        if (sensor_values.attributed_total > *sensor_values.domain_used_total) {
             return std::nullopt;
         }
     }
@@ -575,6 +575,7 @@ struct DerivedClaimAmounts {
     std::uint64_t source_generation = 0;
     std::vector<std::uint64_t> observed;
     std::vector<std::uint64_t> attributed;
+    std::vector<std::uint64_t> residual;
     std::vector<std::uint64_t> uncertainty;
     std::vector<std::uint64_t> safety_margin;
 };
@@ -592,16 +593,19 @@ derive_claim_amounts(const ProfilingDerivationContract &contract,
     result.source_generation = *generation;
     result.observed.reserve(values->size());
     result.attributed.reserve(values->size());
+    result.residual.reserve(values->size());
     result.uncertainty.reserve(values->size());
     result.safety_margin.reserve(values->size());
     for (std::size_t index = 0; index < values->size(); ++index) {
-        const auto amount = *(*values)[index].total;
+        const auto domain_used_amount = *(*values)[index].domain_used_total;
+        const auto attributed_amount = (*values)[index].attributed_total;
         const auto &sensor = contract.sensors[index];
-        if (amount >= sensor.safety_ceiling) return std::nullopt;
-        const auto remaining = sensor.safety_ceiling - amount;
+        if (domain_used_amount >= sensor.safety_ceiling) return std::nullopt;
+        const auto remaining = sensor.safety_ceiling - domain_used_amount;
         if (sensor.uncertainty_bound >= remaining) return std::nullopt;
-        result.observed.push_back(amount);
-        result.attributed.push_back((*values)[index].attributed_total);
+        result.observed.push_back(attributed_amount);
+        result.attributed.push_back(attributed_amount);
+        result.residual.push_back(domain_used_amount - attributed_amount);
         result.uncertainty.push_back(sensor.uncertainty_bound);
         result.safety_margin.push_back(remaining - sensor.uncertainty_bound);
     }
@@ -704,7 +708,7 @@ std::optional<ProfilingDerivedObservation> derived_observation(
     return observation;
 }
 
-std::optional<std::string> interval_frame_provenance_digest(
+std::optional<std::string> interval_frame_state_digest(
     const ProfilingTransactionContext &context,
     const ProfilingRawIntervalFrame &frame) {
     auto samples = frame.samples;
@@ -717,7 +721,7 @@ std::optional<std::string> interval_frame_provenance_digest(
                             right.source_generation);
         });
 
-    std::string bytes = "lemonade/profiling-interval-frame/v1";
+    std::string bytes = "lemonade/profiling-interval-frame/v2";
     append_string(bytes, context.deployment_id);
     append_string(bytes, context.profiling_transaction_id);
     append_string(bytes, context.selector_sha256);
@@ -734,6 +738,45 @@ std::optional<std::string> interval_frame_provenance_digest(
         append_u64(bytes, sample.value);
         append_u64(bytes, sample.source_generation);
     }
+    return sha256_hex(bytes);
+}
+
+struct AcquisitionWindowEncoding {
+    std::uint64_t started_ticks = 0;
+    std::uint64_t finished_ticks = 0;
+};
+
+std::optional<AcquisitionWindowEncoding> acquisition_window_encoding(
+    const ProfilingSourceAcquisitionWindow &window) noexcept {
+    const auto started = count_as_i64(window.started.time_since_epoch().count());
+    const auto finished =
+        count_as_i64(window.finished.time_since_epoch().count());
+    if (!started || !finished || !elapsed_between(window.started,
+                                                   window.finished)) {
+        return std::nullopt;
+    }
+    return AcquisitionWindowEncoding{
+        static_cast<std::uint64_t>(*started),
+        static_cast<std::uint64_t>(*finished),
+    };
+}
+
+std::optional<std::string> interval_frame_provenance_digest(
+    const ProfilingTransactionContext &context,
+    const ProfilingRawIntervalFrame &frame) {
+    const auto state = interval_frame_state_digest(context, frame);
+    const auto acquisition =
+        acquisition_window_encoding(frame.acquisition_window);
+    if (!state || !acquisition) return std::nullopt;
+
+    std::string bytes = "lemonade/profiling-interval-frame/v3";
+    append_string(bytes, *state);
+    static_assert(SteadyClock::period::num > 0 &&
+                  SteadyClock::period::den > 0);
+    append_u64(bytes, static_cast<std::uint64_t>(SteadyClock::period::num));
+    append_u64(bytes, static_cast<std::uint64_t>(SteadyClock::period::den));
+    append_u64(bytes, acquisition->started_ticks);
+    append_u64(bytes, acquisition->finished_ticks);
     return sha256_hex(bytes);
 }
 
@@ -757,6 +800,19 @@ std::optional<std::string> extend_segment_provenance(
     ProfilingEventWatermark event_watermark,
     std::string_view frame_provenance_sha256) {
     std::string bytes = "lemonade/profiling-interval-segment-frame/v1";
+    append_string(bytes, prior);
+    append_u64(bytes, capture_generation);
+    append_u64(bytes, event_watermark.value);
+    append_string(bytes, frame_provenance_sha256);
+    return sha256_hex(bytes);
+}
+
+std::optional<std::string> extend_final_checkpoint_provenance(
+    std::string_view prior, std::uint64_t capture_generation,
+    ProfilingEventWatermark event_watermark,
+    std::string_view frame_provenance_sha256) {
+    std::string bytes =
+        "lemonade/profiling-interval-segment-final-checkpoint/v1";
     append_string(bytes, prior);
     append_u64(bytes, capture_generation);
     append_u64(bytes, event_watermark.value);
@@ -819,6 +875,33 @@ bool componentwise_minimum(std::vector<std::uint64_t> &target,
     if (target.size() != candidate.size()) return false;
     for (std::size_t index = 0; index < target.size(); ++index) {
         target[index] = std::min(target[index], candidate[index]);
+    }
+    return true;
+}
+
+bool componentwise_residual_excursion(
+    std::vector<std::uint64_t> &baseline,
+    std::vector<std::uint64_t> &maximum_excursion,
+    const std::vector<std::uint64_t> &candidate) {
+    if (baseline.empty()) {
+        baseline = candidate;
+        maximum_excursion.assign(candidate.size(), 0);
+        return true;
+    }
+    if (baseline.size() != candidate.size()) {
+        return false;
+    }
+    if (maximum_excursion.empty()) {
+        maximum_excursion.assign(candidate.size(), 0);
+    } else if (maximum_excursion.size() != candidate.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < candidate.size(); ++index) {
+        const auto excursion = baseline[index] > candidate[index]
+                                   ? baseline[index] - candidate[index]
+                                   : candidate[index] - baseline[index];
+        maximum_excursion[index] =
+            std::max(maximum_excursion[index], excursion);
     }
     return true;
 }
@@ -1081,6 +1164,7 @@ struct SegmentAccumulator {
     std::string provenance_sha256;
     std::vector<std::uint64_t> peak_observed;
     std::vector<std::uint64_t> peak_attributed;
+    std::vector<std::uint64_t> maximum_unattributed_excursion;
     std::vector<std::uint64_t> maximum_uncertainty;
     std::vector<std::uint64_t> minimum_safety_margin;
     ProfilingRecordedCheckpoint checkpoint;
@@ -1103,9 +1187,12 @@ struct ProfilingIntervalRecorder::State {
     std::optional<SteadyClock::time_point> last_read_started;
     std::uint64_t next_capture_generation = 1;
     std::uint64_t total_frame_count = 0;
+    std::vector<std::uint64_t> interval_baseline_residual;
     SegmentAccumulator segment;
     DerivedClaimAmounts last_claims;
-    std::string last_raw_frame_provenance_sha256;
+    std::string last_raw_frame_state_sha256;
+    std::optional<ProfilingSourceAcquisitionWindow>
+        last_source_acquisition_window;
     std::string last_checkpoint_provenance_sha256;
     ProfilingRecordedCheckpoint last_checkpoint;
     bool is_active = false;
@@ -1154,15 +1241,47 @@ struct ProfilingIntervalRecorder::State {
                    contract.interval.event_semantics_revision_sha256;
     }
 
-    bool frame_repeats_last_checkpoint(
+    bool frame_repeats_last_retained_state(
         const ProfilingRawIntervalFrame &frame) const {
         if (!frame_matches_stream(frame)) return false;
         const auto claims = derive_claim_amounts(contract, frame.samples, false);
-        const auto provenance = interval_frame_provenance_digest(context, frame);
+        const auto state = interval_frame_state_digest(context, frame);
         return claims &&
                claims->source_generation == frame.event_watermark.value &&
-               provenance &&
-               *provenance == last_raw_frame_provenance_sha256;
+               state && *state == last_raw_frame_state_sha256;
+    }
+
+    bool acquisition_window_is_valid(
+        const ProfilingSourceAcquisitionWindow &window,
+        const std::optional<ProfilingSourceAcquisitionWindow> &call_window)
+        const noexcept {
+        const auto acquisition = acquisition_window_encoding(window);
+        if (!acquisition) return false;
+        const auto duration = elapsed_between(window.started, window.finished);
+        const auto duration_milliseconds =
+            duration ? rounded_up_milliseconds(*duration) : std::nullopt;
+        if (!duration_milliseconds ||
+            *duration_milliseconds > static_cast<std::uint64_t>(
+                                         contract.max_source_skew.count())) {
+            return false;
+        }
+        if (call_window &&
+            (window.started < call_window->started ||
+             window.finished > call_window->finished)) {
+            return false;
+        }
+        if (!last_source_acquisition_window) return true;
+        if (window.started < last_source_acquisition_window->finished) {
+            return false;
+        }
+        const auto gap = elapsed_between(last_source_acquisition_window->started,
+                                         window.started);
+        const auto gap_milliseconds =
+            gap ? rounded_up_milliseconds(*gap) : std::nullopt;
+        return gap_milliseconds &&
+               *gap_milliseconds <= static_cast<std::uint64_t>(
+                                         contract.interval.max_observation_gap
+                                             .count());
     }
 
     bool initialize_segment(ProfilingEventWatermark after) {
@@ -1177,21 +1296,83 @@ struct ProfilingIntervalRecorder::State {
         return true;
     }
 
+    bool refresh_final_checkpoint(
+        const ProfilingRawIntervalFrame &frame,
+        const ProfilingAcquisitionTiming &timing,
+        const ProfilingSourceAcquisitionWindow &call_window) {
+        if (!frame_repeats_last_retained_state(frame) ||
+            !acquisition_window_is_valid(frame.acquisition_window,
+                                         call_window)) {
+            return false;
+        }
+        const auto claims = derive_claim_amounts(contract, frame.samples, false);
+        const auto frame_state = interval_frame_state_digest(context, frame);
+        const auto frame_provenance =
+            interval_frame_provenance_digest(context, frame);
+        if (!claims || !frame_state || !frame_provenance ||
+            segment.last_capture_generation == 0 ||
+            !fold_claims(*claims)) {
+            return false;
+        }
+
+        auto provenance = extend_final_checkpoint_provenance(
+            segment.provenance_sha256, segment.last_capture_generation,
+            frame.event_watermark, *frame_provenance);
+        const auto observation = derived_observation(
+            contract, context, frame.samples, *claims, timing,
+            contract_sha256);
+        if (!provenance || !observation) return false;
+
+        ProfilingRecordedCheckpoint checkpoint{
+            segment.last_capture_generation,
+            frame.event_watermark,
+            *observation,
+        };
+        const auto checkpoint_provenance =
+            checkpoint_provenance_digest(checkpoint);
+        provenance = checkpoint_provenance
+                         ? extend_checkpoint_provenance(
+                               *provenance, *checkpoint_provenance)
+                         : std::nullopt;
+        if (!provenance) return false;
+
+        segment.provenance_sha256 = *provenance;
+        segment.checkpoint = checkpoint;
+        segment.has_checkpoint = true;
+        last_checkpoint = std::move(checkpoint);
+        last_claims = *claims;
+        last_checkpoint_provenance_sha256 = *checkpoint_provenance;
+        last_raw_frame_state_sha256 = *frame_state;
+        last_source_acquisition_window = frame.acquisition_window;
+        return true;
+    }
+
     bool fold_claims(const DerivedClaimAmounts &claims) {
         return componentwise_maximum(segment.peak_observed,
                                      claims.observed) &&
                componentwise_maximum(segment.peak_attributed,
                                      claims.attributed) &&
+               componentwise_residual_excursion(
+                   interval_baseline_residual,
+                   segment.maximum_unattributed_excursion,
+                   claims.residual) &&
                componentwise_maximum(segment.maximum_uncertainty,
                                      claims.uncertainty) &&
                componentwise_minimum(segment.minimum_safety_margin,
                                      claims.safety_margin);
     }
 
-    bool record_frame(const ProfilingRawIntervalFrame &frame,
-                      const std::optional<ProfilingAcquisitionTiming> &timing,
-                      bool counts_toward_limit) {
-        if (!frame_matches_stream(frame)) return false;
+    bool record_frame(
+        const ProfilingRawIntervalFrame &frame,
+        const std::optional<ProfilingAcquisitionTiming> &timing,
+        bool counts_toward_limit,
+        const std::optional<ProfilingSourceAcquisitionWindow> &call_window =
+            std::nullopt) {
+        if (!frame_matches_stream(frame) ||
+            !acquisition_window_is_valid(frame.acquisition_window,
+                                         call_window)) {
+            return false;
+        }
         const auto claims = derive_claim_amounts(contract, frame.samples, false);
         if (!claims ||
             claims->source_generation != frame.event_watermark.value) {
@@ -1214,12 +1395,13 @@ struct ProfilingIntervalRecorder::State {
             }
         }
 
+        const auto frame_state = interval_frame_state_digest(context, frame);
         const auto frame_provenance =
             interval_frame_provenance_digest(context, frame);
-        if (!frame_provenance ||
+        if (!frame_state || !frame_provenance ||
             (frame.event_watermark == segment.through_event_watermark &&
-             !last_raw_frame_provenance_sha256.empty() &&
-             *frame_provenance != last_raw_frame_provenance_sha256)) {
+             !last_raw_frame_state_sha256.empty() &&
+             *frame_state != last_raw_frame_state_sha256)) {
             return false;
         }
         auto provenance = extend_segment_provenance(
@@ -1258,7 +1440,8 @@ struct ProfilingIntervalRecorder::State {
             last_claims = *claims;
             last_checkpoint_provenance_sha256 = *checkpoint_provenance;
         }
-        last_raw_frame_provenance_sha256 = *frame_provenance;
+        last_raw_frame_state_sha256 = *frame_state;
+        last_source_acquisition_window = frame.acquisition_window;
         return true;
     }
 
@@ -1306,7 +1489,8 @@ struct ProfilingIntervalRecorder::State {
         result.peak_attributed_claims =
             claim_closure(contract, segment.peak_attributed);
         result.external_change_claims = claim_closure(contract, zero);
-        result.unattributed_claims = claim_closure(contract, zero);
+        result.unattributed_claims = claim_closure(
+            contract, segment.maximum_unattributed_excursion);
         result.uncertainty_claims =
             claim_closure(contract, segment.maximum_uncertainty);
         result.safety_margin_claims =
@@ -1316,7 +1500,8 @@ struct ProfilingIntervalRecorder::State {
 
     ProfilingIntervalRecorderResult handle_batch(
         ProfilingRawIntervalBatch raw,
-        const ProfilingAcquisitionTiming &timing, bool close,
+        const ProfilingAcquisitionTiming &timing,
+        const ProfilingSourceAcquisitionWindow &call_window, bool close,
         bool source_finished) {
         auto fail = [&](ProfilingIntervalRecorderStatus status,
                         std::string diagnostic) {
@@ -1334,15 +1519,10 @@ struct ProfilingIntervalRecorder::State {
                                  raw.after_event_watermark.value;
         const auto remaining =
             contract.interval.max_interval_frames - total_frame_count;
-        const bool reuses_final_checkpoint =
-            source_finished && remaining == 0 && event_count == 0 &&
-            raw.event_frames.empty() &&
-            raw.checkpoint.event_watermark == current_event_watermark &&
-            frame_repeats_last_checkpoint(raw.checkpoint);
         if (event_count !=
                 static_cast<std::uint64_t>(raw.event_frames.size()) ||
-            (!reuses_final_checkpoint &&
-             (remaining == 0 || event_count >= remaining))) {
+            event_count > remaining ||
+            (!source_finished && event_count >= remaining)) {
             return fail(ProfilingIntervalRecorderStatus::InvalidObservation,
                         "profiling interval history is incomplete");
         }
@@ -1362,11 +1542,16 @@ struct ProfilingIntervalRecorder::State {
                     "profiling interval event history does not close");
             }
         }
+        const bool refreshes_final_checkpoint =
+            source_finished &&
+            total_frame_count == contract.interval.max_interval_frames;
         if (expected != raw.through_event_watermark.value ||
             raw.checkpoint.event_watermark !=
                 raw.through_event_watermark ||
-            (!reuses_final_checkpoint &&
-             !record_frame(raw.checkpoint, timing, true))) {
+            (refreshes_final_checkpoint
+                 ? !refresh_final_checkpoint(raw.checkpoint, timing,
+                                             call_window)
+                 : !record_frame(raw.checkpoint, timing, true, call_window))) {
             return fail(ProfilingIntervalRecorderStatus::InvalidObservation,
                         "profiling interval checkpoint does not close");
         }
@@ -1481,7 +1666,10 @@ struct ProfilingIntervalRecorder::State {
                     ProfilingIntervalRecorderStatus::InvalidObservation,
                     "profiling interval acquisition exceeded its contract");
             }
-            return handle_batch(std::move(raw), *timing, close, finish_source);
+            return handle_batch(
+                std::move(raw), *timing,
+                ProfilingSourceAcquisitionWindow{started, finished}, close,
+                finish_source);
         } catch (...) {
             if (!finish_source) cleanup();
             return recorder_result(
@@ -1579,7 +1767,9 @@ ProfilingIntervalRecorderResult ProfilingIntervalRecorder::begin(
             state_->last_read_started = started;
             state_->next_capture_generation = 1;
             state_->total_frame_count = 0;
-            state_->last_raw_frame_provenance_sha256.clear();
+            state_->interval_baseline_residual.clear();
+            state_->last_raw_frame_state_sha256.clear();
+            state_->last_source_acquisition_window.reset();
             state_->last_checkpoint_provenance_sha256.clear();
             state_->last_checkpoint = {};
             state_->last_claims = {};
@@ -1629,7 +1819,9 @@ ProfilingIntervalRecorderResult ProfilingIntervalRecorder::begin(
                                                observed_time, finished);
         if (timing &&
             state_->initialize_segment(state_->current_event_watermark) &&
-            state_->record_frame(raw.checkpoint, *timing, true)) {
+            state_->record_frame(
+                raw.checkpoint, *timing, true,
+                ProfilingSourceAcquisitionWindow{started, finished})) {
             return recorder_result(ProfilingIntervalRecorderStatus::Ok);
         }
     } catch (...) {

@@ -42,6 +42,13 @@ struct HasAttestation<T, std::void_t<decltype(T::attestation)>>
 static_assert(!HasPhase<ProfilingIntervalSegment>::value);
 static_assert(!HasLifecycleState<ProfilingIntervalSegment>::value);
 static_assert(!HasAttestation<ProfilingIntervalSegment>::value);
+static_assert(std::is_same_v<decltype(ProfilingSourceAcquisitionWindow::started),
+                             std::chrono::steady_clock::time_point>);
+static_assert(std::is_same_v<decltype(ProfilingSourceAcquisitionWindow::finished),
+                             std::chrono::steady_clock::time_point>);
+static_assert(std::is_same_v<
+              decltype(ProfilingRawIntervalFrame::acquisition_window),
+              ProfilingSourceAcquisitionWindow>);
 static_assert(noexcept(
     std::declval<ProfilingIntervalObservationSource &>().finish(
         ProfilingRawIntervalToken{}, ProfilingEventWatermark{})));
@@ -129,7 +136,9 @@ ProfilingCollectionClock clock_at(std::uint64_t utc_seconds) {
 
 ProfilingRawIntervalFrame frame(std::uint64_t watermark,
                                 std::uint64_t total,
-                                std::uint64_t owner) {
+                                std::uint64_t owner,
+                                std::chrono::milliseconds acquired_at = 1ms,
+                                std::chrono::milliseconds acquired_until = 4ms) {
     ProfilingRawIntervalFrame value;
     value.source_epoch_sha256 = digest('1');
     const auto owner_scope_set =
@@ -138,6 +147,10 @@ ProfilingRawIntervalFrame frame(std::uint64_t watermark,
     value.owner_scope_set_sha256 = *owner_scope_set;
     value.event_semantics_revision_sha256 = digest('9');
     value.event_watermark = ProfilingEventWatermark{watermark};
+    value.acquisition_window = ProfilingSourceAcquisitionWindow{
+        std::chrono::steady_clock::time_point{} + acquired_at,
+        std::chrono::steady_clock::time_point{} + acquired_until,
+    };
     value.samples = {
         ProfilingRawSample{"sensor/gtt-used", std::nullopt, total, watermark},
         ProfilingRawSample{"sensor/gtt-used", "owner/model-alpha", owner,
@@ -239,14 +252,17 @@ ScriptedIntervalSource source() {
     value.begin_result = ProfilingRawIntervalBeginResult{
         ProfilingIntervalSourceError::None,
         ProfilingRawIntervalToken{7},
-        frame(10, 100, 100),
+        frame(10, 100, 100, 1ms, 4ms),
         {},
     };
     value.reads.push_back(batch(
-        10, 12, {frame(11, 200, 200), frame(12, 300, 300)},
-        frame(12, 300, 300)));
-    value.finish_result =
-        batch(12, 13, {frame(13, 100, 100)}, frame(13, 100, 100));
+        10, 12,
+        {frame(11, 200, 200, 6ms, 7ms),
+         frame(12, 300, 300, 8ms, 9ms)},
+        frame(12, 300, 300, 11ms, 14ms)));
+    value.finish_result = batch(
+        12, 13, {frame(13, 100, 100, 16ms, 19ms)},
+        frame(13, 100, 100, 21ms, 24ms));
     return value;
 }
 
@@ -343,10 +359,60 @@ void test_records_complete_interval_segments(TestState &state) {
     }
 }
 
+void test_records_target_effect_over_stable_domain_background(
+    TestState &state) {
+    auto scripted = source();
+    scripted.begin_result.checkpoint = frame(10, 500, 100, 1ms, 4ms);
+    scripted.reads.clear();
+    scripted.reads.push_back(batch(
+        10, 12,
+        {frame(11, 600, 200, 6ms, 7ms),
+         frame(12, 700, 300, 8ms, 9ms)},
+        frame(12, 700, 300, 11ms, 14ms)));
+    scripted.finish_result = batch(
+        12, 13, {frame(13, 500, 100, 16ms, 19ms)},
+        frame(13, 500, 100, 21ms, 24ms));
+    ProfilingIntervalRecorder recorder(contract(), scripted, clock());
+
+    const auto started = recorder.begin(context(), [] { return false; });
+    const auto checkpointed = recorder.checkpoint([] { return false; });
+
+    state.require(started.ok() && checkpointed.ok() &&
+                      checkpointed.segment.has_value(),
+                  "stable domain-wide background yields a complete segment");
+    if (checkpointed.segment) {
+        const auto &segment = *checkpointed.segment;
+        require_capacity(state, segment.peak_observed_claims, 300,
+                         "the segment peak describes the target-owned effect");
+        require_capacity(state, segment.peak_attributed_claims, 300,
+                         "the target-owned peak remains fully attributed");
+        require_capacity_zero(
+            state, segment.external_change_claims,
+            "no known-external projection is inferred from the residual");
+        require_capacity_zero(
+            state, segment.unattributed_claims,
+            "a stable nonzero domain residual is not contamination");
+        require_capacity(state, segment.safety_margin_claims, 290,
+                         "safety slack uses peak domain-wide demand");
+        require_capacity(
+            state, segment.checkpoint.observation.observed_claims, 300,
+            "the checkpoint exposes the target effect, not domain-wide background");
+        require_capacity(
+            state, segment.checkpoint.observation.attributed_claims, 300,
+            "checkpoint target attribution remains closed");
+    }
+
+    const auto finished = recorder.finish();
+    state.require(finished.ok() && !recorder.active() &&
+                      scripted.finish_calls == 1,
+                  "the stable-background interval drains normally");
+}
+
 void test_zero_event_watermark_is_not_a_capture_generation(TestState &state) {
     auto scripted = source();
-    scripted.begin_result.checkpoint = frame(0, 100, 100);
-    scripted.finish_result = batch(0, 0, {}, frame(0, 100, 100));
+    scripted.begin_result.checkpoint = frame(0, 100, 100, 1ms, 4ms);
+    scripted.finish_result =
+        batch(0, 0, {}, frame(0, 100, 100, 11ms, 14ms));
     ProfilingIntervalRecorder recorder(contract(), scripted, clock());
 
     const auto started = recorder.begin(context(), [] { return false; });
@@ -364,9 +430,11 @@ void test_zero_event_watermark_is_not_a_capture_generation(TestState &state) {
 void test_poll_retains_history_for_the_next_checkpoint(TestState &state) {
     auto scripted = source();
     scripted.reads.push_back(batch(
-        12, 13, {frame(13, 400, 400)}, frame(13, 400, 400)));
-    scripted.finish_result =
-        batch(13, 14, {frame(14, 100, 100)}, frame(14, 100, 100));
+        12, 13, {frame(13, 400, 400, 16ms, 19ms)},
+        frame(13, 400, 400, 21ms, 24ms)));
+    scripted.finish_result = batch(
+        13, 14, {frame(14, 100, 100, 26ms, 29ms)},
+        frame(14, 100, 100, 31ms, 34ms));
     ProfilingIntervalRecorder recorder(contract(), scripted, clock());
 
     const auto started = recorder.begin(context(), [] { return false; });
@@ -400,11 +468,13 @@ void test_poll_retains_history_for_the_next_checkpoint(TestState &state) {
 
     auto alternate_source = source();
     alternate_source.reads.front().event_frames.front() =
-        frame(11, 250, 250);
+        frame(11, 250, 250, 6ms, 7ms);
     alternate_source.reads.push_back(batch(
-        12, 13, {frame(13, 400, 400)}, frame(13, 400, 400)));
-    alternate_source.finish_result =
-        batch(13, 14, {frame(14, 100, 100)}, frame(14, 100, 100));
+        12, 13, {frame(13, 400, 400, 16ms, 19ms)},
+        frame(13, 400, 400, 21ms, 24ms)));
+    alternate_source.finish_result = batch(
+        13, 14, {frame(14, 100, 100, 26ms, 29ms)},
+        frame(14, 100, 100, 31ms, 34ms));
     ProfilingIntervalRecorder alternate(contract(), alternate_source, clock());
     const auto alternate_started =
         alternate.begin(context(), [] { return false; });
@@ -439,24 +509,42 @@ void test_poll_retains_history_for_the_next_checkpoint(TestState &state) {
                   "the alternate transcript also drains exactly once");
 }
 
-void test_transient_external_demand_fails_closed(TestState &state) {
+void test_records_transient_residual_change(TestState &state) {
     auto scripted = source();
+    scripted.begin_result.checkpoint = frame(10, 500, 100, 1ms, 4ms);
     scripted.reads.clear();
     scripted.reads.push_back(batch(
-        10, 12, {frame(11, 200, 100), frame(12, 100, 100)},
-        frame(12, 100, 100)));
+        10, 12,
+        {frame(11, 700, 200, 6ms, 7ms),
+         frame(12, 600, 200, 8ms, 9ms)},
+        frame(12, 600, 200, 11ms, 14ms)));
+    scripted.finish_result =
+        batch(12, 12, {}, frame(12, 600, 200, 21ms, 24ms));
     ProfilingIntervalRecorder recorder(contract(), scripted, clock());
 
     const auto started = recorder.begin(context(), [] { return false; });
     const auto result = recorder.checkpoint([] { return false; });
 
-    state.require(started.ok() &&
-                      result.status ==
-                          ProfilingIntervalRecorderStatus::InvalidObservation &&
-                      !result.segment.has_value(),
-                  "transient external demand invalidates the whole interval");
-    state.require(!recorder.active() && scripted.finish_calls == 1,
-                  "invalid history is drained before returning failure");
+    state.require(started.ok() && result.ok() && result.segment.has_value(),
+                  "coherent domain-used and target histories remain structural evidence");
+    if (result.segment) {
+        require_capacity(state, result.segment->peak_observed_claims, 200,
+                         "domain-wide background does not inflate the target peak");
+        require_capacity(state, result.segment->peak_attributed_claims, 200,
+                         "the target peak remains attributed");
+        require_capacity_zero(
+            state, result.segment->external_change_claims,
+            "residual motion is not mislabeled as known external ownership");
+        require_capacity(
+            state, result.segment->unattributed_claims, 100,
+            "maximum residual motion is retained for downstream rejection");
+        require_capacity(state, result.segment->safety_margin_claims, 290,
+                         "safety slack still uses peak domain-wide demand");
+    }
+    const auto finished = recorder.finish();
+    state.require(finished.ok() && !recorder.active() &&
+                      scripted.finish_calls == 1,
+                  "the contaminated segment still drains its source exactly once");
 }
 
 void test_rejects_incomplete_or_rebound_history(TestState &state) {
@@ -485,6 +573,54 @@ void test_rejects_incomplete_or_rebound_history(TestState &state) {
              value.event_frames.front().event_semantics_revision_sha256 =
                  digest('2');
          }},
+        {"a malformed acquisition window invalidates the interval",
+         [](auto &value) {
+             value.event_frames.front().acquisition_window =
+                 ProfilingSourceAcquisitionWindow{
+                     std::chrono::steady_clock::time_point{} + 7ms,
+                     std::chrono::steady_clock::time_point{} + 6ms,
+                 };
+         }},
+        {"an excessive source acquisition skew invalidates the interval",
+         [](auto &value) {
+             value.event_frames.front().acquisition_window =
+                 ProfilingSourceAcquisitionWindow{
+                     std::chrono::steady_clock::time_point{} + 6ms,
+                     std::chrono::steady_clock::time_point{} + 27ms,
+                 };
+         }},
+        {"a retrograde historical acquisition window invalidates the interval",
+         [](auto &value) {
+             value.event_frames.back().acquisition_window =
+                 ProfilingSourceAcquisitionWindow{
+                     std::chrono::steady_clock::time_point{} + 5ms,
+                     std::chrono::steady_clock::time_point{} + 6ms,
+                 };
+         }},
+        {"overlapping historical acquisition windows invalidate the interval",
+         [](auto &value) {
+             value.event_frames.back().acquisition_window =
+                 ProfilingSourceAcquisitionWindow{
+                     std::chrono::steady_clock::time_point{} + 6ms,
+                     std::chrono::steady_clock::time_point{} + 8ms,
+                 };
+         }},
+        {"a historical acquisition gap above policy invalidates the interval",
+         [](auto &value) {
+             value.event_frames.front().acquisition_window =
+                 ProfilingSourceAcquisitionWindow{
+                     std::chrono::steady_clock::time_point{} + 52ms,
+                     std::chrono::steady_clock::time_point{} + 53ms,
+                 };
+         }},
+        {"a current checkpoint outside its Server call invalidates the interval",
+         [](auto &value) {
+             value.checkpoint.acquisition_window =
+                 ProfilingSourceAcquisitionWindow{
+                     std::chrono::steady_clock::time_point{} + 11ms,
+                     std::chrono::steady_clock::time_point{} + 16ms,
+                 };
+         }},
         {"mixed sample generations invalidate the interval",
          [](auto &value) {
              value.event_frames.front().samples.front().source_generation = 99;
@@ -507,10 +643,12 @@ void test_rejects_incomplete_or_rebound_history(TestState &state) {
          [](auto &value) {
              value.through_event_watermark = value.after_event_watermark;
              value.event_frames.clear();
-             value.checkpoint = frame(10, 300, 300);
+             value.checkpoint = frame(10, 300, 300, 11ms, 14ms);
          }},
         {"a changed checkpoint cannot reuse the final event watermark",
-         [](auto &value) { value.checkpoint = frame(12, 250, 250); }},
+         [](auto &value) {
+             value.checkpoint = frame(12, 250, 250, 11ms, 14ms);
+         }},
     };
 
     for (const auto &mutation : mutations) {
@@ -527,13 +665,32 @@ void test_rejects_incomplete_or_rebound_history(TestState &state) {
         state.require(scripted.finish_calls == 1 && !recorder.active(),
                       "invalid history is always drained");
     }
+
+    auto malformed_begin = source();
+    malformed_begin.begin_result.checkpoint.acquisition_window =
+        ProfilingSourceAcquisitionWindow{
+            std::chrono::steady_clock::time_point{} + 4ms,
+            std::chrono::steady_clock::time_point{} + 3ms,
+        };
+    ProfilingIntervalRecorder recorder(contract(), malformed_begin, clock());
+    const auto result = recorder.begin(context(), [] { return false; });
+    state.require(result.status ==
+                          ProfilingIntervalRecorderStatus::InvalidObservation &&
+                      !result.segment.has_value() && !recorder.active() &&
+                      malformed_begin.finish_calls == 1,
+                  "a malformed atomic begin window is drained and rejected");
 }
 
 void test_segment_provenance_binds_checkpoint_evidence(TestState &state) {
     auto first_source = source();
     auto second_source = source();
+    second_source.reads.front().checkpoint.acquisition_window =
+        ProfilingSourceAcquisitionWindow{
+            std::chrono::steady_clock::time_point{} + 12ms,
+            std::chrono::steady_clock::time_point{} + 14ms,
+        };
     ProfilingIntervalRecorder first(contract(), first_source, clock_at(1000));
-    ProfilingIntervalRecorder second(contract(), second_source, clock_at(2000));
+    ProfilingIntervalRecorder second(contract(), second_source, clock_at(1000));
 
     const auto first_started = first.begin(context(), [] { return false; });
     const auto second_started = second.begin(context(), [] { return false; });
@@ -543,11 +700,11 @@ void test_segment_provenance_binds_checkpoint_evidence(TestState &state) {
     state.require(first_started.ok() && second_started.ok() &&
                       first_segment.segment.has_value() &&
                       second_segment.segment.has_value() &&
-                      first_segment.segment->checkpoint.observation.observed_at !=
+                      first_segment.segment->checkpoint.observation.observed_at ==
                           second_segment.segment->checkpoint.observation.observed_at &&
                       first_segment.segment->provenance_sha256 !=
                           second_segment.segment->provenance_sha256,
-                  "segment provenance binds checkpoint timing evidence");
+                  "segment provenance binds a newer same-watermark acquisition window");
 }
 
 void test_enforces_cadence_and_frame_bound(TestState &state) {
@@ -599,12 +756,13 @@ void test_enforces_cadence_and_frame_bound(TestState &state) {
 }
 
 void test_frame_bound_remains_finishable(TestState &state) {
+    std::string first_final_provenance;
     {
         auto bounded_contract = contract();
         bounded_contract.interval.max_interval_frames = 1;
         auto scripted = source();
         scripted.finish_result =
-            batch(10, 10, {}, frame(10, 100, 100));
+            batch(10, 10, {}, frame(10, 100, 100, 11ms, 14ms));
         ProfilingIntervalRecorder recorder(bounded_contract, scripted, clock());
 
         const auto started =
@@ -618,8 +776,102 @@ void test_frame_bound_remains_finishable(TestState &state) {
         if (finished.segment) {
             state.require(finished.segment->frame_count == 1 &&
                               finished.segment->checkpoint.capture_generation ==
-                                  1,
-                          "an unchanged final drain reuses the retained checkpoint");
+                                  1 &&
+                              finished.segment->checkpoint.observation.observed_at ==
+                                  "1970-01-01T00:16:41Z",
+                          "an unchanged final drain reuses the retained frame but refreshes checkpoint timing");
+            first_final_provenance = finished.segment->provenance_sha256;
+        }
+    }
+
+    {
+        auto bounded_contract = contract();
+        bounded_contract.interval.max_interval_frames = 1;
+        auto scripted = source();
+        scripted.finish_result =
+            batch(10, 10, {}, frame(10, 100, 100, 12ms, 14ms));
+        ProfilingIntervalRecorder recorder(bounded_contract, scripted, clock());
+
+        const auto started =
+            recorder.begin(context(bounded_contract), [] { return false; });
+        const auto finished = recorder.finish();
+
+        state.require(started.ok() && finished.ok() &&
+                          finished.segment.has_value() &&
+                          !recorder.active() && scripted.finish_calls == 1,
+                      "a distinct newer final window can reuse a capped frame");
+        if (finished.segment) {
+            state.require(
+                finished.segment->frame_count == 1 &&
+                    finished.segment->checkpoint.capture_generation == 1 &&
+                    finished.segment->checkpoint.observation.observed_at ==
+                        "1970-01-01T00:16:41Z" &&
+                    !first_final_provenance.empty() &&
+                    finished.segment->provenance_sha256 !=
+                        first_final_provenance,
+                "the final window changes provenance without incrementing retained frame count");
+        }
+    }
+
+    std::string exact_fill_first_provenance;
+    {
+        auto bounded_contract = contract();
+        bounded_contract.interval.max_interval_frames = 2;
+        auto scripted = source();
+        scripted.finish_result = batch(
+            10, 11, {frame(11, 200, 200, 6ms, 9ms)},
+            frame(11, 200, 200, 10ms, 14ms));
+        ProfilingIntervalRecorder recorder(bounded_contract, scripted, clock());
+
+        const auto started =
+            recorder.begin(context(bounded_contract), [] { return false; });
+        const auto finished = recorder.finish();
+
+        state.require(started.ok() && finished.ok() &&
+                          finished.segment.has_value() &&
+                          !recorder.active() && scripted.finish_calls == 1,
+                      "a final event may exactly fill the remaining frame slot");
+        if (finished.segment) {
+            state.require(
+                finished.segment->frame_count == 2 &&
+                    finished.segment->checkpoint.capture_generation == 2 &&
+                    finished.segment->through_event_watermark.value == 11 &&
+                    finished.segment->checkpoint.observation.observed_at ==
+                        "1970-01-01T00:16:41Z",
+                "the exact-fill drain refreshes timing without retaining its checkpoint");
+            exact_fill_first_provenance =
+                finished.segment->provenance_sha256;
+        }
+    }
+
+    {
+        auto bounded_contract = contract();
+        bounded_contract.interval.max_interval_frames = 2;
+        auto scripted = source();
+        scripted.finish_result = batch(
+            10, 11, {frame(11, 200, 200, 6ms, 9ms)},
+            frame(11, 200, 200, 11ms, 14ms));
+        ProfilingIntervalRecorder recorder(bounded_contract, scripted, clock());
+
+        const auto started =
+            recorder.begin(context(bounded_contract), [] { return false; });
+        const auto finished = recorder.finish();
+
+        state.require(started.ok() && finished.ok() &&
+                          finished.segment.has_value() &&
+                          !recorder.active() && scripted.finish_calls == 1,
+                      "an exact-fill drain accepts a distinct newer final window");
+        if (finished.segment) {
+            state.require(
+                finished.segment->frame_count == 2 &&
+                    finished.segment->checkpoint.capture_generation == 2 &&
+                    finished.segment->through_event_watermark.value == 11 &&
+                    finished.segment->checkpoint.observation.observed_at ==
+                        "1970-01-01T00:16:41Z" &&
+                    !exact_fill_first_provenance.empty() &&
+                    finished.segment->provenance_sha256 !=
+                        exact_fill_first_provenance,
+                "the exact-fill checkpoint window changes provenance without exceeding the frame bound");
         }
     }
 
@@ -628,7 +880,7 @@ void test_frame_bound_remains_finishable(TestState &state) {
         bounded_contract.interval.max_interval_frames = 4;
         auto scripted = source();
         scripted.finish_result =
-            batch(12, 12, {}, frame(12, 300, 300));
+            batch(12, 12, {}, frame(12, 300, 300, 21ms, 24ms));
         ProfilingIntervalRecorder recorder(bounded_contract, scripted, clock());
 
         const auto started =
@@ -656,7 +908,7 @@ void test_frame_bound_remains_finishable(TestState &state) {
         bounded_contract.interval.max_interval_frames = 1;
         auto scripted = source();
         scripted.finish_result =
-            batch(10, 10, {}, frame(10, 200, 200));
+            batch(10, 10, {}, frame(10, 200, 200, 11ms, 14ms));
         ProfilingIntervalRecorder recorder(bounded_contract, scripted, clock());
 
         const auto started =
@@ -815,9 +1067,10 @@ int main() {
     TestState state;
     test_default_recorder_is_unavailable(state);
     test_records_complete_interval_segments(state);
+    test_records_target_effect_over_stable_domain_background(state);
     test_zero_event_watermark_is_not_a_capture_generation(state);
     test_poll_retains_history_for_the_next_checkpoint(state);
-    test_transient_external_demand_fails_closed(state);
+    test_records_transient_residual_change(state);
     test_rejects_incomplete_or_rebound_history(state);
     test_segment_provenance_binds_checkpoint_evidence(state);
     test_enforces_cadence_and_frame_bound(state);
