@@ -291,6 +291,18 @@ _Avoid_: Confusing it with the conservative claim overlay, generalizing an exact
 An exclusive, server-owned qualification of one exact operation and identity whose workload, baseline, and lifecycle are completely isolated and attributed. Unattributed external demand prevents it from establishing a local overlay.
 _Avoid_: Treating an ordinary concurrent benchmark, global memory sample, or partially attributed run as qualification evidence.
 
+**Profiling source sample**:
+A phase-neutral low-level reading containing an opaque sensor ID, an optional server-issued owner-scope ID, one unsigned scalar value, and the source's native generation. It carries no claim family, unit, timestamp, health, completeness, lifecycle, attribution, uncertainty, safety, or attestation authority.
+_Avoid_: Accepting provider-supplied truth decisions or treating a successful read as profiling evidence.
+
+**Profiling derivation contract**:
+The transaction-specific, server-owned policy binding one provider revision, the exact required capacity sensors and owner scopes, their mappings to consumable-capacity byte claims, freshness and skew bounds, and per-sensor uncertainty bounds and safety ceilings. Its canonical digest is order-insensitive for sensor and owner sets. The collector accepts only an exact coherent raw closure and derives a phase-neutral observation with positive safety slack; a later transaction authority proves phase and lifecycle before sealing an attestation.
+_Avoid_: Applying capacity slack arithmetic to discrete claims, letting an observation source select semantics or close ownership, or letting a caller assign phase or lifecycle from one snapshot.
+
+**Profiling derived observation**:
+A phase-neutral Server result from one contract-matched raw closure, carrying Server-derived provider identity, raw provenance, generation, acquisition and freshness bounds, health, complete current owner coverage, observed and owner-attributed capacity closure, uncertainty, and positive safety slack. It carries no interval-change claim, is not a phase attestation, and has no lifecycle or publication authority.
+_Avoid_: Inferring external or unattributed interval change from one snapshot, or treating one accepted collection as baseline, workload, release, or completed qualification evidence.
+
 **Deployment-qualified residency method**:
 A local-only method result established for one exact operation and closed residency deployment identity by a complete profiling transaction. It does not change the shared capability level or footprint confidence class and does not apply to another model, device, backend, configuration, workload, or operation family.
 _Avoid_: Treating local qualification as shared release authority or allowing it to bypass protection, ownership, recovery, claim-completeness, or safety constraints.
