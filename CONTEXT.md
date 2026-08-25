@@ -300,7 +300,7 @@ The transaction-specific, server-owned policy binding one provider revision, exa
 _Avoid_: Applying capacity slack arithmetic to discrete claims, letting an observation source select semantics or close ownership, or letting a caller assign phase or lifecycle from one snapshot.
 
 **Profiling derived observation**:
-A phase-neutral Server result from one contract-matched raw closure, carrying Server-derived provider identity, raw provenance, generation, acquisition and freshness bounds, health, complete current owner coverage, observed and owner-attributed capacity closure, uncertainty, and positive safety slack. It carries no interval-change claim, is not a phase attestation, and has no lifecycle or publication authority.
+A phase-neutral Server result from one contract-matched raw closure, carrying Server-derived provider identity, raw provenance, source generation, acquisition and freshness bounds, health, complete current owner coverage, observed and owner-attributed capacity closure, uncertainty, and positive safety slack. It carries no interval-change claim, is not a phase attestation, and has no lifecycle or publication authority.
 _Avoid_: Inferring external or unattributed interval change from one snapshot, or treating one accepted collection as baseline, workload, release, or completed qualification evidence.
 
 **Profiling observation interval**:

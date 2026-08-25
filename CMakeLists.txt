@@ -3508,6 +3508,25 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_PROVIDER_TEST_SRC}")
     set_tests_properties(ResidencyProfilingProvider PROPERTIES TIMEOUT 30)
 endif()
 
+set(_RESIDENCY_PROFILING_INTERVAL_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_interval.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_INTERVAL_TEST_SRC}")
+    add_executable(
+        test_residency_profiling_interval
+        test/cpp/test_residency_profiling_interval.cpp
+    )
+    target_link_libraries(test_residency_profiling_interval PRIVATE
+        lemonade-server-core
+    )
+    add_cpp_ci_test(
+        ResidencyProfilingInterval
+        CI ON
+        COMMAND test_residency_profiling_interval
+    )
+    set_tests_properties(ResidencyProfilingInterval PROPERTIES TIMEOUT 30)
+endif()
+
 # Routing-helper reconciliation: durable needed-set + non-blocking prune that
 # skips busy/pinned helpers, plus a policy-update-vs-busy concurrency race.
 set(_ROUTING_HELPER_RECONCILE_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_routing_helper_reconcile.cpp")
