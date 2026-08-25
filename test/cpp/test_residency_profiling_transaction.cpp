@@ -389,6 +389,43 @@ void test_accepts_and_releases_gate(TestState &state, Router &router) {
     if (reacquired) router.end_exclusive();
 }
 
+void test_accepts_same_second_phase_observations(TestState &state,
+                                                 Router &router) {
+    ProfilingTransaction transaction(router, options());
+    const auto transaction_context = context();
+    ProfilingTransactionCapture captured;
+    auto baseline = phase_draft(transaction_context, ProfilingPhase::Baseline);
+    auto workload = phase_draft(transaction_context, ProfilingPhase::Workload);
+    auto release = phase_draft(transaction_context, ProfilingPhase::Release);
+    baseline.observed_at = "2026-08-23T10:00:00Z";
+    workload.observed_at = baseline.observed_at;
+    release.observed_at = baseline.observed_at;
+    captured.baseline_attestation = phase_bytes(std::move(baseline));
+    captured.workload_attestation = phase_bytes(std::move(workload));
+    captured.release_attestation = phase_bytes(std::move(release));
+
+    auto result = transaction.run(
+        transaction_context,
+        [captured = std::move(captured)](
+            Router &, const ProfilingTransactionContext &,
+            const ProfilingCancellationCheck &) mutable {
+            return std::move(captured);
+        });
+
+    state.require(result.accepted(),
+                  "same-second phase observations are accepted");
+    state.require(result.evidence.has_value(),
+                  "same-second phase observations retain evidence");
+    if (result.evidence) {
+        state.require(
+            result.evidence->baseline().observation_generation() <
+                    result.evidence->workload().observation_generation() &&
+                result.evidence->workload().observation_generation() <
+                    result.evidence->release().observation_generation(),
+            "same-second phase observations retain strict generation order");
+    }
+}
+
 void test_rejects_incomplete_capture(TestState &state, Router &router) {
     ProfilingTransaction transaction(router, options());
     auto result = transaction.run(context(), [&](Router &, const ProfilingTransactionContext &ctx,
@@ -503,10 +540,10 @@ void test_rejects_unsafe_evidence(TestState &state, Router &router) {
         },
         ProfilingTransactionStatus::InvalidEvidence);
     expect_rejected(
-        "observation times must advance",
+        "observation times must not regress",
         [](auto &ctx, auto &value) {
             auto phase = phase_draft(ctx, ProfilingPhase::Release);
-            phase.observed_at = "2026-08-23T10:01:00Z";
+            phase.observed_at = "2026-08-23T10:00:59Z";
             value.release_attestation = phase_bytes(std::move(phase));
         },
         ProfilingTransactionStatus::InvalidEvidence);
@@ -1161,6 +1198,7 @@ int main() {
         Router router(&config, nullptr, nullptr);
         test_cross_router_request_ownership(state, router, config);
         test_accepts_and_releases_gate(state, router);
+        test_accepts_same_second_phase_observations(state, router);
         test_rejects_incomplete_capture(state, router);
         test_rejects_unsafe_evidence(state, router);
         test_rejects_concurrent_run(state, router);

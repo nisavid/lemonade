@@ -234,6 +234,8 @@ bool contract_is_valid(const ProfilingDerivationContract &contract) {
             contract.interval.event_semantics_revision_sha256) ||
         contract.interval.max_observation_gap <=
             std::chrono::milliseconds::zero() ||
+        contract.max_source_skew >=
+            contract.interval.max_observation_gap ||
         contract.interval.baseline_stability_window <=
             std::chrono::milliseconds::zero() ||
         contract.interval.release_stability_window <=

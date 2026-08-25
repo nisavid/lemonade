@@ -596,6 +596,62 @@ void test_freshness_is_anchored_before_read(TestState &state) {
 
 void test_collector_fails_closed(TestState &state) {
     {
+        auto invalid_cadence_contract = contract();
+        invalid_cadence_contract.max_source_skew =
+            invalid_cadence_contract.interval.max_observation_gap;
+        auto transaction_context = context();
+        const auto invalid_identity =
+            profiling_derivation_contract_sha256(invalid_cadence_contract);
+        state.require(!invalid_identity.has_value(),
+                      "observation cadence must strictly exceed source skew");
+        if (invalid_identity) {
+            transaction_context.observation_contract_sha256 =
+                *invalid_identity;
+        }
+        ScriptedProfilingObservationSource source({successful_read()});
+        ProfilingObservationCollector collector(
+            std::move(invalid_cadence_contract), source, clock());
+
+        const auto result =
+            collector.collect(transaction_context, [] { return false; });
+
+        state.require(result.status ==
+                              ProfilingCollectionStatus::InvalidContract &&
+                          !result.observation.has_value(),
+                      "equal source skew and observation cadence fail closed");
+        state.require(source.requests.empty(),
+                      "an impossible observation cadence cannot enter the source");
+    }
+
+    {
+        auto invalid_cadence_contract = contract();
+        invalid_cadence_contract.max_source_skew =
+            invalid_cadence_contract.interval.max_observation_gap + 1ms;
+        auto transaction_context = context();
+        const auto invalid_identity =
+            profiling_derivation_contract_sha256(invalid_cadence_contract);
+        state.require(!invalid_identity.has_value(),
+                      "observation cadence must exceed greater source skew");
+        if (invalid_identity) {
+            transaction_context.observation_contract_sha256 =
+                *invalid_identity;
+        }
+        ScriptedProfilingObservationSource source({successful_read()});
+        ProfilingObservationCollector collector(
+            std::move(invalid_cadence_contract), source, clock());
+
+        const auto result =
+            collector.collect(transaction_context, [] { return false; });
+
+        state.require(result.status ==
+                              ProfilingCollectionStatus::InvalidContract &&
+                          !result.observation.has_value(),
+                      "source skew above observation cadence fails closed");
+        state.require(source.requests.empty(),
+                      "a negative observation budget cannot enter the source");
+    }
+
+    {
         auto invalid_contract = contract();
         invalid_contract.sensors.front().safety_ceiling =
             invalid_contract.sensors.front().uncertainty_bound;

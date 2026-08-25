@@ -288,7 +288,7 @@ A deployment-scoped, content-addressed qualification derived from one isolated, 
 _Avoid_: Confusing it with the conservative claim overlay, generalizing an exact local qualification, treating local calibration as a release revision, or exporting it automatically.
 
 **Residency profiling transaction**:
-An exclusive, server-owned qualification of one exact operation and identity whose workload, baseline, and lifecycle are completely isolated and attributed. Unattributed external demand prevents it from establishing a local overlay.
+An exclusive, server-owned qualification of one exact operation and identity whose workload, baseline, and lifecycle are completely isolated and attributed. It withholds all phase attestations until one continuous interval proves a stable baseline, completed workload, retained release transition, and stable final drain; any unattributed external demand rejects the whole capture.
 _Avoid_: Treating an ordinary concurrent benchmark, global memory sample, or partially attributed run as qualification evidence.
 
 **Profiling source sample**:
@@ -304,7 +304,7 @@ A phase-neutral Server result from one contract-matched raw closure, carrying Se
 _Avoid_: Inferring external or unattributed interval change from one snapshot, or treating one accepted collection as baseline, workload, release, or completed qualification evidence.
 
 **Profiling observation interval**:
-A Server-owned whole-transaction record that begins with an atomic subscription and snapshot after exclusive admission and ends with an atomic drain and unsubscription after the target becomes terminal. It is complete only when one bound source epoch and owner-scope set exposes every relevant resource mutation without lost history; the Server, not the adapter, derives interval attribution.
+A Server-owned whole-transaction record that begins with an atomic subscription and snapshot after exclusive admission and ends with an atomic drain and unsubscription after the target becomes terminal. It is complete only when one bound source epoch and owner-scope set exposes every relevant resource mutation without lost history; the Server, not the adapter, derives interval attribution and assigns baseline, workload, and release lifecycle states together after the final drain.
 _Avoid_: Inferring isolation from point samples, accepting a provider-supplied clean-interval decision, or ending observation before target release.
 
 **Profiling event watermark**:

@@ -977,6 +977,7 @@ set(SOURCES_CORE
     src/cpp/server/residency/explanations.cpp
     src/cpp/server/residency/generated_contract.cpp
     src/cpp/server/residency/local_overlay.cpp
+    src/cpp/server/residency/profiling_capture_authority.cpp
     src/cpp/server/residency/profiling_provider.cpp
     src/cpp/server/residency/profiling_transaction.cpp
     src/cpp/server/wrapped_server.cpp
@@ -3525,6 +3526,27 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_INTERVAL_TEST_SRC}")
         COMMAND test_residency_profiling_interval
     )
     set_tests_properties(ResidencyProfilingInterval PROPERTIES TIMEOUT 30)
+endif()
+
+set(_RESIDENCY_PROFILING_CAPTURE_AUTHORITY_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_capture_authority.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_CAPTURE_AUTHORITY_TEST_SRC}")
+    add_executable(
+        test_residency_profiling_capture_authority
+        test/cpp/test_residency_profiling_capture_authority.cpp
+    )
+    target_link_libraries(test_residency_profiling_capture_authority PRIVATE
+        lemonade-server-core
+    )
+    add_cpp_ci_test(
+        ResidencyProfilingCaptureAuthority
+        CI ON
+        COMMAND test_residency_profiling_capture_authority
+    )
+    set_tests_properties(
+        ResidencyProfilingCaptureAuthority PROPERTIES TIMEOUT 30
+    )
 endif()
 
 # Routing-helper reconciliation: durable needed-set + non-blocking prune that
