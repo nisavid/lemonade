@@ -223,6 +223,43 @@ ClaimSourcesResult rejected_sources(const ClaimFailure &failure) {
 
 } // namespace
 
+std::optional<ConstraintEvidenceRequirement>
+constraint_evidence_requirement(ConstraintKind constraint) noexcept {
+    switch (constraint) {
+    case ConstraintKind::GpuSharedResidency:
+    case ConstraintKind::GpuProviderResolvedCapacity:
+        return ConstraintEvidenceRequirement{
+            ConstraintEvidenceKind::ClaimFamily,
+            std::optional<ClaimFamily>{ClaimFamily::ConsumableCapacity},
+        };
+    case ConstraintKind::HostMemAvailableFloor:
+    case ConstraintKind::HostEffectsProviderResolved:
+        return ConstraintEvidenceRequirement{
+            ConstraintEvidenceKind::ClaimFamily,
+            std::optional<ClaimFamily>{ClaimFamily::SafetyFloor},
+        };
+    case ConstraintKind::ModelTypePool:
+    case ConstraintKind::FlmTypeSlot:
+        return ConstraintEvidenceRequirement{
+            ConstraintEvidenceKind::ClaimFamily,
+            std::optional<ClaimFamily>{ClaimFamily::CardinalityPool},
+        };
+    case ConstraintKind::Ownership:
+        return ConstraintEvidenceRequirement{
+            ConstraintEvidenceKind::OwnerCoverage,
+            std::nullopt,
+        };
+    case ConstraintKind::NpuCrossFamily:
+    case ConstraintKind::NpuExclusive:
+        return ConstraintEvidenceRequirement{
+            ConstraintEvidenceKind::ClaimFamily,
+            std::optional<ClaimFamily>{
+                ClaimFamily::CompatibilityExclusivity},
+        };
+    }
+    return std::nullopt;
+}
+
 bool ClaimTotal::operator==(const ClaimTotal &other) const noexcept {
     return constraint_id == other.constraint_id && unit == other.unit && amount == other.amount;
 }
@@ -432,6 +469,26 @@ CheckedClaimSetResult check_claim_closure(std::vector<ClaimFamilyClosure> closur
     } catch (const ClaimFailure &failure) {
         return rejected_claims(failure);
     }
+}
+
+bool claim_families_cover_ordinary_constraints(
+    const CheckedClaimSet &claims,
+    const std::vector<ConstraintKind> &constraints) noexcept {
+    if (constraints.empty()) return false;
+    for (const auto constraint : constraints) {
+        const auto requirement = constraint_evidence_requirement(constraint);
+        if (!requirement) return false;
+        if (requirement->kind == ConstraintEvidenceKind::OwnerCoverage) {
+            continue;
+        }
+        if (!requirement->family) return false;
+        const auto completeness = claims.completeness(*requirement->family);
+        if (completeness == ClaimCompleteness::NotApplicable ||
+            completeness == ClaimCompleteness::Unknown) {
+            return false;
+        }
+    }
+    return true;
 }
 
 CheckedClaimSetResult checked_add(const CheckedClaimSet &left, const CheckedClaimSet &right) {

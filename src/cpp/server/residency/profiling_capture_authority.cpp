@@ -59,6 +59,37 @@ bool schedule_is_valid(const ProfilingDerivationContract &contract,
            contract.interval.max_observation_gap - contract.max_source_skew;
 }
 
+bool contract_covers_selector(
+    const ProfilingDerivationContract &contract,
+    const ProfilingTransactionContext &context) {
+    const auto contract_sha256 =
+        profiling_derivation_contract_sha256(contract);
+    if (!contract_sha256 ||
+        *contract_sha256 != context.observation_contract_sha256 ||
+        context.selector.catalog_selector.constraints.size() != 2) {
+        return false;
+    }
+
+    bool has_owner_coverage = false;
+    std::size_t capacity_constraints = 0;
+    for (const auto constraint :
+         context.selector.catalog_selector.constraints) {
+        const auto requirement = constraint_evidence_requirement(constraint);
+        if (!requirement) return false;
+        if (requirement->kind == ConstraintEvidenceKind::OwnerCoverage) {
+            has_owner_coverage = true;
+            continue;
+        }
+        if (requirement->family != ClaimFamily::ConsumableCapacity ||
+            (constraint != ConstraintKind::GpuSharedResidency &&
+             constraint != ConstraintKind::GpuProviderResolvedCapacity)) {
+            return false;
+        }
+        ++capacity_constraints;
+    }
+    return has_owner_coverage && capacity_constraints == 1;
+}
+
 std::optional<bool> elapsed_at_least(
     SteadyClock::time_point started,
     SteadyClock::time_point finished,
@@ -835,6 +866,10 @@ ProfilingTransactionCapture ProfilingCaptureAuthority::capture(
     try {
         if (!schedule_is_valid(contract_, schedule_)) {
             return capture_failure("profiling capture schedule is invalid");
+        }
+        if (!contract_covers_selector(contract_, context)) {
+            return capture_failure(
+                "profiling derivation contract does not cover selector");
         }
         CaptureOperation operation(contract_, *source_, schedule_, router,
                                    context, workload, should_abort);

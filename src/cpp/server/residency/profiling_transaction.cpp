@@ -124,6 +124,26 @@ bool claim_sets_equal(const std::vector<ClaimFamilyClosure> &left,
            *checked_left.claims == *checked_right.claims;
 }
 
+bool claim_set_covers_ordinary_constraints(
+    const std::vector<ClaimFamilyClosure> &claims,
+    const std::vector<ConstraintKind> &constraints) {
+    const auto checked = check_claim_closure(claims);
+    return checked.accepted() &&
+           claim_families_cover_ordinary_constraints(*checked.claims,
+                                                      constraints);
+}
+
+bool phase_covers_required_claim_families(
+    const ParsedProfilingPhaseAttestation &phase,
+    const std::vector<ConstraintKind> &constraints) {
+    return claim_set_covers_ordinary_constraints(phase.observed_claims(), constraints) &&
+           claim_set_covers_ordinary_constraints(phase.attributed_claims(), constraints) &&
+           claim_set_covers_ordinary_constraints(phase.external_change_claims(), constraints) &&
+           claim_set_covers_ordinary_constraints(phase.unattributed_claims(), constraints) &&
+           claim_set_covers_ordinary_constraints(phase.uncertainty_claims(), constraints) &&
+           claim_set_covers_ordinary_constraints(phase.safety_margin_claims(), constraints);
+}
+
 bool release_is_bounded(const ParsedProfilingPhaseAttestation &baseline,
                         const ParsedProfilingPhaseAttestation &release) {
     auto baseline_claims = check_claim_closure(baseline.observed_claims());
@@ -503,7 +523,14 @@ ProfilingTransactionResult ProfilingTransaction::run(ProfilingTransactionContext
                              workload_phase.attributed_claims()) &&
             claim_sets_equal(release_phase.observed_claims(), release_phase.attributed_claims()) &&
             release_is_bounded(baseline_phase, release_phase);
-        if (!common_reference_matches || !phase_order_is_valid || !attribution_is_closed) {
+        const auto &required_constraints =
+            context.selector.catalog_selector.constraints;
+        const auto required_claims_are_closed =
+            phase_covers_required_claim_families(baseline_phase, required_constraints) &&
+            phase_covers_required_claim_families(workload_phase, required_constraints) &&
+            phase_covers_required_claim_families(release_phase, required_constraints);
+        if (!common_reference_matches || !phase_order_is_valid ||
+            !attribution_is_closed || !required_claims_are_closed) {
             return result_for(ProfilingTransactionStatus::InvalidEvidence,
                               "profiling phase attestations do not form a closed transaction");
         }
