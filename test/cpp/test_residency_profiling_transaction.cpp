@@ -1,6 +1,7 @@
 #include "lemon/config_file.h"
 #include "lemon/residency/profiling_transaction.h"
 #include "lemon/router.h"
+#include "lemon/server.h"
 
 #include <mbedtls/md.h>
 #include <nlohmann/json.hpp>
@@ -37,6 +38,29 @@ struct ProfilingTransactionTestHook {
 
     static void cancel_pending(Router &router, std::uint64_t generation) {
         router.cancel_exclusive_request(generation);
+    }
+};
+
+struct ServerProfilingTestHook {
+    static std::unique_ptr<Server> create(
+        std::shared_ptr<RuntimeConfig> config,
+        residency::ProfilingTransactionOptions options) {
+        return std::unique_ptr<Server>(new Server(
+            Server::ProfilingTestTag{}, std::move(config), std::move(options)));
+    }
+
+    static residency::ProfilingTransactionResult run(
+        Server &server,
+        residency::ProfilingTransactionContext context,
+        residency::ProfilingTransaction::Capture capture,
+        std::function<void(const residency::ProfilingTransactionResult &)> before_handoff) {
+        return server.run_residency_profiling_transaction(
+            std::move(context), std::move(capture), nullptr, std::move(before_handoff));
+    }
+
+    static void advance_lifecycle_epoch(Server &server) {
+        std::lock_guard<std::mutex> lock(server.lifecycle_mutex_);
+        server.profiling_lifecycle_epoch_.fetch_add(1);
     }
 };
 
@@ -1053,12 +1077,53 @@ void test_exception_releases_gate(TestState &state, Router &router) {
     if (reacquired) router.end_exclusive();
 }
 
+void test_server_rejects_evidence_after_lifecycle_handoff(
+    TestState &state, const std::shared_ptr<RuntimeConfig> &config) {
+    auto server = lemon::ServerProfilingTestHook::create(config, options());
+    std::promise<void> handoff_entered;
+    auto handoff_entered_signal = handoff_entered.get_future();
+    std::promise<void> release_handoff;
+    auto release_handoff_signal = release_handoff.get_future().share();
+
+    auto run = std::async(std::launch::async, [&] {
+        return lemon::ServerProfilingTestHook::run(
+            *server, context("profile/server-lifecycle-handoff"),
+            [](Router &, const ProfilingTransactionContext &transaction_context,
+               const ProfilingCancellationCheck &) { return capture(transaction_context); },
+            [&](const ProfilingTransactionResult &result) {
+                state.require(result.status == ProfilingTransactionStatus::Accepted,
+                              "Server handoff probe observes accepted transaction");
+                state.require(result.evidence.has_value(),
+                              "Server handoff probe observes accepted evidence");
+                handoff_entered.set_value();
+                release_handoff_signal.wait();
+            });
+    });
+
+    const bool entered =
+        handoff_entered_signal.wait_for(1s) == std::future_status::ready;
+    state.require(entered, "Server transaction reaches the lifecycle handoff");
+    if (entered) lemon::ServerProfilingTestHook::advance_lifecycle_epoch(*server);
+    release_handoff.set_value();
+
+    const auto result = run.get();
+    state.require(result.status == ProfilingTransactionStatus::Restarted,
+                  "Server rejects evidence after a lifecycle-epoch handoff");
+    state.require(!result.evidence.has_value(),
+                  "Server clears evidence after a lifecycle-epoch handoff");
+    state.require(result.diagnostic ==
+                      "profiling lifecycle changed before publication",
+                  "Server reports the lifecycle handoff diagnostic");
+}
+
 } // namespace
 
 int main() {
     TestState state;
     RuntimeConfig config = make_config();
     RuntimeConfig::set_global(&config);
+    auto config_handle =
+        std::shared_ptr<RuntimeConfig>(&config, [](RuntimeConfig *) {});
     {
         Router router(&config, nullptr, nullptr);
         test_cross_router_request_ownership(state, router, config);
@@ -1071,6 +1136,7 @@ int main() {
         test_gate_timeout_bounds_router_lock(state, router);
         test_gate_timeout_clears_pending_intent(state, router);
         test_exception_releases_gate(state, router);
+        test_server_rejects_evidence_after_lifecycle_handoff(state, config_handle);
     }
     RuntimeConfig::set_global(nullptr);
     return state.ok.load() ? 0 : 1;

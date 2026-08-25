@@ -44,6 +44,8 @@ namespace jobs {
 class JobManager;
 }
 
+struct ServerProfilingTestHook;
+
 struct RouterDispatchResult {
     std::string requested_model;
     std::string selected_model;
@@ -76,6 +78,14 @@ public:
     bool startup_failed() const;
 
 private:
+    friend struct ServerProfilingTestHook;
+
+    struct ProfilingTestTag {};
+
+    Server(ProfilingTestTag,
+           std::shared_ptr<RuntimeConfig> config,
+           residency::ProfilingTransactionOptions options);
+
     void begin_residency_lifecycle_change();
 
     // This trusted internal seam does not publish. Its caller must be a
@@ -85,6 +95,12 @@ private:
         residency::ProfilingTransactionContext context,
         residency::ProfilingTransaction::Capture capture,
         std::atomic<bool> *cancel = nullptr);
+
+    residency::ProfilingTransactionResult run_residency_profiling_transaction(
+        residency::ProfilingTransactionContext context,
+        residency::ProfilingTransaction::Capture capture,
+        std::atomic<bool> *cancel,
+        std::function<void(const residency::ProfilingTransactionResult &)> before_handoff);
 
     std::string resolve_host_to_ip(int ai_family, const std::string& host);
     void setup_routes(httplib::Server &web_server);

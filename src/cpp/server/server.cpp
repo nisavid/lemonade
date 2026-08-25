@@ -438,6 +438,18 @@ static const json MIME_TYPES = {
     {"pcm",  "audio/l16;rate=24000;endianness=little-endian"}
 };
 
+Server::Server(ProfilingTestTag,
+               std::shared_ptr<RuntimeConfig> config,
+               residency::ProfilingTransactionOptions options)
+    : config_(config),
+      cache_dir_(),
+      port_(config->port()), running_(false), udp_beacon_() {
+    router_ = std::make_unique<Router>(config_.get(), nullptr, nullptr);
+    profiling_transaction_ =
+        std::make_unique<residency::ProfilingTransaction>(*router_, std::move(options));
+    profiling_accepting_.store(true);
+}
+
 Server::Server(std::shared_ptr<RuntimeConfig> config, const std::string& cache_dir)
     : config_(config),
       cache_dir_(cache_dir),
@@ -2566,6 +2578,16 @@ Server::run_residency_profiling_transaction(
     residency::ProfilingTransactionContext context,
     residency::ProfilingTransaction::Capture capture,
     std::atomic<bool> *cancel) {
+    return run_residency_profiling_transaction(
+        std::move(context), std::move(capture), cancel, {});
+}
+
+residency::ProfilingTransactionResult
+Server::run_residency_profiling_transaction(
+    residency::ProfilingTransactionContext context,
+    residency::ProfilingTransaction::Capture capture,
+    std::atomic<bool> *cancel,
+    std::function<void(const residency::ProfilingTransactionResult &)> before_handoff) {
     uint64_t lifecycle_epoch = 0;
     residency::ProfilingTransaction *transaction = nullptr;
     {
@@ -2623,6 +2645,7 @@ Server::run_residency_profiling_transaction(
                        shutdown_requested_.load() || rebind_requested_.load() ||
                        profiling_lifecycle_epoch_.load() != lifecycle_epoch;
             });
+        if (before_handoff) before_handoff(result);
     } catch (...) {
         residency::ProfilingTransactionResult failed;
         failed.status = residency::ProfilingTransactionStatus::Failed;
