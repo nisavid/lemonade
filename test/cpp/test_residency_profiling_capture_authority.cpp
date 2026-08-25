@@ -366,6 +366,7 @@ struct DynamicIntervalScenario {
     std::shared_ptr<ReleaseSettleProbe> release_settle_probe;
     std::optional<DynamicFrameReading> release_stability_event;
     std::optional<DynamicFrameReading> final_drain_event;
+    bool throw_on_finish = false;
 };
 
 class DynamicIntervalSource final : public ProfilingIntervalObservationSource {
@@ -508,39 +509,53 @@ public:
     ProfilingRawIntervalBatch finish(
         ProfilingRawIntervalToken token,
         ProfilingEventWatermark after_event_watermark) noexcept override {
-        std::lock_guard<std::mutex> lock(mutex_);
-        ++finish_calls_;
-        finish_thread_ = std::this_thread::get_id();
-        finish_thread_token_ = current_thread_token();
-        finish_observer_lifetime_ = current_thread_lifetime();
-        if (!active_ || token.opaque_id != token_.opaque_id) {
-            return failure_batch(
+        try {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ++finish_calls_;
+            finish_thread_ = std::this_thread::get_id();
+            if (!active_ || token.opaque_id != token_.opaque_id) {
+                return failure_batch(
+                    ProfilingIntervalSourceError::Failed,
+                    after_event_watermark,
+                    "dynamic finish token is inactive");
+            }
+            active_ = false;
+            finish_thread_token_ = current_thread_token();
+            finish_observer_lifetime_ = current_thread_lifetime();
+            if (scenario_.throw_on_finish) {
+                throw std::runtime_error("dynamic finish failure");
+            }
+
+            if (scenario_.final_drain_event) {
+                append_frame(*scenario_.final_drain_event);
+                final_drain_event_observed_ = true;
+            }
+
+            std::vector<ProfilingRawIntervalFrame> events;
+            for (const auto &candidate : frames_) {
+                if (candidate.event_watermark.value >
+                    after_event_watermark.value) {
+                    events.push_back(candidate);
+                }
+            }
+            return {
+                ProfilingIntervalSourceError::None,
+                after_event_watermark,
+                frames_.back().event_watermark,
+                std::move(events),
+                frames_.back(),
+                {},
+            };
+        } catch (...) {
+            return {
                 ProfilingIntervalSourceError::Failed,
                 after_event_watermark,
-                "dynamic finish token is inactive");
+                after_event_watermark,
+                {},
+                {},
+                {},
+            };
         }
-        active_ = false;
-
-        if (scenario_.final_drain_event) {
-            append_frame(*scenario_.final_drain_event);
-            final_drain_event_observed_ = true;
-        }
-
-        std::vector<ProfilingRawIntervalFrame> events;
-        for (const auto &candidate : frames_) {
-            if (candidate.event_watermark.value >
-                after_event_watermark.value) {
-                events.push_back(candidate);
-            }
-        }
-        return {
-            ProfilingIntervalSourceError::None,
-            after_event_watermark,
-            frames_.back().event_watermark,
-            std::move(events),
-            frames_.back(),
-            {},
-        };
     }
 
     void publish_workload() {
@@ -869,7 +884,7 @@ void test_invalid_and_default_source_never_invoke_driver(
 
     DynamicIntervalSource source(derivation_contract);
     auto invalid_schedule = schedule();
-    invalid_schedule.observation_poll_interval = 481ms;
+    invalid_schedule.observation_poll_interval = 480ms;
     ProfilingCaptureAuthority invalid(
         derivation_contract, source, std::move(invalid_schedule));
     CountingDriver invalid_driver;
@@ -879,7 +894,7 @@ void test_invalid_and_default_source_never_invoke_driver(
     require_empty_capture(
         state,
         invalid_capture,
-        "an impossible polling schedule emits no phase attestations");
+        "a zero-jitter polling boundary emits no phase attestations");
     state.require(source.begin_calls() == 0 && invalid_driver.run_calls == 0 &&
                       invalid_driver.release_calls == 0,
                   "an invalid schedule is rejected before source or driver access");
@@ -1318,7 +1333,7 @@ void test_unverified_noop_release_discards_every_phase(
                   "an unverified no-op release still closes the driver, observer, and source exactly once");
 }
 
-void test_final_drain_movement_discards_every_phase(
+void test_final_drain_failures_discard_every_phase(
     TestState &state,
     Router &router) {
     const auto derivation_contract = contract();
@@ -1341,6 +1356,26 @@ void test_final_drain_movement_discards_every_phase(
                       source.finish_calls() == 1 && !source.active() &&
                       source.observer_thread_exited(),
                   "a moved final drain unregisters once and joins its observer before failing closed");
+
+    DynamicIntervalScenario throwing_scenario;
+    throwing_scenario.throw_on_finish = true;
+    DynamicIntervalSource throwing_source(
+        derivation_contract, std::move(throwing_scenario));
+    CoordinatedDriver throwing_driver(throwing_source);
+    ProfilingCaptureAuthority throwing_authority(
+        derivation_contract, throwing_source, schedule());
+
+    const auto throwing_capture = throwing_authority.capture(
+        router, transaction_context, throwing_driver,
+        [] { return false; });
+    require_empty_capture(
+        state,
+        throwing_capture,
+        "a final-drain adapter exception is contained and publishes no phase bytes");
+    state.require(throwing_source.finish_calls() == 1 &&
+                      !throwing_source.active() &&
+                      throwing_source.observer_thread_exited(),
+                  "a throwing final drain unregisters once without terminating the test process");
 }
 
 void test_ordered_below_peak_history_changes_workload_provenance(
@@ -1427,7 +1462,7 @@ int main() {
             state, router);
         test_release_settling_abort_closes_owned_workload(state, router);
         test_unverified_noop_release_discards_every_phase(state, router);
-        test_final_drain_movement_discards_every_phase(state, router);
+        test_final_drain_failures_discard_every_phase(state, router);
         test_ordered_below_peak_history_changes_workload_provenance(
             state, router);
     }

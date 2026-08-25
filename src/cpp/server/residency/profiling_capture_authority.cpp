@@ -1,18 +1,10 @@
 #include "lemon/residency/profiling_capture_authority.h"
 
 #include "lemon/residency/claims.h"
+#include "profiling_common.h"
 
-#include <mbedtls/md.h>
-#include <mbedtls/version.h>
-#if MBEDTLS_VERSION_MAJOR >= 4
-#include <psa/crypto.h>
-#endif
-
-#include <algorithm>
-#include <array>
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +21,12 @@ namespace {
 
 using SteadyClock = std::chrono::steady_clock;
 using SystemClock = std::chrono::system_clock;
+using profiling_internal::append_string;
+using profiling_internal::append_u64;
+using profiling_internal::cancelled;
+using profiling_internal::digest_is_valid;
+using profiling_internal::elapsed_between;
+using profiling_internal::sha256_hex;
 
 constexpr std::string_view phase_provenance_domain =
     "lemonade/profiling-phase-interval/v1";
@@ -37,32 +35,9 @@ ProfilingTransactionCapture capture_failure(std::string diagnostic) {
     if (diagnostic.empty()) {
         diagnostic = "profiling interval capture failed";
     }
-    if (diagnostic.size() > max_local_overlay_diagnostic_bytes) {
-        std::size_t boundary = max_local_overlay_diagnostic_bytes;
-        while (boundary > 0 &&
-               (static_cast<unsigned char>(diagnostic[boundary]) & 0xc0u) ==
-                   0x80u) {
-            --boundary;
-        }
-        diagnostic.resize(boundary);
-    }
-    return ProfilingTransactionCapture{{}, {}, {}, std::move(diagnostic)};
-}
-
-bool cancelled(const ProfilingCancellationCheck &should_abort) noexcept {
-    try {
-        return should_abort && should_abort();
-    } catch (...) {
-        return true;
-    }
-}
-
-bool digest_is_valid(std::string_view value) noexcept {
-    return value.size() == 64 &&
-           std::all_of(value.begin(), value.end(), [](char character) {
-               return (character >= '0' && character <= '9') ||
-                      (character >= 'a' && character <= 'f');
-           });
+    return ProfilingTransactionCapture{
+        {}, {}, {},
+        profiling_internal::bounded_diagnostic(std::move(diagnostic))};
 }
 
 void initialize_clock(ProfilingCollectionClock &clock) {
@@ -80,7 +55,7 @@ bool schedule_is_valid(const ProfilingDerivationContract &contract,
         contract.interval.max_observation_gap <= contract.max_source_skew) {
         return false;
     }
-    return schedule.observation_poll_interval <=
+    return schedule.observation_poll_interval <
            contract.interval.max_observation_gap - contract.max_source_skew;
 }
 
@@ -89,19 +64,10 @@ std::optional<bool> elapsed_at_least(
     SteadyClock::time_point finished,
     std::chrono::milliseconds required) noexcept {
     if (required <= std::chrono::milliseconds::zero()) return std::nullopt;
-    const auto started_seconds =
-        std::chrono::duration<long double>(started.time_since_epoch()).count();
-    const auto finished_seconds =
-        std::chrono::duration<long double>(finished.time_since_epoch()).count();
-    const auto required_seconds =
-        std::chrono::duration<long double>(required).count();
-    if (!std::isfinite(started_seconds) ||
-        !std::isfinite(finished_seconds) ||
-        !std::isfinite(required_seconds) ||
-        finished_seconds < started_seconds) {
-        return std::nullopt;
-    }
-    return finished_seconds - started_seconds >= required_seconds;
+    const auto elapsed = elapsed_between(started, finished);
+    if (!elapsed) return std::nullopt;
+    return std::chrono::duration_cast<std::chrono::milliseconds>(*elapsed) >=
+           required;
 }
 
 bool segment_moved(const ProfilingIntervalSegment &segment) noexcept {
@@ -221,53 +187,6 @@ bool segment_chain_is_valid(
         }
     }
     return true;
-}
-
-void append_u64(std::string &bytes, std::uint64_t value) {
-    for (int shift = 56; shift >= 0; shift -= 8) {
-        bytes.push_back(static_cast<char>((value >> shift) & 0xffu));
-    }
-}
-
-void append_string(std::string &bytes, std::string_view value) {
-    append_u64(bytes, static_cast<std::uint64_t>(value.size()));
-    bytes.append(value.data(), value.size());
-}
-
-std::optional<std::string> sha256_hex(std::string_view bytes) {
-#if MBEDTLS_VERSION_MAJOR >= 4
-    static std::once_flag initialized;
-    static psa_status_t initialization_status = PSA_ERROR_BAD_STATE;
-    std::call_once(initialized,
-                   [] { initialization_status = psa_crypto_init(); });
-    if (initialization_status != PSA_SUCCESS) return std::nullopt;
-#endif
-
-    const auto *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (info == nullptr) return std::nullopt;
-
-    mbedtls_md_context_t context;
-    mbedtls_md_init(&context);
-    std::array<unsigned char, 32> digest{};
-    const bool failed =
-        mbedtls_md_setup(&context, info, 0) != 0 ||
-        mbedtls_md_starts(&context) != 0 ||
-        mbedtls_md_update(
-            &context,
-            reinterpret_cast<const unsigned char *>(bytes.data()),
-            bytes.size()) != 0 ||
-        mbedtls_md_finish(&context, digest.data()) != 0;
-    mbedtls_md_free(&context);
-    if (failed) return std::nullopt;
-
-    static constexpr char hex[] = "0123456789abcdef";
-    std::string result;
-    result.reserve(64);
-    for (const auto byte : digest) {
-        result.push_back(hex[(byte >> 4) & 0x0f]);
-        result.push_back(hex[byte & 0x0f]);
-    }
-    return result;
 }
 
 std::string_view phase_wire(ProfilingPhase phase) noexcept {

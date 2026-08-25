@@ -978,6 +978,7 @@ set(SOURCES_CORE
     src/cpp/server/residency/generated_contract.cpp
     src/cpp/server/residency/local_overlay.cpp
     src/cpp/server/residency/profiling_capture_authority.cpp
+    src/cpp/server/residency/profiling_common.cpp
     src/cpp/server/residency/profiling_provider.cpp
     src/cpp/server/residency/profiling_transaction.cpp
     src/cpp/server/wrapped_server.cpp

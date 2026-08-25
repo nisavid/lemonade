@@ -1,10 +1,6 @@
 #include "lemon/residency/profiling_provider.h"
 
-#include <mbedtls/md.h>
-#include <mbedtls/version.h>
-#if MBEDTLS_VERSION_MAJOR >= 4
-#include <psa/crypto.h>
-#endif
+#include "profiling_common.h"
 
 #include <algorithm>
 #include <array>
@@ -29,23 +25,19 @@ namespace {
 
 using SteadyClock = std::chrono::steady_clock;
 using SystemClock = std::chrono::system_clock;
+using profiling_internal::append_string;
+using profiling_internal::append_u64;
+using profiling_internal::bounded_diagnostic;
+using profiling_internal::cancelled;
+using profiling_internal::digest_is_valid;
+using profiling_internal::elapsed_between;
+using profiling_internal::sha256_hex;
 
 struct SensorValues {
     std::optional<std::uint64_t> total;
     std::map<std::string, std::uint64_t> owners;
     std::uint64_t attributed_total = 0;
 };
-
-std::string bounded_diagnostic(std::string value) {
-    if (value.size() <= max_local_overlay_diagnostic_bytes) return value;
-    std::size_t boundary = max_local_overlay_diagnostic_bytes;
-    while (boundary > 0 &&
-           (static_cast<unsigned char>(value[boundary]) & 0xc0u) == 0x80u) {
-        --boundary;
-    }
-    value.resize(boundary);
-    return value;
-}
 
 ProfilingObservationCollectionResult
 result_for(ProfilingCollectionStatus status, std::string diagnostic = {}) {
@@ -54,15 +46,6 @@ result_for(ProfilingCollectionStatus status, std::string diagnostic = {}) {
         bounded_diagnostic(std::move(diagnostic)),
         std::nullopt,
     };
-}
-
-bool cancelled(const ProfilingCancellationCheck &should_abort) noexcept {
-    if (!should_abort) return false;
-    try {
-        return should_abort();
-    } catch (...) {
-        return true;
-    }
 }
 
 std::optional<std::size_t> family_index(ClaimFamily family) noexcept {
@@ -177,14 +160,6 @@ bool identifier_is_valid(std::string_view value) noexcept {
            value.size() <= max_local_overlay_identifier_bytes &&
            std::all_of(value.begin(), value.end(), [](unsigned char character) {
                return character >= 0x21 && character <= 0x7e;
-           });
-}
-
-bool digest_is_valid(std::string_view value) noexcept {
-    return value.size() == 64 &&
-           std::all_of(value.begin(), value.end(), [](char character) {
-               return (character >= '0' && character <= '9') ||
-                      (character >= 'a' && character <= 'f');
            });
 }
 
@@ -358,17 +333,6 @@ std::string format_utc(std::int64_t seconds) {
     return result.size() == 20 ? result : std::string{};
 }
 
-void append_u64(std::string &bytes, std::uint64_t value) {
-    for (int shift = 56; shift >= 0; shift -= 8) {
-        bytes.push_back(static_cast<char>((value >> shift) & 0xffu));
-    }
-}
-
-void append_string(std::string &bytes, std::string_view value) {
-    append_u64(bytes, static_cast<std::uint64_t>(value.size()));
-    bytes.append(value.data(), value.size());
-}
-
 void append_claim_closure(std::string &bytes,
                           std::vector<ClaimFamilyClosure> closure) {
     std::sort(closure.begin(), closure.end(),
@@ -397,41 +361,6 @@ void append_claim_closure(std::string &bytes,
             append_u64(bytes, entry.amount);
         }
     }
-}
-
-std::optional<std::string> sha256_hex(std::string_view bytes) {
-#if MBEDTLS_VERSION_MAJOR >= 4
-    static std::once_flag initialized;
-    static psa_status_t initialization_status = PSA_ERROR_BAD_STATE;
-    std::call_once(initialized,
-                   [] { initialization_status = psa_crypto_init(); });
-    if (initialization_status != PSA_SUCCESS) return std::nullopt;
-#endif
-
-    const auto *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (info == nullptr) return std::nullopt;
-
-    mbedtls_md_context_t context;
-    mbedtls_md_init(&context);
-    std::array<unsigned char, 32> digest{};
-    const bool failed =
-        mbedtls_md_setup(&context, info, 0) != 0 ||
-        mbedtls_md_starts(&context) != 0 ||
-        mbedtls_md_update(&context,
-                          reinterpret_cast<const unsigned char *>(bytes.data()),
-                          bytes.size()) != 0 ||
-        mbedtls_md_finish(&context, digest.data()) != 0;
-    mbedtls_md_free(&context);
-    if (failed) return std::nullopt;
-
-    static constexpr char hex[] = "0123456789abcdef";
-    std::string result;
-    result.reserve(64);
-    for (const auto byte : digest) {
-        result.push_back(hex[(byte >> 4) & 0x0f]);
-        result.push_back(hex[byte & 0x0f]);
-    }
-    return result;
 }
 
 std::optional<std::string> owner_scope_set_digest(
@@ -677,39 +606,6 @@ derive_claim_amounts(const ProfilingDerivationContract &contract,
         result.safety_margin.push_back(remaining - sensor.uncertainty_bound);
     }
     return result;
-}
-
-std::optional<SteadyClock::duration>
-elapsed_between(SteadyClock::time_point started,
-                SteadyClock::time_point finished) noexcept {
-    using Rep = SteadyClock::duration::rep;
-    static_assert(std::is_integral_v<Rep>);
-
-    const auto start = count_as_i64(started.time_since_epoch().count());
-    const auto finish = count_as_i64(finished.time_since_epoch().count());
-    if (!start || !finish || *finish < *start) return std::nullopt;
-
-    std::uint64_t ticks = 0;
-    if (*start < 0 && *finish >= 0) {
-        const auto magnitude =
-            static_cast<std::uint64_t>(-(*start + 1)) + 1;
-        ticks = magnitude + static_cast<std::uint64_t>(*finish);
-    } else {
-        ticks = static_cast<std::uint64_t>(*finish - *start);
-    }
-    if constexpr (std::is_signed_v<Rep>) {
-        if (ticks > static_cast<std::uint64_t>(
-                        std::numeric_limits<Rep>::max())) {
-            return std::nullopt;
-        }
-    } else if constexpr (std::numeric_limits<Rep>::digits <
-                         std::numeric_limits<std::uint64_t>::digits) {
-        if (ticks > static_cast<std::uint64_t>(
-                        std::numeric_limits<Rep>::max())) {
-            return std::nullopt;
-        }
-    }
-    return SteadyClock::duration(static_cast<Rep>(ticks));
 }
 
 std::optional<std::uint64_t>
