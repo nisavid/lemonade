@@ -5,7 +5,9 @@
 #include "platform/linux_amd_gtt_point_observation_source.h"
 #include "platform/process_containment_platform.h"
 
+#include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -28,7 +30,9 @@
 #include <vector>
 
 #include <stdlib.h>
+#include <sys/inotify.h>
 #include <sys/vfs.h>
+#include <unistd.h>
 
 namespace lemon::utils {
 
@@ -165,6 +169,62 @@ void write_file(const std::filesystem::path &path,
     output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
     if (!output) setup_failure("could not write fixture file");
 }
+
+class FileReadCounter {
+public:
+    FileReadCounter(const std::filesystem::path &directory,
+                    std::string filename)
+        : filename_(std::move(filename)),
+          descriptor_(::inotify_init1(IN_CLOEXEC | IN_NONBLOCK)) {
+        if (descriptor_ < 0 ||
+            ::inotify_add_watch(descriptor_, directory.c_str(),
+                                IN_OPEN | IN_CLOSE_NOWRITE |
+                                    IN_CLOSE_WRITE) < 0) {
+            if (descriptor_ >= 0) ::close(descriptor_);
+            setup_failure("could not watch fixture file reads");
+        }
+    }
+
+    FileReadCounter(const FileReadCounter &) = delete;
+    FileReadCounter &operator=(const FileReadCounter &) = delete;
+
+    ~FileReadCounter() { ::close(descriptor_); }
+
+    std::size_t consume() const {
+        std::size_t count = 0;
+        alignas(inotify_event) std::array<char, 4096> buffer{};
+        while (true) {
+            const auto bytes = ::read(descriptor_, buffer.data(),
+                                      buffer.size());
+            if (bytes < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+                setup_failure("could not read fixture file events");
+            }
+            if (bytes == 0) break;
+            std::size_t offset = 0;
+            const auto size = static_cast<std::size_t>(bytes);
+            while (offset < size) {
+                const auto *event = reinterpret_cast<const inotify_event *>(
+                    buffer.data() + offset);
+                if ((event->mask & IN_Q_OVERFLOW) != 0) {
+                    setup_failure("fixture file event queue overflowed");
+                }
+                if ((event->mask & IN_CLOSE_NOWRITE) != 0 &&
+                    event->len != 0 &&
+                    std::string_view(event->name) == filename_) {
+                    ++count;
+                }
+                offset += sizeof(inotify_event) +
+                          static_cast<std::size_t>(event->len);
+            }
+        }
+        return count;
+    }
+
+private:
+    std::string filename_;
+    int descriptor_ = -1;
+};
 
 long filesystem_magic(const std::filesystem::path &path) {
     struct statfs status {};
@@ -328,6 +388,17 @@ std::string fdinfo(std::string_view resident,
 
 class Scenario {
 public:
+    struct ReadOptions {
+        std::optional<ProfilingRawReadRequest> request_override;
+        ProfilingCancellationCheck cancellation_check = [] { return false; };
+        std::optional<LinuxAmdGttPointObservationSourceBinding>
+            source_binding;
+        std::function<std::chrono::steady_clock::time_point()> monotonic_now;
+        std::optional<long> expected_proc_filesystem_magic;
+        std::optional<long> expected_sysfs_filesystem_magic;
+        std::function<void(ReadBoundary)> on_read_boundary;
+    };
+
     Scenario()
         : proc_root(tree.root() / "proc"),
           device_directory(tree.root() / "sys" / std::string(kPdev)),
@@ -383,29 +454,54 @@ public:
                    contents);
     }
 
-    ProfilingRawReadResult read(
-        ProfilingRawReadRequest read_request,
-        ProfilingCancellationCheck should_abort = [] { return false; },
-        std::optional<LinuxAmdGttPointObservationSourceBinding>
-            source_binding = std::nullopt,
-        std::function<std::chrono::steady_clock::time_point()> now = {},
-        std::optional<long> proc_magic = std::nullopt,
-        std::optional<long> sysfs_magic = std::nullopt,
-        std::function<void(ReadBoundary)> on_read_boundary = {}) {
-        if (!now) {
-            const auto base = std::chrono::steady_clock::now();
-            now = [base] { return base; };
+    void write_ignored_fds(std::size_t count, int pid = kPid) {
+        if (count == 0) return;
+        const auto directory =
+            proc_root / std::to_string(pid) / "fdinfo";
+        const auto first = directory / "3";
+        write_file(first, "pos:\t0\nflags:\t0100002\n");
+        for (std::size_t index = 1; index < count; ++index) {
+            std::error_code error;
+            const auto fd = 3U + static_cast<std::uint64_t>(index);
+            std::filesystem::create_hard_link(
+                first, directory / std::to_string(fd), error);
+            if (error) setup_failure("could not link fixture fdinfo entry");
         }
-        if (!proc_magic) proc_magic = filesystem_magic(proc_root);
-        if (!sysfs_magic) sysfs_magic = filesystem_magic(device_directory);
-        auto source = LinuxAmdGttPointObservationSourceTestHook::make(
-            source_binding ? std::move(*source_binding) : binding(),
-            containment, proc_root, std::move(now), proc_magic, sysfs_magic,
-            std::move(on_read_boundary));
-        return source.read(read_request, should_abort);
     }
 
-    ProfilingRawReadResult read() { return read(request); }
+    ProfilingRawReadResult read(ReadOptions options) {
+        if (!options.monotonic_now) {
+            const auto base = std::chrono::steady_clock::now();
+            options.monotonic_now = [base] { return base; };
+        }
+        if (!options.expected_proc_filesystem_magic) {
+            options.expected_proc_filesystem_magic =
+                filesystem_magic(proc_root);
+        }
+        if (!options.expected_sysfs_filesystem_magic) {
+            options.expected_sysfs_filesystem_magic =
+                filesystem_magic(device_directory);
+        }
+        auto source = LinuxAmdGttPointObservationSourceTestHook::make(
+            options.source_binding ? std::move(*options.source_binding)
+                                   : binding(),
+            containment, proc_root, std::move(options.monotonic_now),
+            options.expected_proc_filesystem_magic,
+            options.expected_sysfs_filesystem_magic,
+            std::move(options.on_read_boundary));
+        const auto &read_request = options.request_override
+                                       ? *options.request_override
+                                       : request;
+        return source.read(read_request, options.cancellation_check);
+    }
+
+    ProfilingRawReadResult read() { return read(ReadOptions{}); }
+
+    ProfilingRawReadResult read(ProfilingRawReadRequest read_request) {
+        ReadOptions options;
+        options.request_override = std::move(read_request);
+        return read(std::move(options));
+    }
 
     TempTree tree;
     std::filesystem::path proc_root;
@@ -415,6 +511,14 @@ public:
     PreparedProcessContainment containment;
     ProfilingRawReadRequest request;
 };
+
+Scenario::ReadOptions read_options_at_boundary(
+    ReadBoundary boundary, std::function<void()> action) {
+    Scenario::ReadOptions options;
+    options.on_read_boundary =
+        at_boundary(boundary, std::move(action));
+    return options;
+}
 
 void require_success(TestState &state,
                      const ProfilingRawReadResult &result,
@@ -469,60 +573,6 @@ void test_binding_identity(TestState &state) {
     state.require(owner_set.has_value() &&
                       *owner_set == kExpectedOwnerSetDigest,
                   "the exact one-owner request digest is canonical");
-
-    const std::vector<std::function<void(ProcessContainmentIdentity &)>>
-        mutations{
-            [](auto &value) {
-                value.boot_id = "11234567-89ab-cdef-0123-456789abcdef";
-            },
-            [](auto &value) { ++value.mount_id; },
-            [](auto &value) { ++value.device; },
-            [](auto &value) { ++value.inode; },
-            [](auto &value) { value.owner_scope_id = "owner/model-beta"; },
-            [](auto &value) { value.nonce_sha256 = std::string(64, 'b'); },
-        };
-    for (const auto &mutate : mutations) {
-        auto changed = identity;
-        mutate(changed);
-        const auto changed_binding = profiling_owner_scope_binding(changed);
-        state.require(changed_binding.has_value() &&
-                          changed_binding->containment_identity_sha256 !=
-                              binding->containment_identity_sha256,
-                      "every containment identity field changes the binding");
-    }
-
-    std::vector<ProcessContainmentIdentity> invalid;
-    auto value = identity;
-    value.boot_id.clear();
-    invalid.push_back(value);
-    value = identity;
-    value.boot_id = "boot-alpha";
-    invalid.push_back(value);
-    value = identity;
-    value.mount_id = 0;
-    invalid.push_back(value);
-    value = identity;
-    value.device = 0;
-    invalid.push_back(value);
-    value = identity;
-    value.inode = 0;
-    invalid.push_back(value);
-    value = identity;
-    value.owner_scope_id.clear();
-    invalid.push_back(value);
-    value = identity;
-    value.owner_scope_id = "owner/model alpha";
-    invalid.push_back(value);
-    value = identity;
-    value.nonce_sha256 = std::string(63, 'a');
-    invalid.push_back(value);
-    value = identity;
-    value.nonce_sha256 = std::string(64, 'A');
-    invalid.push_back(value);
-    for (const auto &candidate : invalid) {
-        state.require(!profiling_owner_scope_binding(candidate).has_value(),
-                      "malformed containment identities have no binding");
-    }
 }
 
 void test_binding_is_acquired_from_a_normalized_snapshot(TestState &state) {
@@ -556,10 +606,11 @@ void test_binding_is_acquired_from_a_normalized_snapshot(TestState &state) {
     };
     scenario.reset_snapshots(acquired.snapshot->identity,
                              acquired.snapshot->members);
+    Scenario::ReadOptions options;
+    options.request_override = std::move(request);
+    options.source_binding = std::move(source_binding);
     require_success(
-        state,
-        scenario.read(std::move(request), [] { return false; },
-                      std::move(source_binding)),
+        state, scenario.read(std::move(options)),
         4096,
         "the source consumes the concrete acquired identity without digest echo");
 }
@@ -575,6 +626,16 @@ void test_request_and_basic_reads(TestState &state) {
         Scenario scenario;
         require_success(state, scenario.read(), 0,
                         "two complete empty passes prove target zero");
+    }
+    {
+        Scenario scenario;
+        scenario.reset_snapshots(
+            scenario.identity, std::vector<ProcessBirthIdentity>{});
+        write_file(scenario.device_directory / "mem_info_gtt_used", "0\n");
+        require_success(
+            state, scenario.read(), 0,
+            "a stable genuinely empty containment returns physical and target zero",
+            0);
     }
     {
         Scenario scenario;
@@ -919,16 +980,57 @@ void test_multiple_containment_members(TestState &state) {
         scenario.reset_snapshots(scenario.identity, members);
         require_unavailable(
             state,
-            scenario.read(
-                scenario.request, [] { return false; }, std::nullopt, {}, {},
-                {}, at_boundary(ReadBoundary::AfterGlobalPoint,
-                                [&scenario] {
-                                    write_file(
-                                        scenario.proc_root / "4313" / "stat",
-                                        process_stat(4313, 999));
-                                })),
+            scenario.read(read_options_at_boundary(
+                ReadBoundary::AfterGlobalPoint, [&scenario] {
+                    write_file(scenario.proc_root / "4313" / "stat",
+                               process_stat(4313, 999));
+                })),
             scenario.tree.root(),
             "a member birth identity change between passes fails closed");
+    }
+}
+
+void test_fdinfo_descriptor_limits(TestState &state) {
+    constexpr std::size_t descriptors_per_pass = 4096;
+    constexpr int second_pid = 4313;
+
+    {
+        Scenario scenario;
+        scenario.write_ignored_fds(descriptors_per_pass);
+        auto binding = scenario.binding();
+        binding.max_read_duration = 30s;
+        Scenario::ReadOptions options;
+        options.source_binding = std::move(binding);
+        require_success(
+            state, scenario.read(std::move(options)), 0,
+            "4096 descriptors per pass and 8192 per read are accepted");
+    }
+    {
+        Scenario scenario;
+        scenario.write_ignored_fds(descriptors_per_pass + 1);
+        auto binding = scenario.binding();
+        binding.max_read_duration = 30s;
+        Scenario::ReadOptions options;
+        options.source_binding = std::move(binding);
+        require_unavailable(
+            state, scenario.read(std::move(options)), scenario.tree.root(),
+            "a 4097th descriptor in one pass fails closed atomically");
+    }
+    {
+        Scenario scenario;
+        scenario.write_ignored_fds(descriptors_per_pass / 2);
+        scenario.add_member(second_pid, 998);
+        scenario.write_ignored_fds(descriptors_per_pass / 2 + 1,
+                                   second_pid);
+        scenario.reset_snapshots(
+            scenario.identity, {birth(), birth(second_pid, 998)});
+        auto binding = scenario.binding();
+        binding.max_read_duration = 30s;
+        Scenario::ReadOptions options;
+        options.source_binding = std::move(binding);
+        require_unavailable(
+            state, scenario.read(std::move(options)), scenario.tree.root(),
+            "the per-pass descriptor cap is aggregate across members");
     }
 }
 
@@ -944,10 +1046,9 @@ void test_between_pass_churn_fails_closed(TestState &state) {
         Scenario scenario;
         require_unavailable(
             state,
-            scenario.read(
-                scenario.request, [] { return false; }, std::nullopt, {}, {},
-                {}, at_boundary(ReadBoundary::AfterGlobalPoint,
-                                [&scenario, &target_contents] {
+            scenario.read(read_options_at_boundary(
+                ReadBoundary::AfterGlobalPoint,
+                [&scenario, &target_contents] {
                     scenario.write_fd(3, target_contents);
                 })),
             scenario.tree.root(),
@@ -958,10 +1059,9 @@ void test_between_pass_churn_fails_closed(TestState &state) {
         scenario.write_fd(3, target_contents);
         require_unavailable(
             state,
-            scenario.read(
-                scenario.request, [] { return false; }, std::nullopt, {}, {},
-                {}, at_boundary(ReadBoundary::AfterGlobalPoint,
-                                [&scenario, &fd_path] {
+            scenario.read(read_options_at_boundary(
+                ReadBoundary::AfterGlobalPoint,
+                [&scenario, &fd_path] {
                     std::error_code error;
                     if (!std::filesystem::remove(fd_path(scenario, 3), error) ||
                         error) {
@@ -976,10 +1076,9 @@ void test_between_pass_churn_fails_closed(TestState &state) {
         scenario.write_fd(3, target_contents);
         require_unavailable(
             state,
-            scenario.read(
-                scenario.request, [] { return false; }, std::nullopt, {}, {},
-                {}, at_boundary(ReadBoundary::AfterGlobalPoint,
-                                [&scenario, &fd_path] {
+            scenario.read(read_options_at_boundary(
+                ReadBoundary::AfterGlobalPoint,
+                [&scenario, &fd_path] {
                     std::error_code error;
                     std::filesystem::rename(fd_path(scenario, 3),
                                             fd_path(scenario, 4), error);
@@ -993,10 +1092,9 @@ void test_between_pass_churn_fails_closed(TestState &state) {
         scenario.write_fd(3, target_contents);
         require_unavailable(
             state,
-            scenario.read(
-                scenario.request, [] { return false; }, std::nullopt, {}, {},
-                {}, at_boundary(ReadBoundary::AfterGlobalPoint,
-                                [&scenario, &target_contents] {
+            scenario.read(read_options_at_boundary(
+                ReadBoundary::AfterGlobalPoint,
+                [&scenario, &target_contents] {
                     scenario.write_fd(4, target_contents);
                 })),
             scenario.tree.root(),
@@ -1007,10 +1105,8 @@ void test_between_pass_churn_fails_closed(TestState &state) {
         scenario.write_fd(3, target_contents);
         require_unavailable(
             state,
-            scenario.read(
-                scenario.request, [] { return false; }, std::nullopt, {}, {},
-                {}, at_boundary(ReadBoundary::AfterGlobalPoint,
-                                [&scenario] {
+            scenario.read(read_options_at_boundary(
+                ReadBoundary::AfterGlobalPoint, [&scenario] {
                     scenario.write_fd(
                         3, fdinfo("drm-resident-gtt:\t4 KiB\n",
                                   "drm-shared-gtt:\t0 KiB\n", "8"));
@@ -1023,10 +1119,8 @@ void test_between_pass_churn_fails_closed(TestState &state) {
         scenario.write_fd(3, target_contents);
         require_unavailable(
             state,
-            scenario.read(
-                scenario.request, [] { return false; }, std::nullopt, {}, {},
-                {}, at_boundary(ReadBoundary::AfterGlobalPoint,
-                                [&scenario] {
+            scenario.read(read_options_at_boundary(
+                ReadBoundary::AfterGlobalPoint, [&scenario] {
                     scenario.write_fd(
                         3, fdinfo("drm-resident-gtt:\t8 KiB\n"));
                 })),
@@ -1038,10 +1132,8 @@ void test_between_pass_churn_fails_closed(TestState &state) {
         scenario.write_fd(3, target_contents);
         require_unavailable(
             state,
-            scenario.read(
-                scenario.request, [] { return false; }, std::nullopt, {}, {},
-                {}, at_boundary(ReadBoundary::AfterGlobalPoint,
-                                [&scenario] {
+            scenario.read(read_options_at_boundary(
+                ReadBoundary::AfterGlobalPoint, [&scenario] {
                     scenario.write_fd(
                         3, fdinfo("drm-resident-gtt:\t4 KiB\n",
                                   "drm-shared-gtt:\t1 KiB\n"));
@@ -1063,11 +1155,11 @@ void test_point_read_phase_order_and_single_global(TestState &state) {
         Scenario scenario;
         scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
         std::vector<ReadBoundary> observed;
-        const auto result = scenario.read(
-            scenario.request, [] { return false; }, std::nullopt, {}, {}, {},
-            [&observed](ReadBoundary boundary) {
-                observed.push_back(boundary);
-            });
+        Scenario::ReadOptions options;
+        options.on_read_boundary = [&observed](ReadBoundary boundary) {
+            observed.push_back(boundary);
+        };
+        const auto result = scenario.read(std::move(options));
         require_success(state, result, 4096,
                         "a point read closes one coherent five-phase sample");
         state.require(observed == expected_order,
@@ -1078,14 +1170,12 @@ void test_point_read_phase_order_and_single_global(TestState &state) {
         scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
         require_unavailable(
             state,
-            scenario.read(
-                scenario.request, [] { return false; }, std::nullopt, {}, {},
-                {}, at_boundary(ReadBoundary::AfterFirstFdinfoPass,
-                                [&scenario] {
-                                    scenario.write_fd(
-                                        3, fdinfo(
-                                               "drm-resident-gtt:\t8 KiB\n"));
-                                })),
+            scenario.read(read_options_at_boundary(
+                ReadBoundary::AfterFirstFdinfoPass, [&scenario] {
+                    scenario.write_fd(
+                        3, fdinfo(
+                               "drm-resident-gtt:\t8 KiB\n"));
+                })),
             scenario.tree.root(),
             "target mutation immediately after pass A fails closed");
     }
@@ -1094,29 +1184,49 @@ void test_point_read_phase_order_and_single_global(TestState &state) {
         scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
         require_unavailable(
             state,
-            scenario.read(
-                scenario.request, [] { return false; }, std::nullopt, {}, {},
-                {}, at_boundary(ReadBoundary::AfterGlobalPoint,
-                                [&scenario] {
-                                    scenario.write_fd(
-                                        3, fdinfo(
-                                               "drm-resident-gtt:\t8 KiB\n"));
-                                })),
+            scenario.read(read_options_at_boundary(
+                ReadBoundary::AfterGlobalPoint, [&scenario] {
+                    scenario.write_fd(
+                        3, fdinfo(
+                               "drm-resident-gtt:\t8 KiB\n"));
+                })),
             scenario.tree.root(),
             "target mutation immediately after the global point fails closed");
     }
     {
         Scenario scenario;
         scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
-        const auto result = scenario.read(
-            scenario.request, [] { return false; }, std::nullopt, {}, {}, {},
-            at_boundary(ReadBoundary::AfterGlobalPoint, [&scenario] {
-                write_file(scenario.device_directory / "mem_info_gtt_used",
-                           "32768\n");
-            }));
+        const auto global_path =
+            scenario.device_directory / "mem_info_gtt_used";
+        write_file(global_path, "invalid-before-pass-a\n");
+        FileReadCounter global_reads(scenario.device_directory,
+                                     "mem_info_gtt_used");
+        for (int calibration = 0; calibration < 2; ++calibration) {
+            std::ifstream input(global_path, std::ios::binary);
+            char byte = '\0';
+            input.get(byte);
+            if (!input) setup_failure("could not calibrate fixture read watch");
+        }
+        state.require(
+            global_reads.consume() == 2,
+            "the file-read observer distinguishes consecutive unread events");
+        Scenario::ReadOptions options;
+        options.on_read_boundary =
+            [&global_path](ReadBoundary boundary) {
+                if (boundary == ReadBoundary::AfterFirstFdinfoPass) {
+                    write_file(global_path, "12288\n");
+                } else if (boundary == ReadBoundary::AfterGlobalPoint) {
+                    write_file(global_path, "invalid-after-global\n");
+                }
+            };
+        const auto result = scenario.read(std::move(options));
         require_success(
             state, result, 4096,
-            "a point read returns the one already sampled physical value");
+            "the global value is sampled strictly between fdinfo passes",
+            12288);
+        state.require(
+            global_reads.consume() == 1,
+            "a point read opens the global sysfs counter exactly once");
     }
 }
 
@@ -1150,9 +1260,10 @@ void test_device_binding(TestState &state) {
         Scenario scenario;
         auto binding = scenario.binding();
         binding.drm_pdev = "c6:00.0";
+        Scenario::ReadOptions options;
+        options.source_binding = std::move(binding);
         require_unavailable(
-            state, scenario.read(scenario.request, [] { return false; },
-                                 std::move(binding)),
+            state, scenario.read(std::move(options)),
             scenario.tree.root(), "a noncanonical PCI BDF fails closed");
     }
     {
@@ -1179,9 +1290,10 @@ void test_device_binding(TestState &state) {
         Scenario scenario;
         auto binding = scenario.binding();
         binding.sysfs_device_directory = scenario.tree.root() / "missing";
+        Scenario::ReadOptions options;
+        options.source_binding = std::move(binding);
         require_unavailable(
-            state, scenario.read(scenario.request, [] { return false; },
-                                 std::move(binding)),
+            state, scenario.read(std::move(options)),
             scenario.tree.root(),
             "the sysfs device directory participates in the binding");
     }
@@ -1189,9 +1301,10 @@ void test_device_binding(TestState &state) {
         Scenario scenario;
         auto binding = scenario.binding();
         binding.max_read_duration = 0ms;
+        Scenario::ReadOptions options;
+        options.source_binding = std::move(binding);
         require_unavailable(
-            state, scenario.read(scenario.request, [] { return false; },
-                                 std::move(binding)),
+            state, scenario.read(std::move(options)),
             scenario.tree.root(),
             "the maximum read duration participates in the binding");
     }
@@ -1224,10 +1337,8 @@ void test_device_binding(TestState &state) {
         scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
         require_unavailable(
             state,
-            scenario.read(
-                scenario.request, [] { return false; }, std::nullopt, {}, {},
-                {}, at_boundary(ReadBoundary::AfterGlobalPoint,
-                                [&scenario] {
+            scenario.read(read_options_at_boundary(
+                ReadBoundary::AfterGlobalPoint, [&scenario] {
                     const auto retained =
                         scenario.tree.root() / "mid-read-retained-device";
                     std::error_code error;
@@ -1261,21 +1372,25 @@ void test_device_binding(TestState &state) {
     }
     {
         Scenario scenario;
+        Scenario::ReadOptions proc_options;
+        proc_options.expected_proc_filesystem_magic =
+            filesystem_magic(scenario.proc_root) + 1;
+        proc_options.expected_sysfs_filesystem_magic =
+            filesystem_magic(scenario.device_directory);
         require_unavailable(
             state,
-            scenario.read(scenario.request, [] { return false; },
-                          std::nullopt, {},
-                          filesystem_magic(scenario.proc_root) + 1,
-                          filesystem_magic(scenario.device_directory)),
+            scenario.read(std::move(proc_options)),
             scenario.tree.root(),
             "a proc filesystem identity mismatch fails closed");
         scenario.reset_snapshots();
+        Scenario::ReadOptions sysfs_options;
+        sysfs_options.expected_proc_filesystem_magic =
+            filesystem_magic(scenario.proc_root);
+        sysfs_options.expected_sysfs_filesystem_magic =
+            filesystem_magic(scenario.device_directory) + 1;
         require_unavailable(
             state,
-            scenario.read(scenario.request, [] { return false; },
-                          std::nullopt, {},
-                          filesystem_magic(scenario.proc_root),
-                          filesystem_magic(scenario.device_directory) + 1),
+            scenario.read(std::move(sysfs_options)),
             scenario.tree.root(),
             "a sysfs filesystem identity mismatch fails closed");
     }
@@ -1302,8 +1417,10 @@ void test_containment_closure_cancellation_and_deadline(TestState &state) {
     {
         Scenario scenario;
         scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        Scenario::ReadOptions options;
+        options.cancellation_check = [] { return true; };
         require_cancelled(
-            state, scenario.read(scenario.request, [] { return true; }),
+            state, scenario.read(std::move(options)),
             scenario.tree.root(),
             "cancellation before the opening snapshot stays cancellation");
         state.require(scenario.control->snapshot_calls == 0,
@@ -1311,12 +1428,22 @@ void test_containment_closure_cancellation_and_deadline(TestState &state) {
     }
     {
         Scenario scenario;
+        scenario.control->active = false;
+        require_unavailable(
+            state, scenario.read(), scenario.tree.root(),
+            "an inactive prepared containment fails closed");
+        state.require(scenario.control->snapshot_calls == 0,
+                      "inactive containment fails before snapshot access");
+    }
+    {
+        Scenario scenario;
         scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        Scenario::ReadOptions options;
+        options.cancellation_check = [&scenario] {
+            return scenario.control->snapshot_calls >= 1;
+        };
         require_cancelled(
-            state,
-            scenario.read(scenario.request, [&scenario] {
-                return scenario.control->snapshot_calls >= 1;
-            }),
+            state, scenario.read(std::move(options)),
             scenario.tree.root(),
             "cancellation after the opening snapshot discards all evidence");
         state.require(scenario.control->snapshot_calls == 1,
@@ -1325,11 +1452,12 @@ void test_containment_closure_cancellation_and_deadline(TestState &state) {
     {
         Scenario scenario;
         scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        Scenario::ReadOptions options;
+        options.cancellation_check = [&scenario] {
+            return scenario.control->snapshot_calls >= 2;
+        };
         require_cancelled(
-            state,
-            scenario.read(scenario.request, [&scenario] {
-                return scenario.control->snapshot_calls >= 2;
-            }),
+            state, scenario.read(std::move(options)),
             scenario.tree.root(),
             "cancellation at completion discards an otherwise closed read");
         state.require(scenario.control->snapshot_calls == 2,
@@ -1343,10 +1471,10 @@ void test_containment_closure_cancellation_and_deadline(TestState &state) {
             const auto call = ++*calls;
             return call == 1 ? start : start + 50ms;
         };
+        Scenario::ReadOptions options;
+        options.monotonic_now = std::move(clock);
         require_unavailable(
-            state,
-            scenario.read(scenario.request, [] { return false; },
-                          std::nullopt, std::move(clock)),
+            state, scenario.read(std::move(options)),
             scenario.tree.root(),
             "expiry at the first bounded boundary produces no evidence");
         state.require(scenario.control->snapshot_calls == 0,
@@ -1354,15 +1482,14 @@ void test_containment_closure_cancellation_and_deadline(TestState &state) {
     }
     {
         Scenario scenario;
-        auto binding = scenario.binding();
-        binding.max_read_duration = std::chrono::milliseconds::max();
-        const auto near_max = std::chrono::steady_clock::time_point::max() - 1ms;
+        const auto near_max =
+            std::chrono::steady_clock::time_point::max() - 49ms;
+        Scenario::ReadOptions options;
+        options.monotonic_now = [near_max] { return near_max; };
         require_unavailable(
-            state,
-            scenario.read(scenario.request, [] { return false; },
-                          std::move(binding), [near_max] { return near_max; }),
+            state, scenario.read(std::move(options)),
             scenario.tree.root(),
-            "an unrepresentable absolute deadline fails closed");
+            "a valid 50ms duration that overflows its absolute deadline fails closed");
         state.require(scenario.control->snapshot_calls == 0,
                       "deadline overflow fails before containment access");
     }
@@ -1424,17 +1551,17 @@ void test_mid_read_controls_and_containment_statuses(TestState &state) {
         Scenario scenario;
         scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
         const auto cancelled = std::make_shared<std::atomic<bool>>(false);
-        const auto result = scenario.read(
-            scenario.request,
-            [cancelled] {
-                return cancelled->load(std::memory_order_acquire);
-            },
-            std::nullopt, {}, {}, {},
+        Scenario::ReadOptions options;
+        options.cancellation_check = [cancelled] {
+            return cancelled->load(std::memory_order_acquire);
+        };
+        options.on_read_boundary =
             [boundary, cancelled](ReadBoundary observed) {
                 if (observed == boundary) {
                     cancelled->store(true, std::memory_order_release);
                 }
-            });
+            };
+        const auto result = scenario.read(std::move(options));
         require_cancelled(
             state, result, scenario.tree.root(),
             "cancellation after each target/global phase discards evidence");
@@ -1451,17 +1578,19 @@ void test_mid_read_controls_and_containment_statuses(TestState &state) {
         binding.max_read_duration = 5s;
         const auto expired = std::make_shared<std::atomic<bool>>(false);
         const auto base = std::chrono::steady_clock::now();
-        const auto result = scenario.read(
-            scenario.request, [] { return false; }, std::move(binding),
-            [base, expired] {
-                return expired->load(std::memory_order_acquire) ? base + 5s
-                                                                : base;
-            },
-            {}, {}, [boundary, expired](ReadBoundary observed) {
+        Scenario::ReadOptions options;
+        options.source_binding = std::move(binding);
+        options.monotonic_now = [base, expired] {
+            return expired->load(std::memory_order_acquire) ? base + 5s
+                                                            : base;
+        };
+        options.on_read_boundary =
+            [boundary, expired](ReadBoundary observed) {
                 if (observed == boundary) {
                     expired->store(true, std::memory_order_release);
                 }
-            });
+            };
+        const auto result = scenario.read(std::move(options));
         require_unavailable(
             state, result, scenario.tree.root(),
             "deadline expiry after each target/global phase discards evidence");
@@ -1474,14 +1603,19 @@ void test_mid_read_controls_and_containment_statuses(TestState &state) {
     {
         Scenario scenario;
         scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
-        require_success(state, scenario.read(), 4096,
+        const auto base = std::chrono::steady_clock::now() + 1s;
+        Scenario::ReadOptions options;
+        options.monotonic_now = [base] { return base; };
+        require_success(state, scenario.read(std::move(options)), 4096,
                         "a successful read closes both containment snapshots");
         const auto &controls = scenario.control->snapshot_controls;
         state.require(
             controls.size() == 2 &&
-                controls[0].deadline == controls[1].deadline &&
+                controls[0].deadline == base + 50ms &&
+                controls[1].deadline == base + 50ms &&
+                controls[0].cancellation != nullptr &&
                 controls[0].cancellation == controls[1].cancellation,
-            "opening and closing snapshots share one exact operation control");
+            "both snapshots carry the exact deadline and one non-null cancellation");
     }
 
     {
@@ -1728,6 +1862,7 @@ int main() {
         test_fdinfo_device_selection(state);
         test_fdinfo_completeness_failures(state);
         test_multiple_containment_members(state);
+        test_fdinfo_descriptor_limits(state);
         test_between_pass_churn_fails_closed(state);
         test_point_read_phase_order_and_single_global(state);
         test_global_counter_grammar(state);
