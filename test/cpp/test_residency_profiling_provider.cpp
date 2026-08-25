@@ -532,7 +532,7 @@ void test_collector_derives_observation_from_raw_samples(TestState &state) {
         observation.observation_contract_sha256 ==
             transaction_context.observation_contract_sha256,
         "the derived observation carries the matched contract identity");
-    state.require(observation.observation_generation == 7,
+    state.require(observation.source_generation == 7,
                   "the Server derives the coherent native generation");
     state.require(observation.observed_at == "1970-01-01T00:16:40Z",
                   "the Server assigns observation time");

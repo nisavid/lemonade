@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -136,7 +137,7 @@ public:
     // caller cancellation to skip source cleanup.
     virtual ProfilingRawIntervalBatch
     finish(ProfilingRawIntervalToken token,
-           ProfilingEventWatermark after_event_watermark) = 0;
+           ProfilingEventWatermark after_event_watermark) noexcept = 0;
 };
 
 class UnavailableProfilingIntervalObservationSource final
@@ -151,7 +152,7 @@ public:
                const ProfilingCancellationCheck &should_abort) override;
     ProfilingRawIntervalBatch
     finish(ProfilingRawIntervalToken token,
-           ProfilingEventWatermark after_event_watermark) override;
+           ProfilingEventWatermark after_event_watermark) noexcept override;
 };
 
 struct ProfilingSensorContract {
@@ -209,7 +210,7 @@ struct ProfilingDerivedObservation {
     std::string provider_revision_sha256;
     std::string raw_provenance_sha256;
     std::string observation_contract_sha256;
-    std::uint64_t observation_generation = 0;
+    std::uint64_t source_generation = 0;
     std::string observed_at;
     std::string fresh_until;
     std::uint64_t source_skew_milliseconds = 0;
@@ -257,6 +258,83 @@ private:
     UnavailableProfilingObservationSource unavailable_source_;
     ProfilingObservationSource *source_ = nullptr;
     ProfilingCollectionClock clock_;
+};
+
+enum class ProfilingIntervalRecorderStatus {
+    Ok,
+    Cancelled,
+    EvidenceUnavailable,
+    InvalidContract,
+    InvalidObservation,
+    DigestUnavailable,
+    InvalidState,
+};
+
+struct ProfilingRecordedCheckpoint {
+    std::uint64_t capture_generation = 0;
+    ProfilingEventWatermark event_watermark;
+    ProfilingDerivedObservation observation;
+};
+
+struct ProfilingIntervalSegment {
+    std::string source_epoch_sha256;
+    std::string owner_scope_set_sha256;
+    std::string event_semantics_revision_sha256;
+    ProfilingEventWatermark after_event_watermark;
+    ProfilingEventWatermark through_event_watermark;
+    std::uint64_t first_capture_generation = 0;
+    std::uint64_t last_capture_generation = 0;
+    std::uint64_t frame_count = 0;
+    std::string provenance_sha256;
+    ProfilingRecordedCheckpoint checkpoint;
+    std::vector<ClaimFamilyClosure> peak_observed_claims;
+    std::vector<ClaimFamilyClosure> peak_attributed_claims;
+    std::vector<ClaimFamilyClosure> external_change_claims;
+    std::vector<ClaimFamilyClosure> unattributed_claims;
+    std::vector<ClaimFamilyClosure> uncertainty_claims;
+    std::vector<ClaimFamilyClosure> safety_margin_claims;
+};
+
+struct ProfilingIntervalRecorderResult {
+    ProfilingIntervalRecorderStatus status =
+        ProfilingIntervalRecorderStatus::EvidenceUnavailable;
+    std::string diagnostic;
+    std::optional<ProfilingIntervalSegment> segment;
+
+    bool ok() const noexcept;
+};
+
+class ProfilingIntervalRecorder {
+public:
+    // One Server owner serializes the recorder lifecycle and all source calls.
+    ProfilingIntervalRecorder(ProfilingDerivationContract contract,
+                              ProfilingCollectionClock clock = {});
+    // The injected source must outlive this recorder.
+    ProfilingIntervalRecorder(ProfilingDerivationContract contract,
+                              ProfilingIntervalObservationSource &source,
+                              ProfilingCollectionClock clock = {});
+    ~ProfilingIntervalRecorder();
+
+    ProfilingIntervalRecorder(const ProfilingIntervalRecorder &) = delete;
+    ProfilingIntervalRecorder &
+    operator=(const ProfilingIntervalRecorder &) = delete;
+    ProfilingIntervalRecorder(ProfilingIntervalRecorder &&) = delete;
+    ProfilingIntervalRecorder &
+    operator=(ProfilingIntervalRecorder &&) = delete;
+
+    ProfilingIntervalRecorderResult
+    begin(const ProfilingTransactionContext &context,
+          const ProfilingCancellationCheck &should_abort);
+    ProfilingIntervalRecorderResult
+    poll(const ProfilingCancellationCheck &should_abort);
+    ProfilingIntervalRecorderResult
+    checkpoint(const ProfilingCancellationCheck &should_abort);
+    ProfilingIntervalRecorderResult finish();
+    bool active() const noexcept;
+
+private:
+    struct State;
+    std::unique_ptr<State> state_;
 };
 
 } // namespace lemon::residency
