@@ -10,6 +10,10 @@
 #include <string>
 #include <vector>
 
+namespace lemon::utils {
+struct ProcessContainmentIdentity;
+}
+
 namespace lemon::residency {
 
 inline constexpr std::uint64_t max_profiling_interval_frames = 4096;
@@ -182,6 +186,9 @@ struct ProfilingOwnerScopeBinding {
     std::string owner_scope_id;
     std::string containment_identity_sha256;
 };
+
+std::optional<ProfilingOwnerScopeBinding> profiling_owner_scope_binding(
+    const lemon::utils::ProcessContainmentIdentity &identity);
 
 struct ProfilingIntervalContract {
     std::string event_semantics_revision_sha256;

@@ -1,4 +1,5 @@
 #include "lemon/residency/profiling_provider.h"
+#include "lemon/utils/process_containment.h"
 
 #include "profiling_common.h"
 
@@ -916,6 +917,44 @@ std::optional<std::string> profiling_derivation_contract_sha256(
 std::optional<std::string> profiling_owner_scope_set_sha256(
     const std::vector<ProfilingOwnerScopeBinding> &owner_scopes) {
     return owner_scope_set_digest(owner_scopes);
+}
+
+std::optional<ProfilingOwnerScopeBinding> profiling_owner_scope_binding(
+    const lemon::utils::ProcessContainmentIdentity &identity) {
+    const auto boot_id_is_valid = [&identity] {
+        if (identity.boot_id.size() != 36) return false;
+        for (std::size_t index = 0; index < identity.boot_id.size(); ++index) {
+            if (index == 8 || index == 13 || index == 18 || index == 23) {
+                if (identity.boot_id[index] != '-') return false;
+                continue;
+            }
+            const auto character =
+                static_cast<unsigned char>(identity.boot_id[index]);
+            if (!((character >= '0' && character <= '9') ||
+                  (character >= 'a' && character <= 'f'))) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (!boot_id_is_valid() || identity.mount_id == 0 ||
+        identity.device == 0 || identity.inode == 0 ||
+        !identifier_is_valid(identity.owner_scope_id) ||
+        !digest_is_valid(identity.nonce_sha256)) {
+        return std::nullopt;
+    }
+
+    std::string bytes =
+        "lemonade/profiling-process-containment-identity/v1";
+    append_string(bytes, identity.boot_id);
+    append_u64(bytes, identity.mount_id);
+    append_u64(bytes, identity.device);
+    append_u64(bytes, identity.inode);
+    append_string(bytes, identity.owner_scope_id);
+    append_string(bytes, identity.nonce_sha256);
+    const auto digest = sha256_hex(bytes);
+    if (!digest) return std::nullopt;
+    return ProfilingOwnerScopeBinding{identity.owner_scope_id, *digest};
 }
 
 ProfilingRawReadResult UnavailableProfilingObservationSource::read(

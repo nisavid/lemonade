@@ -1,4 +1,5 @@
 #include "lemon/residency/profiling_provider.h"
+#include "lemon/utils/process_containment.h"
 
 #include <algorithm>
 #include <atomic>
@@ -440,6 +441,82 @@ void test_derivation_contract_identity(TestState &state) {
         max_profiling_interval_frames + 1;
     state.require(!profiling_derivation_contract_sha256(invalid).has_value(),
                   "the interval frame budget has a finite contract bound");
+}
+
+void test_process_containment_owner_binding(TestState &state) {
+    lemon::utils::ProcessContainmentIdentity identity{
+        "01234567-89ab-cdef-0123-456789abcdef",
+        17,
+        23,
+        42,
+        "owner/model-alpha",
+        digest('a'),
+    };
+    const auto binding = profiling_owner_scope_binding(identity);
+    state.require(binding.has_value(),
+                  "a complete containment identity has an owner binding");
+    if (binding) {
+        state.require(
+            binding->owner_scope_id == identity.owner_scope_id &&
+                binding->containment_identity_sha256 ==
+                    "e18a4a54a4e7ec7b7cd8e1f95bb4c33dae728cb9c2e12f0e4a6db44c48a3666f",
+            "the containment owner binding uses the canonical encoding");
+    }
+
+    const auto expected = binding;
+    const std::vector<std::function<void(
+        lemon::utils::ProcessContainmentIdentity &)>> mutations{
+        [](auto &value) {
+            value.boot_id = "11234567-89ab-cdef-0123-456789abcdef";
+        },
+        [](auto &value) { ++value.mount_id; },
+        [](auto &value) { ++value.device; },
+        [](auto &value) { ++value.inode; },
+        [](auto &value) { value.owner_scope_id = "owner/model-beta"; },
+        [](auto &value) { value.nonce_sha256 = digest('b'); },
+    };
+    for (const auto &mutate : mutations) {
+        auto changed = identity;
+        mutate(changed);
+        const auto changed_binding = profiling_owner_scope_binding(changed);
+        state.require(changed_binding.has_value() && expected.has_value() &&
+                          changed_binding->containment_identity_sha256 !=
+                              expected->containment_identity_sha256,
+                      "every containment identity field is bound");
+    }
+
+    const auto invalid = [&state](
+                             lemon::utils::ProcessContainmentIdentity value,
+                             const char *message) {
+        state.require(!profiling_owner_scope_binding(value).has_value(),
+                      message);
+    };
+    auto malformed = identity;
+    malformed.boot_id.clear();
+    invalid(malformed, "an empty boot identity has no owner binding");
+    malformed = identity;
+    malformed.boot_id[0] = 'A';
+    invalid(malformed,
+            "a noncanonical boot identity has no owner binding");
+    malformed = identity;
+    malformed.mount_id = 0;
+    invalid(malformed, "a missing mount identity has no owner binding");
+    malformed = identity;
+    malformed.device = 0;
+    invalid(malformed, "a missing device identity has no owner binding");
+    malformed = identity;
+    malformed.inode = 0;
+    invalid(malformed, "a missing inode identity has no owner binding");
+    malformed = identity;
+    malformed.owner_scope_id.clear();
+    invalid(malformed, "an empty owner scope has no owner binding");
+    malformed = identity;
+    malformed.owner_scope_id = std::string(
+        max_local_overlay_identifier_bytes + 1, 'x');
+    invalid(malformed, "an oversized owner scope has no owner binding");
+    malformed = identity;
+    malformed.nonce_sha256[0] = 'A';
+    invalid(malformed, "a noncanonical nonce has no owner binding");
 }
 
 void test_stale_contract_identity_fails_before_source_access(TestState &state) {
@@ -988,6 +1065,7 @@ int main() {
     test_default_source_is_unavailable(state);
     test_default_interval_source_is_unavailable(state);
     test_derivation_contract_identity(state);
+    test_process_containment_owner_binding(state);
     test_stale_contract_identity_fails_before_source_access(state);
     test_collector_derives_observation_from_raw_samples(state);
     test_collector_separates_domain_used_from_target_projection(state);

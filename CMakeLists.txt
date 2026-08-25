@@ -1042,6 +1042,9 @@ elseif(APPLE)
     set_source_files_properties(src/cpp/server/macos_system_info.mm PROPERTIES LANGUAGE OBJCXX)
 elseif(UNIX)
     list(APPEND SOURCES_CORE src/cpp/server/residency/platform/durable_file_adapter_posix.cpp)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        list(APPEND SOURCES_CORE src/cpp/server/residency/platform/linux_amd_gtt_point_observation_source.cpp)
+    endif()
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/path_linux.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/platform/metrics_linux.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/platform/suspend_linux.cpp)
@@ -2692,6 +2695,38 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ProcessContainmentLinuxDeterministic
             CI ON
             COMMAND test_process_containment_linux_deterministic
+        )
+    endif()
+endif()
+
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_LINUX_AMD_GTT_POINT_OBSERVATION_SOURCE_TEST_SRC
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_linux_amd_gtt_point_observation_source.cpp"
+    )
+    if(EXISTS "${_LINUX_AMD_GTT_POINT_OBSERVATION_SOURCE_TEST_SRC}")
+        add_executable(test_linux_amd_gtt_point_observation_source
+            ${_LINUX_AMD_GTT_POINT_OBSERVATION_SOURCE_TEST_SRC}
+            src/cpp/server/residency/platform/linux_amd_gtt_point_observation_source.cpp
+            src/cpp/server/residency/profiling_common.cpp
+            src/cpp/server/residency/profiling_provider.cpp
+            src/cpp/server/utils/process_manager.cpp
+            src/cpp/server/utils/platform/process_containment_linux.cpp
+            src/cpp/server/utils/platform/process_containment_linux_ops.cpp
+            src/cpp/server/utils/platform/process_linux.cpp
+        )
+        target_include_directories(test_linux_amd_gtt_point_observation_source PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/residency
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/utils
+        )
+        find_package(Threads REQUIRED)
+        target_link_libraries(test_linux_amd_gtt_point_observation_source PRIVATE
+            lemonade-digest-crypto
+            Threads::Threads
+        )
+        add_cpp_ci_test(
+            LinuxAmdGttPointObservationSource
+            CI ON
+            COMMAND test_linux_amd_gtt_point_observation_source
         )
     endif()
 endif()
