@@ -2563,7 +2563,7 @@ void Server::begin_residency_lifecycle_change() {
 
 residency::ProfilingTransactionResult
 Server::run_residency_profiling_transaction(
-    std::string transaction_id,
+    residency::ProfilingTransactionContext context,
     residency::ProfilingTransaction::Capture capture,
     std::atomic<bool> *cancel) {
     uint64_t lifecycle_epoch = 0;
@@ -2601,15 +2601,15 @@ Server::run_residency_profiling_transaction(
         if (lifecycle_changed) {
             value.status = residency::ProfilingTransactionStatus::Restarted;
             value.diagnostic = "profiling lifecycle changed before publication";
-            value.candidate.reset();
+            value.evidence.reset();
         } else if (value.status ==
                        residency::ProfilingTransactionStatus::Accepted &&
-                   !value.candidate.has_value()) {
+                   !value.evidence.has_value()) {
             value.status = residency::ProfilingTransactionStatus::InvalidEvidence;
-            value.diagnostic = "profiling transaction returned no candidate";
+            value.diagnostic = "profiling transaction returned no evidence";
         }
         if (value.status != residency::ProfilingTransactionStatus::Accepted)
-            value.candidate.reset();
+            value.evidence.reset();
         admission_guard.release_locked();
         return value;
     };
@@ -2617,7 +2617,7 @@ Server::run_residency_profiling_transaction(
     residency::ProfilingTransactionResult result;
     try {
         result = transaction->run(
-            std::move(transaction_id), std::move(capture), cancel,
+            std::move(context), std::move(capture), cancel,
             [this, lifecycle_epoch] {
                 return !profiling_accepting_.load() ||
                        shutdown_requested_.load() || rebind_requested_.load() ||

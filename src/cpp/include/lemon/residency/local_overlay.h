@@ -216,8 +216,12 @@ public:
     ParsedProfilingInputEnvelope() = delete;
     ParsedProfilingInputEnvelope(const ParsedProfilingInputEnvelope &) =
         default;
+    ParsedProfilingInputEnvelope(ParsedProfilingInputEnvelope &&) noexcept =
+        default;
     ParsedProfilingInputEnvelope &
     operator=(const ParsedProfilingInputEnvelope &) = default;
+    ParsedProfilingInputEnvelope &
+    operator=(ParsedProfilingInputEnvelope &&) noexcept = default;
 
     SchemaVersion schema() const noexcept;
     std::string_view deployment_id() const noexcept;
@@ -263,8 +267,12 @@ public:
     ParsedProfilingPhaseAttestation() = delete;
     ParsedProfilingPhaseAttestation(
         const ParsedProfilingPhaseAttestation &) = default;
+    ParsedProfilingPhaseAttestation(
+        ParsedProfilingPhaseAttestation &&) noexcept = default;
     ParsedProfilingPhaseAttestation &
     operator=(const ParsedProfilingPhaseAttestation &) = default;
+    ParsedProfilingPhaseAttestation &
+    operator=(ParsedProfilingPhaseAttestation &&) noexcept = default;
 
     SchemaVersion schema() const noexcept;
     ProfilingPhase phase() const noexcept;
