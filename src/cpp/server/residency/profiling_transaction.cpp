@@ -1,8 +1,7 @@
 #include "lemon/residency/profiling_transaction.h"
 
 #include "lemon/router.h"
-
-#include <mbedtls/md.h>
+#include "profiling_common.h"
 
 #include <array>
 #include <chrono>
@@ -20,6 +19,8 @@ namespace lemon::residency {
 namespace {
 
 using Clock = std::chrono::steady_clock;
+using profiling_internal::bounded_diagnostic;
+using profiling_internal::sha256_hex;
 
 std::string system_utc_now() {
     const auto now = std::chrono::system_clock::now();
@@ -33,33 +34,6 @@ std::string system_utc_now() {
     std::ostringstream output;
     output << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
     return output.str();
-}
-
-std::optional<std::string> raw_sha256(std::string_view bytes) {
-    const auto *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (info == nullptr) {
-        return std::nullopt;
-    }
-    mbedtls_md_context_t context;
-    mbedtls_md_init(&context);
-    std::array<unsigned char, 32> digest{};
-    const bool failed =
-        mbedtls_md_setup(&context, info, 0) != 0 || mbedtls_md_starts(&context) != 0 ||
-        mbedtls_md_update(&context, reinterpret_cast<const unsigned char *>(bytes.data()),
-                          bytes.size()) != 0 ||
-        mbedtls_md_finish(&context, digest.data()) != 0;
-    mbedtls_md_free(&context);
-    if (failed) {
-        return std::nullopt;
-    }
-    static constexpr char hex[] = "0123456789abcdef";
-    std::string result;
-    result.reserve(64);
-    for (const auto byte : digest) {
-        result.push_back(hex[(byte >> 4) & 0x0f]);
-        result.push_back(hex[byte & 0x0f]);
-    }
-    return result;
 }
 
 std::int64_t days_from_civil(int year, unsigned month, unsigned day) noexcept {
@@ -111,16 +85,6 @@ std::optional<std::int64_t> utc_seconds(std::string_view value) noexcept {
     }
     return days_from_civil(year, static_cast<unsigned>(month), static_cast<unsigned>(day)) * 86400 +
            hour * 3600 + minute * 60 + second;
-}
-
-std::string bounded_diagnostic(std::string value) {
-    if (value.size() > max_local_overlay_diagnostic_bytes) {
-        std::size_t boundary = max_local_overlay_diagnostic_bytes;
-        while (boundary > 0 && (static_cast<unsigned char>(value[boundary]) & 0xc0u) == 0x80u)
-            --boundary;
-        value.resize(boundary);
-    }
-    return value;
 }
 
 ProfilingTransactionResult result_for(ProfilingTransactionStatus status,
@@ -589,9 +553,9 @@ ProfilingTransactionResult ProfilingTransaction::run(ProfilingTransactionContext
                               "profiling evidence is stale or future-dated");
         }
 
-        const auto baseline_sha256 = raw_sha256(capture_result.baseline_attestation);
-        const auto workload_sha256 = raw_sha256(capture_result.workload_attestation);
-        const auto release_sha256 = raw_sha256(capture_result.release_attestation);
+        const auto baseline_sha256 = sha256_hex(capture_result.baseline_attestation);
+        const auto workload_sha256 = sha256_hex(capture_result.workload_attestation);
+        const auto release_sha256 = sha256_hex(capture_result.release_attestation);
         if (!baseline_sha256.has_value() || !workload_sha256.has_value() ||
             !release_sha256.has_value()) {
             return result_for(ProfilingTransactionStatus::Failed,
