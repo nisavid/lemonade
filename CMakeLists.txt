@@ -977,6 +977,7 @@ set(SOURCES_CORE
     src/cpp/server/residency/explanations.cpp
     src/cpp/server/residency/generated_contract.cpp
     src/cpp/server/residency/local_overlay.cpp
+    src/cpp/server/residency/profiling_provider.cpp
     src/cpp/server/residency/profiling_transaction.cpp
     src/cpp/server/wrapped_server.cpp
     src/cpp/server/streaming_proxy.cpp
@@ -3486,6 +3487,25 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_TRANSACTION_TEST_SRC}")
         COMMAND test_residency_profiling_transaction
     )
     set_tests_properties(ResidencyProfilingTransaction PROPERTIES TIMEOUT 30)
+endif()
+
+set(_RESIDENCY_PROFILING_PROVIDER_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_provider.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_PROVIDER_TEST_SRC}")
+    add_executable(
+        test_residency_profiling_provider
+        test/cpp/test_residency_profiling_provider.cpp
+    )
+    target_link_libraries(test_residency_profiling_provider PRIVATE
+        lemonade-server-core
+    )
+    add_cpp_ci_test(
+        ResidencyProfilingProvider
+        CI ON
+        COMMAND test_residency_profiling_provider
+    )
+    set_tests_properties(ResidencyProfilingProvider PROPERTIES TIMEOUT 30)
 endif()
 
 # Routing-helper reconciliation: durable needed-set + non-blocking prune that
