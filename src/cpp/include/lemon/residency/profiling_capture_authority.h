@@ -12,6 +12,8 @@ namespace residency {
 
 struct ProfilingCaptureSchedule {
     std::chrono::milliseconds observation_poll_interval{0};
+    // Reserves scheduler wakeup and recorder overhead in each start-to-start gap.
+    std::chrono::milliseconds poll_cycle_overhead_allowance{0};
     ProfilingCollectionClock clock;
 };
 
