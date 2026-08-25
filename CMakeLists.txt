@@ -2624,31 +2624,47 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endif()
 endif()
 
-if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(_PROCESS_CONTAINMENT_TEST_SRC
-        "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_process_containment.cpp"
-    )
-    if(EXISTS "${_PROCESS_CONTAINMENT_TEST_SRC}")
-        add_executable(test_process_containment
-            test/cpp/test_process_containment.cpp
-            src/cpp/server/utils/process_manager.cpp
+if(BUILD_TESTING
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_process_containment.cpp"
+   AND (WIN32 OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+    if(WIN32)
+        set(_PROCESS_CONTAINMENT_TEST_PLATFORM_SOURCES
+            src/cpp/server/utils/platform/process_containment_stub.cpp
+            src/cpp/server/utils/platform/process_windows.cpp
+        )
+    elseif(APPLE)
+        set(_PROCESS_CONTAINMENT_TEST_PLATFORM_SOURCES
+            src/cpp/server/utils/platform/process_containment_stub.cpp
+            src/cpp/server/utils/platform/process_macos.cpp
+        )
+    else()
+        set(_PROCESS_CONTAINMENT_TEST_PLATFORM_SOURCES
             src/cpp/server/utils/platform/process_containment_linux.cpp
             src/cpp/server/utils/platform/process_containment_linux_ops.cpp
             src/cpp/server/utils/platform/process_linux.cpp
         )
-        target_include_directories(test_process_containment PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/utils
-            ${CMAKE_CURRENT_BINARY_DIR}/include
-        )
-        find_package(Threads REQUIRED)
-        target_link_libraries(test_process_containment PRIVATE Threads::Threads)
-        add_cpp_ci_test(
-            ProcessContainmentTest
-            CI ON
-            COMMAND test_process_containment
-        )
     endif()
+
+    add_executable(test_process_containment
+        test/cpp/test_process_containment.cpp
+        src/cpp/server/utils/process_manager.cpp
+        ${_PROCESS_CONTAINMENT_TEST_PLATFORM_SOURCES}
+    )
+    target_include_directories(test_process_containment PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/utils
+        ${CMAKE_CURRENT_BINARY_DIR}/include
+    )
+    find_package(Threads REQUIRED)
+    target_link_libraries(test_process_containment PRIVATE Threads::Threads)
+    if(WIN32)
+        target_link_libraries(test_process_containment PRIVATE ws2_32)
+    endif()
+    add_cpp_ci_test(
+        ProcessContainmentTest
+        CI ON
+        COMMAND test_process_containment
+    )
 endif()
 
 if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")

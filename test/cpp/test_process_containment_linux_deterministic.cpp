@@ -1,11 +1,11 @@
 #include <lemon/utils/process_manager.h>
 
 #include "process_containment_linux_fake_ops.h"
+#include "process_containment_linux_test_support.h"
 
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -19,7 +19,6 @@ int run_process_containment_linux_deterministic_race_tests();
 namespace {
 
 using namespace std::chrono_literals;
-using lemon::utils::ProcessContainmentOperationControl;
 using lemon::utils::ProcessContainmentRequest;
 using lemon::utils::ProcessContainmentStartResult;
 using lemon::utils::ProcessContainmentStatus;
@@ -31,39 +30,11 @@ using lemon::utils::internal::testing::force_next_events_populated;
 using lemon::utils::internal::testing::hold_child_before_exec;
 using lemon::utils::internal::testing::process_containment_linux_fake_drained;
 using lemon::utils::internal::testing::process_containment_linux_fake_snapshot;
-using lemon::utils::internal::testing::reset_process_containment_linux_fake;
-
-struct TestState {
-    int failures = 0;
-
-    void require(bool condition, const char *message) {
-        if (condition) {
-            return;
-        }
-        ++failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-};
-
-class TemporaryDirectory {
-public:
-    TemporaryDirectory() {
-        std::string pattern = "/tmp/lemonade-containment-fake-XXXXXX";
-        if (char *created = ::mkdtemp(pattern.data())) {
-            path_ = created;
-        }
-    }
-
-    ~TemporaryDirectory() {
-        std::error_code error;
-        std::filesystem::remove_all(path_, error);
-    }
-
-    const std::filesystem::path &path() const noexcept { return path_; }
-
-private:
-    std::filesystem::path path_;
-};
+using process_containment_test::TemporaryDirectory;
+using process_containment_test::TestState;
+using process_containment_test::begin_scenario;
+using process_containment_test::nonce;
+using process_containment_test::operation_control;
 
 class ClosedStandardDescriptors {
 public:
@@ -108,19 +79,6 @@ private:
     bool closed_ = false;
 };
 
-ProcessContainmentOperationControl operation_control() {
-    return {std::chrono::steady_clock::now() + 5s, {}};
-}
-
-std::string nonce(char value) { return std::string(64U, value); }
-
-bool begin_scenario(TestState &state) {
-    const bool reset = reset_process_containment_linux_fake();
-    state.require(reset,
-                  "scenario reset refuses to race retained child or reaper state");
-    return reset;
-}
-
 bool wait_for_fake_drain() {
     for (int attempt = 0; attempt < 500; ++attempt) {
         if (process_containment_linux_fake_drained()) {
@@ -132,10 +90,10 @@ bool wait_for_fake_drain() {
 }
 
 void test_prepare_uses_production_state_machine(TestState &state) {
-    if (!begin_scenario(state)) {
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     {
         auto result = ProcessManager::prepare_process_containment(
             ProcessContainmentRequest{root.path(), "deterministic/prepare",
@@ -152,10 +110,10 @@ void test_prepare_uses_production_state_machine(TestState &state) {
 }
 
 void test_prepare_failure_rolls_back_leaf(TestState &state) {
-    if (!begin_scenario(state)) {
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     fail_next_leaf_open();
     const auto result = ProcessManager::prepare_process_containment(
         ProcessContainmentRequest{root.path(), "deterministic/rollback",
@@ -170,10 +128,10 @@ void test_prepare_failure_rolls_back_leaf(TestState &state) {
 }
 
 void test_full_lifecycle_and_scope_anomaly_cleanup(TestState &state) {
-    if (!begin_scenario(state)) {
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     auto prepared = ProcessManager::prepare_process_containment(
         ProcessContainmentRequest{root.path(), "deterministic/lifecycle",
                                   nonce('c')},
@@ -232,10 +190,10 @@ void test_full_lifecycle_and_scope_anomaly_cleanup(TestState &state) {
 }
 
 void test_exec_failure_transfers_exact_reaping(TestState &state) {
-    if (!begin_scenario(state)) {
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     auto prepared = ProcessManager::prepare_process_containment(
         ProcessContainmentRequest{root.path(), "deterministic/exec-failure",
                                   nonce('d')},
@@ -274,10 +232,10 @@ void test_exec_failure_transfers_exact_reaping(TestState &state) {
 }
 
 void test_exec_handshake_cancellation_is_bounded(TestState &state) {
-    if (!begin_scenario(state)) {
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     auto prepared = ProcessManager::prepare_process_containment(
         ProcessContainmentRequest{root.path(), "deterministic/cancel",
                                   nonce('e')},
@@ -318,10 +276,10 @@ void test_exec_handshake_cancellation_is_bounded(TestState &state) {
 }
 
 void test_exec_handshake_timeout_is_bounded(TestState &state) {
-    if (!begin_scenario(state)) {
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     auto prepared = ProcessManager::prepare_process_containment(
         ProcessContainmentRequest{root.path(), "deterministic/timeout",
                                   nonce('f')},
@@ -356,10 +314,10 @@ void test_exec_handshake_timeout_is_bounded(TestState &state) {
 }
 
 void test_closed_standard_descriptors_are_normalized(TestState &state) {
-    if (!begin_scenario(state)) {
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     auto prepared = ProcessManager::prepare_process_containment(
         ProcessContainmentRequest{root.path(), "deterministic/closed-stdio",
                                   nonce('0')},
@@ -401,10 +359,10 @@ void test_closed_standard_descriptors_are_normalized(TestState &state) {
 }
 
 void test_release_revalidates_empty_scope(TestState &state) {
-    if (!begin_scenario(state)) {
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     auto prepared = ProcessManager::prepare_process_containment(
         ProcessContainmentRequest{root.path(), "deterministic/release",
                                   nonce('1')},

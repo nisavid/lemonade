@@ -1,10 +1,9 @@
 #include <lemon/utils/process_manager.h>
 
 #include "process_containment_linux_fake_ops.h"
+#include "process_containment_linux_test_support.h"
 
 #include <chrono>
-#include <cstdlib>
-#include <filesystem>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -15,7 +14,6 @@
 namespace {
 
 using namespace std::chrono_literals;
-using lemon::utils::ProcessContainmentOperationControl;
 using lemon::utils::ProcessContainmentPrepareResult;
 using lemon::utils::ProcessContainmentRequest;
 using lemon::utils::ProcessContainmentStartResult;
@@ -30,51 +28,17 @@ using lemon::utils::internal::testing::fail_retained_scope_identity;
 using lemon::utils::internal::testing::force_scope_populated;
 using lemon::utils::internal::testing::process_containment_linux_fake_snapshot;
 using lemon::utils::internal::testing::report_pidfd_exit_on_poll;
-using lemon::utils::internal::testing::reset_process_containment_linux_fake;
 using lemon::utils::internal::testing::rewrite_proc_stat_comm;
-
-struct TestState {
-    int failures = 0;
-
-    void require(bool condition, const char *message) {
-        if (condition) {
-            return;
-        }
-        ++failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-};
-
-class TemporaryDirectory {
-public:
-    TemporaryDirectory() {
-        std::string pattern = "/tmp/lemonade-containment-race-XXXXXX";
-        if (char *created = ::mkdtemp(pattern.data())) {
-            path_ = created;
-        }
-    }
-
-    ~TemporaryDirectory() {
-        std::error_code error;
-        std::filesystem::remove_all(path_, error);
-    }
-
-    const std::filesystem::path &path() const noexcept { return path_; }
-
-private:
-    std::filesystem::path path_;
-};
+using process_containment_test::TemporaryDirectory;
+using process_containment_test::TestState;
+using process_containment_test::begin_scenario;
+using process_containment_test::nonce;
+using process_containment_test::operation_control;
 
 struct RunningScenario {
     ProcessContainmentPrepareResult prepared;
     ProcessContainmentStartResult started;
 };
-
-ProcessContainmentOperationControl operation_control() {
-    return {std::chrono::steady_clock::now() + 5s, {}};
-}
-
-std::string nonce(char value) { return std::string(64U, value); }
 
 RunningScenario start_running_scenario(TestState &state,
                                        const TemporaryDirectory &root,
@@ -137,12 +101,10 @@ void test_snapshot_rejection(TestState &state, const char *owner_scope_id,
                              std::size_t ordinal,
                              ProcessContainmentStatus expected_status,
                              const char *rejection_message) {
-    if (!reset_process_containment_linux_fake()) {
-        state.require(false,
-                      "snapshot scenario starts without retained fake state");
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     auto scenario =
         start_running_scenario(state, root, owner_scope_id, nonce_value);
     if (!scenario.started.succeeded()) {
@@ -195,12 +157,10 @@ void test_snapshot_rejects_final_pidfd_exit(TestState &state) {
 }
 
 void test_proc_stat_parser_uses_the_final_comm_delimiter(TestState &state) {
-    if (!reset_process_containment_linux_fake()) {
-        state.require(false,
-                      "proc-stat scenario starts without retained fake state");
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     auto scenario = start_running_scenario(
         state, root, "deterministic/proc-stat-comm", '3');
     if (!scenario.started.succeeded()) {
@@ -219,12 +179,10 @@ void test_proc_stat_parser_uses_the_final_comm_delimiter(TestState &state) {
 }
 
 void test_kill_cleans_after_retained_identity_anomaly(TestState &state) {
-    if (!reset_process_containment_linux_fake()) {
-        state.require(false,
-                      "retained-identity scenario starts without fake state");
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     auto scenario = start_running_scenario(
         state, root, "deterministic/retained-identity", '4');
     if (!scenario.started.succeeded()) {
@@ -245,12 +203,10 @@ void test_kill_cleans_after_retained_identity_anomaly(TestState &state) {
 }
 
 void test_kill_cleans_live_direct_child_missing_from_scope(TestState &state) {
-    if (!reset_process_containment_linux_fake()) {
-        state.require(false,
-                      "direct-escape scenario starts without retained fake state");
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     auto scenario = start_running_scenario(
         state, root, "deterministic/direct-escape", '6');
     if (!scenario.started.succeeded()) {
@@ -271,12 +227,10 @@ void test_kill_cleans_live_direct_child_missing_from_scope(TestState &state) {
 }
 
 void test_repeated_kill_respects_one_deadline(TestState &state) {
-    if (!reset_process_containment_linux_fake()) {
-        state.require(false,
-                      "kill-deadline scenario starts without retained fake state");
+    TemporaryDirectory root;
+    if (!begin_scenario(state, root)) {
         return;
     }
-    TemporaryDirectory root;
     auto scenario = start_running_scenario(
         state, root, "deterministic/kill-deadline", '5');
     if (!scenario.started.succeeded()) {

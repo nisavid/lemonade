@@ -711,6 +711,10 @@ bool reset_process_containment_linux_fake() noexcept {
     state.fake_clock_now_ns.store(0, std::memory_order_release);
     state.scope_fd.store(-1, std::memory_order_release);
     state.direct_pid.store(-1, std::memory_order_release);
+    for (auto &role : state.fd_roles) {
+        role.store(static_cast<int>(FdRole::None),
+                   std::memory_order_release);
+    }
     return true;
 }
 

@@ -214,6 +214,16 @@ ProcessContainmentOperationControl operation_control() {
     return {std::chrono::steady_clock::now() + 5s, {}};
 }
 
+#if defined(_WIN32) || defined(__APPLE__)
+void test_platform_reports_unsupported_containment(TestState &state) {
+    const auto result = ProcessManager::prepare_process_containment(
+        {}, operation_control());
+    state.require(result.status == ProcessContainmentStatus::Unsupported &&
+                      !result.succeeded() && !result.containment,
+                  "unsupported platforms return no containment authority");
+}
+#endif
+
 ProcessBirthIdentity birth(
     std::string boot_id, int pid, std::uint64_t start_time_ticks) {
     return {std::move(boot_id), pid, start_time_ticks};
@@ -894,6 +904,9 @@ void test_move_and_destruction_never_kill(TestState &state) {
 
 int main() {
     TestState state;
+#if defined(_WIN32) || defined(__APPLE__)
+    test_platform_reports_unsupported_containment(state);
+#endif
     test_result_helpers_are_fail_closed(state);
     test_identity_and_snapshot_contract(state);
     test_start_forwards_arguments_and_lifecycle_order(state);
