@@ -109,6 +109,13 @@ struct HasUnattributedClaims<
     : std::true_type {};
 
 template <typename T, typename = void>
+struct HasResidualClaims : std::false_type {};
+template <typename T>
+struct HasResidualClaims<
+    T, std::void_t<decltype(std::declval<T>().residual_claims)>>
+    : std::true_type {};
+
+template <typename T, typename = void>
 struct HasAttestation : std::false_type {};
 template <typename T>
 struct HasAttestation<T, std::void_t<decltype(std::declval<T>().attestation)>>
@@ -146,6 +153,7 @@ static_assert(!HasLifecycleState<ProfilingDerivedObservation>::value);
 static_assert(!HasAttestation<ProfilingDerivedObservation>::value);
 static_assert(!HasExternalChangeClaims<ProfilingDerivedObservation>::value);
 static_assert(!HasUnattributedClaims<ProfilingDerivedObservation>::value);
+static_assert(!HasResidualClaims<ProfilingDerivedObservation>::value);
 static_assert(!HasPhase<ProfilingObservationCollectionResult>::value);
 static_assert(!HasLifecycleState<ProfilingObservationCollectionResult>::value);
 static_assert(!HasAttestation<ProfilingObservationCollectionResult>::value);
@@ -231,7 +239,7 @@ void test_default_interval_source_is_unavailable(TestState &state) {
 std::string digest(char value) { return std::string(64, value); }
 
 constexpr char known_contract_sha256[] =
-    "a62d1c4f2bd4345138b4cffd52e29da00bd1d06788831c4cb7fbe5dded344870";
+    "25bc49c39bc87f9a471f3b64e86686a365db7f96899d3cf86b52f3e0cf829d4e";
 
 ProfilingDerivationContract contract() {
     ProfilingDerivationContract value;
@@ -572,6 +580,44 @@ void test_collector_derives_observation_from_raw_samples(TestState &state) {
     }
 }
 
+void test_collector_separates_domain_used_from_target_projection(
+    TestState &state) {
+    ScriptedProfilingObservationSource first_source(
+        {successful_read(4096, 2048)});
+    ProfilingObservationCollector first_collector(contract(), first_source,
+                                                  clock());
+    const auto first =
+        first_collector.collect(context(), [] { return false; });
+
+    ScriptedProfilingObservationSource second_source(
+        {successful_read(4000, 2048)});
+    ProfilingObservationCollector second_collector(contract(), second_source,
+                                                   clock());
+    const auto second =
+        second_collector.collect(context(), [] { return false; });
+
+    state.require(first.accepted() && first.observation.has_value() &&
+                      second.accepted() && second.observation.has_value(),
+                  "coherent domain-used totals may include stable background use");
+    if (!first.observation || !second.observation) return;
+
+    require_capacity(state, first.observation->observed_claims, 2048,
+                     "observed claims describe the target-owned effect");
+    require_capacity(state, first.observation->attributed_claims, 2048,
+                     "the target-owned effect remains fully attributed");
+    require_capacity(state, second.observation->observed_claims, 2048,
+                     "domain-wide background does not inflate the target effect");
+    require_capacity(state, second.observation->attributed_claims, 2048,
+                     "target attribution is independent from domain-wide background");
+    require_capacity(state, first.observation->safety_margin_claims, 256,
+                     "safety slack is derived from the domain-used value");
+    require_capacity(state, second.observation->safety_margin_claims, 352,
+                     "lower domain use produces greater safety slack");
+    state.require(first.observation->raw_provenance_sha256 !=
+                      second.observation->raw_provenance_sha256,
+                  "raw provenance binds the distinct domain-used value");
+}
+
 void test_freshness_is_anchored_before_read(TestState &state) {
     auto utc = std::make_shared<std::chrono::system_clock::time_point>(
         std::chrono::system_clock::time_point{} + 1000s);
@@ -842,13 +888,13 @@ void test_collector_fails_closed(TestState &state) {
 
     {
         ScriptedProfilingObservationSource source(
-            {successful_read(4096, 2048)});
+            {successful_read(2047, 2048)});
         ProfilingObservationCollector collector(contract(), source, clock());
         const auto result = collector.collect(context(), [] { return false; });
         state.require(result.status ==
                               ProfilingCollectionStatus::InvalidObservation &&
                           !result.observation.has_value(),
-                      "unattributed totals fail closed");
+                      "an owner projection cannot exceed its domain-used total");
     }
 
     {
@@ -944,6 +990,7 @@ int main() {
     test_derivation_contract_identity(state);
     test_stale_contract_identity_fails_before_source_access(state);
     test_collector_derives_observation_from_raw_samples(state);
+    test_collector_separates_domain_used_from_target_projection(state);
     test_freshness_is_anchored_before_read(state);
     test_collector_fails_closed(state);
     return state.ok.load() ? 0 : 1;

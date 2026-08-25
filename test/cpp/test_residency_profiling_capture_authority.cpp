@@ -43,6 +43,27 @@ struct TestState {
 
 std::string digest(char value) { return std::string(64, value); }
 
+class SharedCaptureClock {
+public:
+    std::chrono::steady_clock::time_point monotonic_now() noexcept {
+        return std::chrono::steady_clock::time_point{} +
+               std::chrono::milliseconds(
+                   next_milliseconds_.fetch_add(5, std::memory_order_relaxed));
+    }
+
+    ProfilingSourceAcquisitionWindow source_window() const noexcept {
+        const auto next =
+            next_milliseconds_.load(std::memory_order_relaxed);
+        const auto offset = next == 0 ? 0 : next - 1;
+        const auto point = std::chrono::steady_clock::time_point{} +
+                           std::chrono::milliseconds(offset);
+        return ProfilingSourceAcquisitionWindow{point, point};
+    }
+
+private:
+    std::atomic<std::uint64_t> next_milliseconds_{0};
+};
+
 struct ThreadLifetime {
     std::uint64_t token = 0;
 };
@@ -167,6 +188,13 @@ bool has_capacity(const std::vector<ClaimFamilyClosure> &families,
            family->entries.front().amount == expected;
 }
 
+bool has_zero_capacity(const std::vector<ClaimFamilyClosure> &families) {
+    const auto *family = capacity_family(families);
+    return family != nullptr &&
+           family->completeness == ClaimCompleteness::KnownZero &&
+           family->entries.empty();
+}
+
 LocalOverlaySelectorIdentity selector() {
     RuntimeCatalogSelector catalog;
     catalog.source_support_baseline = std::string(40, 'a');
@@ -271,18 +299,15 @@ ProfilingTransactionContext context(
 }
 
 ProfilingCollectionClock clock(
+    std::shared_ptr<SharedCaptureClock> shared_clock,
     std::shared_ptr<ReleaseSettleProbe> release_settle_probe = {}) {
-    auto monotonic_milliseconds =
-        std::make_shared<std::atomic<std::uint64_t>>(0);
     ProfilingCollectionClock value;
-    value.monotonic_now = [monotonic_milliseconds,
+    value.monotonic_now = [shared_clock = std::move(shared_clock),
                            release_settle_probe] {
         if (release_settle_probe) {
             release_settle_probe->note_monotonic_read();
         }
-        return std::chrono::steady_clock::time_point{} +
-               std::chrono::milliseconds(
-                   monotonic_milliseconds->fetch_add(5));
+        return shared_clock->monotonic_now();
     };
     value.utc_now = [] {
         return std::chrono::system_clock::time_point{} +
@@ -292,11 +317,13 @@ ProfilingCollectionClock clock(
 }
 
 ProfilingCaptureSchedule schedule(
+    std::shared_ptr<SharedCaptureClock> shared_clock,
     std::shared_ptr<ReleaseSettleProbe> release_settle_probe = {}) {
     ProfilingCaptureSchedule value;
     value.observation_poll_interval = 1ms;
     value.poll_cycle_overhead_allowance = 10ms;
-    value.clock = clock(std::move(release_settle_probe));
+    value.clock = clock(std::move(shared_clock),
+                        std::move(release_settle_probe));
     return value;
 }
 
@@ -321,7 +348,8 @@ ProfilingRawIntervalFrame frame(
     const ProfilingDerivationContract &derivation_contract,
     std::uint64_t watermark,
     std::uint64_t total,
-    std::uint64_t owner) {
+    std::uint64_t owner,
+    ProfilingSourceAcquisitionWindow acquisition_window) {
     const auto owner_scope_set =
         profiling_owner_scope_set_sha256(derivation_contract.owner_scopes);
     if (!owner_scope_set) throw std::runtime_error("invalid owner scope set");
@@ -332,6 +360,7 @@ ProfilingRawIntervalFrame frame(
     value.event_semantics_revision_sha256 =
         derivation_contract.interval.event_semantics_revision_sha256;
     value.event_watermark = ProfilingEventWatermark{watermark};
+    value.acquisition_window = acquisition_window;
     value.samples = {
         ProfilingRawSample{
             "sensor/gtt-used",
@@ -361,6 +390,7 @@ struct DynamicFrameReading {
 };
 
 struct DynamicIntervalScenario {
+    DynamicFrameReading initial_reading{100, 100};
     std::vector<DynamicFrameReading> baseline_stability_events;
     std::function<void()> after_first_baseline_read;
     std::vector<DynamicFrameReading> workload_events = {
@@ -379,10 +409,14 @@ class DynamicIntervalSource final : public ProfilingIntervalObservationSource {
 public:
     explicit DynamicIntervalSource(
         ProfilingDerivationContract contract_value,
+        std::shared_ptr<SharedCaptureClock> shared_clock,
         DynamicIntervalScenario scenario = {})
         : contract_(std::move(contract_value)),
+          shared_clock_(std::move(shared_clock)),
           scenario_(std::move(scenario)) {
-        frames_.push_back(frame(contract_, 10, 100, 100));
+        frames_.push_back(frame(
+            contract_, 10, scenario_.initial_reading.total,
+            scenario_.initial_reading.owner, shared_clock_->source_window()));
     }
 
     ProfilingRawIntervalBeginResult begin(
@@ -422,10 +456,12 @@ public:
             };
         }
         active_ = true;
+        auto checkpoint = frames_.back();
+        checkpoint.acquisition_window = shared_clock_->source_window();
         return {
             ProfilingIntervalSourceError::None,
             token_,
-            frames_.back(),
+            std::move(checkpoint),
             {},
         };
     }
@@ -502,12 +538,14 @@ public:
             scenario_.release_settle_probe->note_release_read();
         }
 
+        auto checkpoint = frames_.back();
+        checkpoint.acquisition_window = shared_clock_->source_window();
         return {
             ProfilingIntervalSourceError::None,
             after_event_watermark,
             frames_.back().event_watermark,
             std::move(events),
-            frames_.back(),
+            std::move(checkpoint),
             {},
         };
     }
@@ -544,12 +582,14 @@ public:
                     events.push_back(candidate);
                 }
             }
+            auto checkpoint = frames_.back();
+            checkpoint.acquisition_window = shared_clock_->source_window();
             return {
                 ProfilingIntervalSourceError::None,
                 after_event_watermark,
                 frames_.back().event_watermark,
                 std::move(events),
-                frames_.back(),
+                std::move(checkpoint),
                 {},
             };
         } catch (...) {
@@ -676,8 +716,8 @@ private:
 
     void append_frame(const DynamicFrameReading &reading) {
         const auto watermark = frames_.back().event_watermark.value + 1;
-        frames_.push_back(
-            frame(contract_, watermark, reading.total, reading.owner));
+        frames_.push_back(frame(contract_, watermark, reading.total,
+                                reading.owner, shared_clock_->source_window()));
     }
 
     ProfilingRawIntervalBatch failure_batch(
@@ -695,6 +735,7 @@ private:
     }
 
     ProfilingDerivationContract contract_;
+    std::shared_ptr<SharedCaptureClock> shared_clock_;
     DynamicIntervalScenario scenario_;
     ProfilingRawIntervalToken token_{71};
     mutable std::mutex mutex_;
@@ -888,8 +929,9 @@ void test_invalid_and_default_source_never_invoke_driver(
     const auto derivation_contract = contract();
     const auto transaction_context = context(derivation_contract);
 
-    DynamicIntervalSource source(derivation_contract);
-    auto invalid_schedule = schedule();
+    auto invalid_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource source(derivation_contract, invalid_clock);
+    auto invalid_schedule = schedule(invalid_clock);
     invalid_schedule.observation_poll_interval = 471ms;
     ProfilingCaptureAuthority invalid(
         derivation_contract, source, std::move(invalid_schedule));
@@ -905,8 +947,10 @@ void test_invalid_and_default_source_never_invoke_driver(
                       invalid_driver.release_calls == 0,
                   "an invalid schedule is rejected before source or driver access");
 
-    DynamicIntervalSource no_allowance_source(derivation_contract);
-    auto no_allowance_schedule = schedule();
+    auto no_allowance_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource no_allowance_source(derivation_contract,
+                                              no_allowance_clock);
+    auto no_allowance_schedule = schedule(no_allowance_clock);
     no_allowance_schedule.poll_cycle_overhead_allowance = 0ms;
     ProfilingCaptureAuthority no_allowance(
         derivation_contract, no_allowance_source,
@@ -925,9 +969,11 @@ void test_invalid_and_default_source_never_invoke_driver(
                       no_allowance_driver.release_calls == 0,
                   "a missing cycle-overhead allowance is rejected before source or driver access");
 
-    DynamicIntervalSource incomplete_source(derivation_contract);
+    auto incomplete_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource incomplete_source(derivation_contract,
+                                            incomplete_clock);
     ProfilingCaptureAuthority incomplete(
-        derivation_contract, incomplete_source, schedule());
+        derivation_contract, incomplete_source, schedule(incomplete_clock));
     CountingDriver incomplete_driver;
     const auto incomplete_context = context(
         derivation_contract,
@@ -950,7 +996,9 @@ void test_invalid_and_default_source_never_invoke_driver(
                       incomplete_driver.release_calls == 0,
                   "incomplete selector coverage is rejected before source or driver access");
 
-    ProfilingCaptureAuthority unavailable(derivation_contract, schedule());
+    auto unavailable_clock = std::make_shared<SharedCaptureClock>();
+    ProfilingCaptureAuthority unavailable(
+        derivation_contract, schedule(unavailable_clock));
     CountingDriver unavailable_driver;
     const auto unavailable_capture = unavailable.capture(
         router, transaction_context, unavailable_driver,
@@ -970,10 +1018,11 @@ void test_captures_canonical_phases_across_a_complete_interval(
     Router &router) {
     const auto derivation_contract = contract();
     const auto transaction_context = context(derivation_contract);
-    DynamicIntervalSource source(derivation_contract);
+    auto shared_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource source(derivation_contract, shared_clock);
     CoordinatedDriver driver(source);
     ProfilingCaptureAuthority authority(
-        derivation_contract, source, schedule());
+        derivation_contract, source, schedule(shared_clock));
     ProfilingTransaction transaction(router, transaction_options());
     ProfilingTransactionCapture captured;
     const auto owner_thread = std::this_thread::get_id();
@@ -1100,6 +1149,64 @@ void test_captures_canonical_phases_across_a_complete_interval(
                   "capture returns only after the observer drains, unregisters, and exits");
 }
 
+void test_accepts_stable_nonzero_domain_background(
+    TestState &state,
+    Router &router) {
+    const auto derivation_contract = contract();
+    const auto transaction_context = context(derivation_contract);
+    DynamicIntervalScenario scenario;
+    scenario.initial_reading = {500, 100};
+    scenario.workload_events = {
+        {700, 300},
+        {900, 500},
+        {500, 100},
+    };
+    scenario.release_events = {{500, 100}};
+    auto shared_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource source(derivation_contract, shared_clock,
+                                 std::move(scenario));
+    CoordinatedDriver driver(source);
+    ProfilingCaptureAuthority authority(
+        derivation_contract, source, schedule(shared_clock));
+
+    const auto captured = authority.capture(
+        router, transaction_context, driver, [] { return false; });
+    const auto baseline =
+        parse_profiling_phase_attestation(captured.baseline_attestation);
+    const auto workload =
+        parse_profiling_phase_attestation(captured.workload_attestation);
+    const auto release =
+        parse_profiling_phase_attestation(captured.release_attestation);
+
+    state.require(captured.diagnostic.empty() && baseline.accepted() &&
+                      workload.accepted() && release.accepted(),
+                  "stable nonzero domain background yields all three canonical phases");
+    if (baseline.candidate && workload.candidate && release.candidate) {
+        state.require(
+            has_capacity(baseline.candidate->observed_claims(), 100) &&
+                has_capacity(workload.candidate->observed_claims(), 500) &&
+                has_capacity(release.candidate->observed_claims(), 100) &&
+                has_capacity(baseline.candidate->attributed_claims(), 100) &&
+                has_capacity(workload.candidate->attributed_claims(), 500) &&
+                has_capacity(release.candidate->attributed_claims(), 100),
+            "phase claims expose only the target-owned effect");
+        state.require(
+            has_zero_capacity(baseline.candidate->unattributed_claims()) &&
+                has_zero_capacity(workload.candidate->unattributed_claims()) &&
+                has_zero_capacity(release.candidate->unattributed_claims()),
+            "a constant domain-wide residual is not unattributed movement");
+        state.require(
+            has_capacity(baseline.candidate->safety_margin_claims(), 490) &&
+                has_capacity(workload.candidate->safety_margin_claims(), 90) &&
+                has_capacity(release.candidate->safety_margin_claims(), 490),
+            "phase safety slack retains peak domain-wide use");
+    }
+    state.require(driver.run_calls == 1 && driver.release_calls == 1 &&
+                      source.finish_calls() == 1 && !source.active() &&
+                      source.observer_thread_exited(),
+                  "stable background capture releases and drains exactly once");
+}
+
 void test_stability_windows_restart_after_retained_events(
     TestState &state,
     Router &router) {
@@ -1110,10 +1217,13 @@ void test_stability_windows_restart_after_retained_events(
     scenario.baseline_stability_events = {{120, 120}};
     scenario.release_settle_probe = release_settle_probe;
     scenario.release_stability_event = DynamicFrameReading{105, 105};
-    DynamicIntervalSource source(derivation_contract, std::move(scenario));
+    auto shared_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource source(derivation_contract, shared_clock,
+                                 std::move(scenario));
     CoordinatedDriver driver(source);
     ProfilingCaptureAuthority authority(
-        derivation_contract, source, schedule(release_settle_probe));
+        derivation_contract, source,
+        schedule(shared_clock, release_settle_probe));
 
     const auto captured = authority.capture(
         router, transaction_context, driver, [] { return false; });
@@ -1141,7 +1251,7 @@ void test_stability_windows_restart_after_retained_events(
         "each moved stability boundary requires a later unchanged checkpoint");
 }
 
-void test_transient_unattributed_demand_discards_every_phase(
+void test_domain_residual_excursions_discard_every_phase(
     TestState &state,
     Router &router) {
     const auto derivation_contract = contract();
@@ -1152,73 +1262,109 @@ void test_transient_unattributed_demand_discards_every_phase(
         {300, 200},
         {100, 100},
     };
+    auto baseline_clock = std::make_shared<SharedCaptureClock>();
     DynamicIntervalSource baseline_source(
-        derivation_contract, std::move(baseline_scenario));
+        derivation_contract, baseline_clock, std::move(baseline_scenario));
     CountingDriver baseline_driver;
     ProfilingCaptureAuthority baseline_authority(
-        derivation_contract, baseline_source, schedule());
+        derivation_contract, baseline_source, schedule(baseline_clock));
     const auto baseline_capture = baseline_authority.capture(
         router, transaction_context, baseline_driver,
         [] { return false; });
     require_empty_capture(
         state,
         baseline_capture,
-        "transient unattributed baseline demand discards all phases even when the following frame is clean");
-    state.require(baseline_driver.run_calls == 0 &&
-                      baseline_driver.release_calls == 0 &&
+        "a baseline domain-residual excursion discards all phases even when the following frame returns");
+    state.require(baseline_driver.run_calls == 1 &&
+                      baseline_driver.release_calls == 1 &&
                       baseline_source.finish_calls() == 1 &&
                       !baseline_source.active(),
-                  "invalid baseline demand drains the source before any workload ownership begins");
+                  "baseline residual movement remains structural until the authority rejects atomic publication");
 
     DynamicIntervalScenario workload_scenario;
     workload_scenario.workload_events = {
         {300, 200},
         {100, 100},
     };
+    auto workload_clock = std::make_shared<SharedCaptureClock>();
     DynamicIntervalSource workload_source(
-        derivation_contract, std::move(workload_scenario));
+        derivation_contract, workload_clock, std::move(workload_scenario));
     AdversarialDriver workload_driver(
         workload_source, DriverRunOutcome::Complete, false);
     ProfilingCaptureAuthority workload_authority(
-        derivation_contract, workload_source, schedule());
+        derivation_contract, workload_source, schedule(workload_clock));
     const auto workload_capture = workload_authority.capture(
         router, transaction_context, workload_driver,
         [] { return false; });
     require_empty_capture(
         state,
         workload_capture,
-        "transient unattributed workload demand discards all phases even when the following frame is clean");
+        "a workload domain-residual excursion discards every phase byte");
     state.require(workload_driver.run_calls == 1 &&
                       workload_driver.release_calls == 1 &&
                       workload_source.finish_calls() == 1 &&
                       !workload_source.active() &&
                       workload_source.observer_thread_exited(),
-                  "invalid workload demand releases once and drains the source token before returning");
+                  "workload residual movement releases once and drains before returning");
 
     DynamicIntervalScenario release_scenario;
     release_scenario.release_events = {
         {300, 200},
         {100, 100},
     };
+    auto release_clock = std::make_shared<SharedCaptureClock>();
     DynamicIntervalSource release_source(
-        derivation_contract, std::move(release_scenario));
+        derivation_contract, release_clock, std::move(release_scenario));
     AdversarialDriver release_driver(
         release_source, DriverRunOutcome::Complete, true);
     ProfilingCaptureAuthority release_authority(
-        derivation_contract, release_source, schedule());
+        derivation_contract, release_source, schedule(release_clock));
     const auto release_capture = release_authority.capture(
         router, transaction_context, release_driver,
         [] { return false; });
     require_empty_capture(
         state,
         release_capture,
-        "transient unattributed release demand discards all phases even when the following frame is clean");
+        "a release domain-residual excursion discards every phase byte");
     state.require(release_driver.run_calls == 1 &&
                       release_driver.release_calls == 1 &&
                       release_source.finish_calls() == 1 &&
                       !release_source.active() &&
                       release_source.observer_thread_exited(),
-                  "invalid release demand drains the source token and joins the observer before returning");
+                  "release residual movement drains and joins the observer before returning");
+
+    DynamicIntervalScenario final_drain_scenario;
+    final_drain_scenario.initial_reading = {500, 100};
+    final_drain_scenario.workload_events = {
+        {700, 300},
+        {900, 500},
+        {500, 100},
+    };
+    final_drain_scenario.release_events = {{500, 100}};
+    final_drain_scenario.final_drain_event =
+        DynamicFrameReading{501, 100};
+    auto final_drain_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource final_drain_source(
+        derivation_contract, final_drain_clock,
+        std::move(final_drain_scenario));
+    CoordinatedDriver final_drain_driver(final_drain_source);
+    ProfilingCaptureAuthority final_drain_authority(
+        derivation_contract, final_drain_source,
+        schedule(final_drain_clock));
+    const auto final_drain_capture = final_drain_authority.capture(
+        router, transaction_context, final_drain_driver,
+        [] { return false; });
+    require_empty_capture(
+        state, final_drain_capture,
+        "a final-drain domain-residual excursion discards every phase byte");
+    state.require(
+        final_drain_source.final_drain_event_observed() &&
+            final_drain_driver.run_calls == 1 &&
+            final_drain_driver.release_calls == 1 &&
+            final_drain_source.finish_calls() == 1 &&
+            !final_drain_source.active() &&
+            final_drain_source.observer_thread_exited(),
+        "final-drain residual movement closes workload and source exactly once");
 }
 
 void test_workload_failure_and_cancellation_close_the_interval(
@@ -1227,11 +1373,13 @@ void test_workload_failure_and_cancellation_close_the_interval(
     const auto derivation_contract = contract();
     const auto transaction_context = context(derivation_contract);
 
-    DynamicIntervalSource throwing_source(derivation_contract);
+    auto throwing_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource throwing_source(derivation_contract,
+                                          throwing_clock);
     AdversarialDriver throwing_driver(
         throwing_source, DriverRunOutcome::Throw, true);
     ProfilingCaptureAuthority throwing_authority(
-        derivation_contract, throwing_source, schedule());
+        derivation_contract, throwing_source, schedule(throwing_clock));
     const auto throwing_capture = throwing_authority.capture(
         router, transaction_context, throwing_driver,
         [] { return false; });
@@ -1249,12 +1397,14 @@ void test_workload_failure_and_cancellation_close_the_interval(
         "a workload exception releases once, finishes once, joins the observer, and returns no live token");
 
     std::atomic<bool> caller_cancelled{false};
-    DynamicIntervalSource cancelled_source(derivation_contract);
+    auto cancelled_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource cancelled_source(derivation_contract,
+                                           cancelled_clock);
     AdversarialDriver cancelled_driver(
         cancelled_source, DriverRunOutcome::Cancel, false,
         &caller_cancelled);
     ProfilingCaptureAuthority cancelled_authority(
-        derivation_contract, cancelled_source, schedule());
+        derivation_contract, cancelled_source, schedule(cancelled_clock));
     const auto cancelled_capture = cancelled_authority.capture(
         router, transaction_context, cancelled_driver, [&] {
             return caller_cancelled.load(std::memory_order_acquire);
@@ -1284,10 +1434,12 @@ void test_predispatch_abort_never_enters_workload_ownership(
     scenario.after_first_baseline_read = [&abort] {
         abort.arm_after_baseline_read();
     };
-    DynamicIntervalSource source(derivation_contract, std::move(scenario));
+    auto shared_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource source(derivation_contract, shared_clock,
+                                 std::move(scenario));
     CountingDriver driver;
     ProfilingCaptureAuthority authority(
-        derivation_contract, source, schedule());
+        derivation_contract, source, schedule(shared_clock));
     const auto owner_thread = std::this_thread::get_id();
     const auto owner_thread_token = current_thread_token();
 
@@ -1322,10 +1474,13 @@ void test_release_settling_abort_closes_owned_workload(
         std::make_shared<ReleaseSettleProbe>(&caller_cancelled);
     DynamicIntervalScenario scenario;
     scenario.release_settle_probe = release_settle_probe;
-    DynamicIntervalSource source(derivation_contract, std::move(scenario));
+    auto shared_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource source(derivation_contract, shared_clock,
+                                 std::move(scenario));
     CoordinatedDriver driver(source);
     ProfilingCaptureAuthority authority(
-        derivation_contract, source, schedule(release_settle_probe));
+        derivation_contract, source,
+        schedule(shared_clock, release_settle_probe));
     const auto owner_thread = std::this_thread::get_id();
     const auto owner_thread_token = current_thread_token();
 
@@ -1366,11 +1521,13 @@ void test_unverified_noop_release_discards_every_phase(
         {100, 100},
     };
     scenario.release_events.clear();
-    DynamicIntervalSource source(derivation_contract, std::move(scenario));
+    auto shared_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource source(derivation_contract, shared_clock,
+                                 std::move(scenario));
     AdversarialDriver driver(
         source, DriverRunOutcome::Complete, false);
     ProfilingCaptureAuthority authority(
-        derivation_contract, source, schedule());
+        derivation_contract, source, schedule(shared_clock));
 
     const auto captured = authority.capture(
         router, transaction_context, driver, [] { return false; });
@@ -1391,10 +1548,12 @@ void test_final_drain_failures_discard_every_phase(
     const auto transaction_context = context(derivation_contract);
     DynamicIntervalScenario scenario;
     scenario.final_drain_event = DynamicFrameReading{101, 101};
-    DynamicIntervalSource source(derivation_contract, std::move(scenario));
+    auto shared_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource source(derivation_contract, shared_clock,
+                                 std::move(scenario));
     CoordinatedDriver driver(source);
     ProfilingCaptureAuthority authority(
-        derivation_contract, source, schedule());
+        derivation_contract, source, schedule(shared_clock));
 
     const auto captured = authority.capture(
         router, transaction_context, driver, [] { return false; });
@@ -1410,11 +1569,12 @@ void test_final_drain_failures_discard_every_phase(
 
     DynamicIntervalScenario throwing_scenario;
     throwing_scenario.throw_on_finish = true;
+    auto throwing_clock = std::make_shared<SharedCaptureClock>();
     DynamicIntervalSource throwing_source(
-        derivation_contract, std::move(throwing_scenario));
+        derivation_contract, throwing_clock, std::move(throwing_scenario));
     CoordinatedDriver throwing_driver(throwing_source);
     ProfilingCaptureAuthority throwing_authority(
-        derivation_contract, throwing_source, schedule());
+        derivation_contract, throwing_source, schedule(throwing_clock));
 
     const auto throwing_capture = throwing_authority.capture(
         router, transaction_context, throwing_driver,
@@ -1449,19 +1609,21 @@ void test_ordered_below_peak_history_changes_workload_provenance(
         {100, 100},
     };
 
+    auto first_clock = std::make_shared<SharedCaptureClock>();
     DynamicIntervalSource first_source(
-        derivation_contract, std::move(first_scenario));
+        derivation_contract, first_clock, std::move(first_scenario));
     CoordinatedDriver first_driver(first_source);
     ProfilingCaptureAuthority first_authority(
-        derivation_contract, first_source, schedule());
+        derivation_contract, first_source, schedule(first_clock));
     const auto first = first_authority.capture(
         router, transaction_context, first_driver, [] { return false; });
 
+    auto second_clock = std::make_shared<SharedCaptureClock>();
     DynamicIntervalSource second_source(
-        derivation_contract, std::move(second_scenario));
+        derivation_contract, second_clock, std::move(second_scenario));
     CoordinatedDriver second_driver(second_source);
     ProfilingCaptureAuthority second_authority(
-        derivation_contract, second_source, schedule());
+        derivation_contract, second_source, schedule(second_clock));
     const auto second = second_authority.capture(
         router, transaction_context, second_driver, [] { return false; });
 
@@ -1504,8 +1666,9 @@ int main() {
         test_invalid_and_default_source_never_invoke_driver(state, router);
         test_captures_canonical_phases_across_a_complete_interval(
             state, router);
+        test_accepts_stable_nonzero_domain_background(state, router);
         test_stability_windows_restart_after_retained_events(state, router);
-        test_transient_unattributed_demand_discards_every_phase(
+        test_domain_residual_excursions_discard_every_phase(
             state, router);
         test_workload_failure_and_cancellation_close_the_interval(
             state, router);

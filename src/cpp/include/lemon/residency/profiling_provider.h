@@ -23,8 +23,8 @@ enum class ProfilingSourceError {
 
 struct ProfilingRawSample {
     std::string sensor_id;
-    // Absence identifies the all-owner sensor total. Present identities must
-    // come from the Server-issued scope set in the read request.
+    // Absence identifies the domain-wide used value. Present identities are
+    // target-owner projections from the Server-issued scope set.
     std::optional<std::string> owner_scope_id;
     std::uint64_t value = 0;
     std::uint64_t source_generation = 0;
@@ -85,6 +85,13 @@ struct ProfilingEventWatermark {
     }
 };
 
+struct ProfilingSourceAcquisitionWindow {
+    // Both endpoints use the Server process steady-clock domain and bracket
+    // every component read represented by the frame.
+    std::chrono::steady_clock::time_point started;
+    std::chrono::steady_clock::time_point finished;
+};
+
 struct ProfilingRawIntervalFrame {
     std::string source_epoch_sha256;
     std::string owner_scope_set_sha256;
@@ -92,6 +99,7 @@ struct ProfilingRawIntervalFrame {
     // All samples share a source generation equal to this watermark. This
     // source order remains independent from the Server capture generation.
     ProfilingEventWatermark event_watermark;
+    ProfilingSourceAcquisitionWindow acquisition_window;
     std::vector<ProfilingRawSample> samples;
 };
 
@@ -129,9 +137,10 @@ public:
     virtual ProfilingRawIntervalBeginResult
     begin(const ProfilingRawIntervalReadRequest &request,
           const ProfilingCancellationCheck &should_abort) = 0;
-    // Event watermarks are dense: success returns exactly one retained frame
-    // for each watermark after the supplied watermark through the returned
-    // watermark, plus an atomic checkpoint at that watermark.
+    // Event watermarks advance only when retained resource state changes and
+    // are dense: success returns exactly one retained frame for each watermark
+    // after the supplied watermark through the returned watermark, plus an
+    // atomic checkpoint at that watermark. Unchanged checkpoints retain it.
     virtual ProfilingRawIntervalBatch
     read_since(ProfilingRawIntervalToken token,
                ProfilingEventWatermark after_event_watermark,
@@ -168,6 +177,8 @@ struct ProfilingSensorContract {
 };
 
 struct ProfilingOwnerScopeBinding {
+    // One provider revision must map bindings to pairwise-disjoint target
+    // projections and assign shared effects to exactly one scope.
     std::string owner_scope_id;
     std::string containment_identity_sha256;
 };
