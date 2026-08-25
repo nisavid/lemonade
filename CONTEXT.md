@@ -296,12 +296,20 @@ A phase-neutral low-level reading containing an opaque sensor ID, an optional se
 _Avoid_: Accepting provider-supplied truth decisions or treating a successful read as profiling evidence.
 
 **Profiling derivation contract**:
-The transaction-specific, server-owned policy binding one provider revision, the exact required capacity sensors and owner scopes, their mappings to consumable-capacity byte claims, freshness and skew bounds, and per-sensor uncertainty bounds and safety ceilings. Its canonical digest is order-insensitive for sensor and owner sets. The collector accepts only an exact coherent raw closure and derives a phase-neutral observation with positive safety slack; a later transaction authority proves phase and lifecycle before sealing an attestation.
+The transaction-specific, server-owned policy binding one provider revision, exact required capacity sensors, owner-containment identities, claim mappings, freshness and skew bounds, uncertainty and safety policy, event semantics, observation cadence, stability windows, and interval retention. Its canonical digest is order-insensitive for sensor and owner sets. The collector accepts only an exact coherent raw closure and derives a phase-neutral observation with positive safety slack; a later transaction authority proves interval continuity, phase, and lifecycle before sealing an attestation.
 _Avoid_: Applying capacity slack arithmetic to discrete claims, letting an observation source select semantics or close ownership, or letting a caller assign phase or lifecycle from one snapshot.
 
 **Profiling derived observation**:
 A phase-neutral Server result from one contract-matched raw closure, carrying Server-derived provider identity, raw provenance, generation, acquisition and freshness bounds, health, complete current owner coverage, observed and owner-attributed capacity closure, uncertainty, and positive safety slack. It carries no interval-change claim, is not a phase attestation, and has no lifecycle or publication authority.
 _Avoid_: Inferring external or unattributed interval change from one snapshot, or treating one accepted collection as baseline, workload, release, or completed qualification evidence.
+
+**Profiling observation interval**:
+A Server-owned whole-transaction record that begins with an atomic subscription and snapshot after exclusive admission and ends with an atomic drain and unsubscription after the target becomes terminal. It is complete only when one bound source epoch and owner-scope set exposes every relevant resource mutation without lost history; the Server, not the adapter, derives interval attribution.
+_Avoid_: Inferring isolation from point samples, accepting a provider-supplied clean-interval decision, or ending observation before target release.
+
+**Profiling event watermark**:
+The source-native progress cursor for relevant resource mutations within one profiling observation interval. It may remain unchanged at a checkpoint; a gap, wrap, epoch change, owner-scope replacement, or lost history makes the interval incomplete.
+_Avoid_: Treating it as phase order, a Server capture generation, or evidence by itself.
 
 **Deployment-qualified residency method**:
 A local-only method result established for one exact operation and closed residency deployment identity by a complete profiling transaction. It does not change the shared capability level or footprint confidence class and does not apply to another model, device, backend, configuration, workload, or operation family.

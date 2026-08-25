@@ -141,17 +141,58 @@ bool digest_is_valid(std::string_view value) noexcept {
            });
 }
 
+bool owner_scopes_are_valid(
+    const std::vector<ProfilingOwnerScopeBinding> &owner_scopes) {
+    if (owner_scopes.empty() ||
+        owner_scopes.size() > max_journal_array_entries) {
+        return false;
+    }
+
+    std::set<std::string> owner_scope_ids;
+    std::set<std::string> containment_identities;
+    for (const auto &owner_scope : owner_scopes) {
+        if (!identifier_is_valid(owner_scope.owner_scope_id) ||
+            !digest_is_valid(owner_scope.containment_identity_sha256) ||
+            !owner_scope_ids.insert(owner_scope.owner_scope_id).second ||
+            !containment_identities
+                 .insert(owner_scope.containment_identity_sha256)
+                 .second) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<std::string> owner_scope_ids(
+    const std::vector<ProfilingOwnerScopeBinding> &owner_scopes) {
+    std::vector<std::string> result;
+    result.reserve(owner_scopes.size());
+    for (const auto &owner_scope : owner_scopes) {
+        result.push_back(owner_scope.owner_scope_id);
+    }
+    return result;
+}
+
 bool contract_is_valid(const ProfilingDerivationContract &contract) {
     if (!identifier_is_valid(contract.provider_id) ||
         !digest_is_valid(contract.provider_revision_sha256) ||
         contract.sensors.empty() ||
         contract.sensors.size() > max_journal_array_entries ||
-        contract.owner_scope_ids.empty() ||
-        contract.owner_scope_ids.size() > max_journal_array_entries ||
+        !owner_scopes_are_valid(contract.owner_scopes) ||
         contract.freshness_window <= std::chrono::seconds::zero() ||
         contract.max_source_skew <= std::chrono::milliseconds::zero() ||
         contract.max_source_skew.count() / 1000 >=
-            contract.freshness_window.count()) {
+            contract.freshness_window.count() ||
+        !digest_is_valid(
+            contract.interval.event_semantics_revision_sha256) ||
+        contract.interval.max_observation_gap <=
+            std::chrono::milliseconds::zero() ||
+        contract.interval.baseline_stability_window <=
+            std::chrono::milliseconds::zero() ||
+        contract.interval.release_stability_window <=
+            std::chrono::milliseconds::zero() ||
+        contract.interval.max_interval_frames == 0 ||
+        contract.interval.max_interval_frames > max_profiling_interval_frames) {
         return false;
     }
 
@@ -168,13 +209,6 @@ bool contract_is_valid(const ProfilingDerivationContract &contract) {
         }
     }
 
-    std::set<std::string> owner_scope_ids;
-    for (const auto &owner_scope_id : contract.owner_scope_ids) {
-        if (!identifier_is_valid(owner_scope_id) ||
-            !owner_scope_ids.insert(owner_scope_id).second) {
-            return false;
-        }
-    }
     return true;
 }
 
@@ -321,6 +355,29 @@ std::optional<std::string> sha256_hex(std::string_view bytes) {
     return result;
 }
 
+std::optional<std::string> owner_scope_set_digest(
+    const std::vector<ProfilingOwnerScopeBinding> &input_owner_scopes) {
+    if (!owner_scopes_are_valid(input_owner_scopes)) return std::nullopt;
+
+    auto owner_scopes = input_owner_scopes;
+    std::sort(owner_scopes.begin(), owner_scopes.end(),
+              [](const ProfilingOwnerScopeBinding &left,
+                 const ProfilingOwnerScopeBinding &right) {
+                  return std::tie(left.owner_scope_id,
+                                  left.containment_identity_sha256) <
+                         std::tie(right.owner_scope_id,
+                                  right.containment_identity_sha256);
+              });
+
+    std::string bytes = "lemonade/profiling-owner-scope-set/v1";
+    append_u64(bytes, static_cast<std::uint64_t>(owner_scopes.size()));
+    for (const auto &owner_scope : owner_scopes) {
+        append_string(bytes, owner_scope.owner_scope_id);
+        append_string(bytes, owner_scope.containment_identity_sha256);
+    }
+    return sha256_hex(bytes);
+}
+
 std::optional<std::string>
 derivation_contract_digest(const ProfilingDerivationContract &contract) {
     if (!contract_is_valid(contract)) return std::nullopt;
@@ -336,10 +393,11 @@ derivation_contract_digest(const ProfilingDerivationContract &contract) {
                                   right.claim_family, right.uncertainty_bound,
                                   right.safety_ceiling);
               });
-    auto owner_scope_ids = contract.owner_scope_ids;
-    std::sort(owner_scope_ids.begin(), owner_scope_ids.end());
+    const auto owner_scope_set_sha256 =
+        owner_scope_set_digest(contract.owner_scopes);
+    if (!owner_scope_set_sha256) return std::nullopt;
 
-    std::string bytes = "lemonade/profiling-derivation-contract/v1";
+    std::string bytes = "lemonade/profiling-derivation-contract/v2";
     append_string(bytes, contract.provider_id);
     append_string(bytes, contract.provider_revision_sha256);
     append_u64(bytes, static_cast<std::uint64_t>(sensors.size()));
@@ -353,14 +411,19 @@ derivation_contract_digest(const ProfilingDerivationContract &contract) {
         append_u64(bytes, sensor.uncertainty_bound);
         append_u64(bytes, sensor.safety_ceiling);
     }
-    append_u64(bytes, static_cast<std::uint64_t>(owner_scope_ids.size()));
-    for (const auto &owner_scope_id : owner_scope_ids) {
-        append_string(bytes, owner_scope_id);
-    }
+    append_string(bytes, *owner_scope_set_sha256);
     append_u64(bytes,
                static_cast<std::uint64_t>(contract.freshness_window.count()));
     append_u64(bytes,
                static_cast<std::uint64_t>(contract.max_source_skew.count()));
+    append_string(bytes, contract.interval.event_semantics_revision_sha256);
+    append_u64(bytes, static_cast<std::uint64_t>(
+                          contract.interval.max_observation_gap.count()));
+    append_u64(bytes, static_cast<std::uint64_t>(
+                          contract.interval.baseline_stability_window.count()));
+    append_u64(bytes, static_cast<std::uint64_t>(
+                          contract.interval.release_stability_window.count()));
+    append_u64(bytes, contract.interval.max_interval_frames);
     return sha256_hex(bytes);
 }
 
@@ -444,12 +507,13 @@ source_generation(const std::vector<ProfilingRawSample> &samples) noexcept {
 std::optional<std::vector<SensorValues>>
 reconcile_samples(const ProfilingDerivationContract &contract,
                   const std::vector<ProfilingRawSample> &samples) {
+    const auto expected_owner_scope_ids = owner_scope_ids(contract.owner_scopes);
     if (contract.sensors.size() > std::numeric_limits<std::size_t>::max() /
-                                      (contract.owner_scope_ids.size() + 1)) {
+                                      (expected_owner_scope_ids.size() + 1)) {
         return std::nullopt;
     }
     const auto expected_count =
-        contract.sensors.size() * (contract.owner_scope_ids.size() + 1);
+        contract.sensors.size() * (expected_owner_scope_ids.size() + 1);
     if (samples.size() != expected_count) return std::nullopt;
 
     std::map<std::string, std::size_t> sensor_indices;
@@ -457,7 +521,7 @@ reconcile_samples(const ProfilingDerivationContract &contract,
         sensor_indices.emplace(contract.sensors[index].sensor_id, index);
     }
     const std::set<std::string> owner_scope_ids(
-        contract.owner_scope_ids.begin(), contract.owner_scope_ids.end());
+        expected_owner_scope_ids.begin(), expected_owner_scope_ids.end());
 
     std::vector<SensorValues> values(contract.sensors.size());
     for (const auto &sample : samples) {
@@ -478,10 +542,10 @@ reconcile_samples(const ProfilingDerivationContract &contract,
 
     for (auto &sensor_values : values) {
         if (!sensor_values.total ||
-            sensor_values.owners.size() != contract.owner_scope_ids.size()) {
+            sensor_values.owners.size() != expected_owner_scope_ids.size()) {
             return std::nullopt;
         }
-        for (const auto &owner_scope_id : contract.owner_scope_ids) {
+        for (const auto &owner_scope_id : expected_owner_scope_ids) {
             const auto owner = sensor_values.owners.find(owner_scope_id);
             if (owner == sensor_values.owners.end() ||
                 owner->second > std::numeric_limits<std::uint64_t>::max() -
@@ -563,12 +627,56 @@ std::optional<std::string> profiling_derivation_contract_sha256(
     return derivation_contract_digest(contract);
 }
 
+std::optional<std::string> profiling_owner_scope_set_sha256(
+    const std::vector<ProfilingOwnerScopeBinding> &owner_scopes) {
+    return owner_scope_set_digest(owner_scopes);
+}
+
 ProfilingRawReadResult UnavailableProfilingObservationSource::read(
     const ProfilingRawReadRequest &, const ProfilingCancellationCheck &) {
     return ProfilingRawReadResult{
         ProfilingSourceError::Unavailable,
         {},
+        {},
         "profiling observation source is unavailable",
+    };
+}
+
+ProfilingRawIntervalBeginResult
+UnavailableProfilingIntervalObservationSource::begin(
+    const ProfilingRawIntervalReadRequest &,
+    const ProfilingCancellationCheck &) {
+    return ProfilingRawIntervalBeginResult{
+        ProfilingIntervalSourceError::Unavailable,
+        {},
+        {},
+        "profiling interval observation source is unavailable",
+    };
+}
+
+ProfilingRawIntervalBatch
+UnavailableProfilingIntervalObservationSource::read_since(
+    ProfilingRawIntervalToken, ProfilingEventWatermark after_event_watermark,
+    const ProfilingCancellationCheck &) {
+    return ProfilingRawIntervalBatch{
+        ProfilingIntervalSourceError::Unavailable,
+        after_event_watermark,
+        after_event_watermark,
+        {},
+        {},
+        "profiling interval observation source is unavailable",
+    };
+}
+
+ProfilingRawIntervalBatch UnavailableProfilingIntervalObservationSource::finish(
+    ProfilingRawIntervalToken, ProfilingEventWatermark after_event_watermark) {
+    return ProfilingRawIntervalBatch{
+        ProfilingIntervalSourceError::Unavailable,
+        after_event_watermark,
+        after_event_watermark,
+        {},
+        {},
+        "profiling interval observation source is unavailable",
     };
 }
 
@@ -617,6 +725,13 @@ ProfilingObservationCollectionResult ProfilingObservationCollector::collect(
                               "profiling derivation contract identity does not "
                               "match context");
         }
+        const auto owner_scope_set_sha256 =
+            owner_scope_set_digest(contract_.owner_scopes);
+        if (!owner_scope_set_sha256) {
+            return result_for(
+                ProfilingCollectionStatus::DigestUnavailable,
+                "profiling owner-scope identity is unavailable");
+        }
         if (cancelled(should_abort)) {
             return result_for(ProfilingCollectionStatus::Cancelled,
                               "profiling observation collection cancelled");
@@ -650,7 +765,8 @@ ProfilingObservationCollectionResult ProfilingObservationCollector::collect(
         for (const auto &sensor : contract_.sensors) {
             request.sensor_ids.push_back(sensor.sensor_id);
         }
-        request.owner_scope_ids = contract_.owner_scope_ids;
+        request.owner_scope_ids = owner_scope_ids(contract_.owner_scopes);
+        request.owner_scope_set_sha256 = *owner_scope_set_sha256;
 
         ProfilingRawReadResult raw;
         try {
@@ -674,6 +790,11 @@ ProfilingObservationCollectionResult ProfilingObservationCollector::collect(
                 raw.diagnostic.empty()
                     ? "profiling observation source is unavailable"
                     : std::move(raw.diagnostic));
+        }
+        if (raw.owner_scope_set_sha256 != *owner_scope_set_sha256) {
+            return result_for(
+                ProfilingCollectionStatus::InvalidObservation,
+                "profiling owner-scope identity does not match the contract");
         }
         const auto elapsed = elapsed_between(started, finished);
         const auto skew = elapsed ? rounded_up_milliseconds(*elapsed)
