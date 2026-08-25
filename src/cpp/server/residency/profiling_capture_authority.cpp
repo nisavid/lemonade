@@ -51,12 +51,21 @@ bool schedule_is_valid(const ProfilingDerivationContract &contract,
                        const ProfilingCaptureSchedule &schedule) noexcept {
     if (schedule.observation_poll_interval <=
             std::chrono::milliseconds::zero() ||
+        schedule.poll_cycle_overhead_allowance <=
+            std::chrono::milliseconds::zero() ||
         contract.max_source_skew <= std::chrono::milliseconds::zero() ||
         contract.interval.max_observation_gap <= contract.max_source_skew) {
         return false;
     }
-    return schedule.observation_poll_interval <
-           contract.interval.max_observation_gap - contract.max_source_skew;
+    const auto cycle_budget_after_source =
+        contract.interval.max_observation_gap - contract.max_source_skew;
+    if (cycle_budget_after_source <=
+        schedule.poll_cycle_overhead_allowance) {
+        return false;
+    }
+    return schedule.observation_poll_interval <=
+           cycle_budget_after_source -
+               schedule.poll_cycle_overhead_allowance;
 }
 
 bool contract_covers_selector(

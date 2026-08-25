@@ -295,6 +295,7 @@ ProfilingCaptureSchedule schedule(
     std::shared_ptr<ReleaseSettleProbe> release_settle_probe = {}) {
     ProfilingCaptureSchedule value;
     value.observation_poll_interval = 1ms;
+    value.poll_cycle_overhead_allowance = 10ms;
     value.clock = clock(std::move(release_settle_probe));
     return value;
 }
@@ -889,7 +890,7 @@ void test_invalid_and_default_source_never_invoke_driver(
 
     DynamicIntervalSource source(derivation_contract);
     auto invalid_schedule = schedule();
-    invalid_schedule.observation_poll_interval = 480ms;
+    invalid_schedule.observation_poll_interval = 471ms;
     ProfilingCaptureAuthority invalid(
         derivation_contract, source, std::move(invalid_schedule));
     CountingDriver invalid_driver;
@@ -899,10 +900,30 @@ void test_invalid_and_default_source_never_invoke_driver(
     require_empty_capture(
         state,
         invalid_capture,
-        "a zero-jitter polling boundary emits no phase attestations");
+        "a polling schedule without its reserved cycle-overhead budget emits no phase attestations");
     state.require(source.begin_calls() == 0 && invalid_driver.run_calls == 0 &&
                       invalid_driver.release_calls == 0,
                   "an invalid schedule is rejected before source or driver access");
+
+    DynamicIntervalSource no_allowance_source(derivation_contract);
+    auto no_allowance_schedule = schedule();
+    no_allowance_schedule.poll_cycle_overhead_allowance = 0ms;
+    ProfilingCaptureAuthority no_allowance(
+        derivation_contract, no_allowance_source,
+        std::move(no_allowance_schedule));
+    CountingDriver no_allowance_driver;
+    const auto no_allowance_capture = no_allowance.capture(
+        router, transaction_context, no_allowance_driver,
+        [] { return false; });
+
+    require_empty_capture(
+        state,
+        no_allowance_capture,
+        "a polling schedule without a defined cycle-overhead allowance emits no phase attestations");
+    state.require(no_allowance_source.begin_calls() == 0 &&
+                      no_allowance_driver.run_calls == 0 &&
+                      no_allowance_driver.release_calls == 0,
+                  "a missing cycle-overhead allowance is rejected before source or driver access");
 
     DynamicIntervalSource incomplete_source(derivation_contract);
     ProfilingCaptureAuthority incomplete(
