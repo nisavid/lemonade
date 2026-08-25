@@ -7,14 +7,18 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
+#include <system_error>
 #include <unistd.h>
 
 namespace {
 
 using namespace std::chrono_literals;
 using lemon::utils::PreparedProcessContainment;
+using lemon::utils::ProcessContainmentIdentity;
 using lemon::utils::ProcessContainmentRequest;
 using lemon::utils::ProcessManager;
 
@@ -37,6 +41,28 @@ lemon::utils::ProcessContainmentOperationControl operation_control() {
     return {std::chrono::steady_clock::now() + 5s, {}};
 }
 
+std::optional<std::filesystem::path> find_prepared_leaf(
+    const std::filesystem::path &root,
+    const ProcessContainmentIdentity &identity) {
+    std::error_code error;
+    std::optional<std::filesystem::path> match;
+    for (std::filesystem::directory_iterator entry(root, error), end;
+         !error && entry != end; entry.increment(error)) {
+        struct stat status {};
+        if (::lstat(entry->path().c_str(), &status) != 0 ||
+            !S_ISDIR(status.st_mode) ||
+            static_cast<std::uint64_t>(status.st_dev) != identity.device ||
+            static_cast<std::uint64_t>(status.st_ino) != identity.inode) {
+            continue;
+        }
+        if (match) {
+            return std::nullopt;
+        }
+        match = entry->path();
+    }
+    return error ? std::nullopt : match;
+}
+
 } // namespace
 
 int main() {
@@ -49,8 +75,6 @@ int main() {
 
     const std::filesystem::path root(root_value);
     const std::string nonce = unique_nonce();
-    const std::filesystem::path leaf =
-        root / ("lemonade-profile-" + nonce);
     auto prepared_result = ProcessManager::prepare_process_containment(
         ProcessContainmentRequest{root, "integration/direct-child", nonce},
         operation_control());
@@ -69,11 +93,18 @@ int main() {
             containment, operation_control());
     };
 
-    if (!std::filesystem::is_directory(leaf)) {
+    const auto initial = ProcessManager::snapshot_process_containment(
+        containment, operation_control());
+    if (!initial.succeeded() || !initial.snapshot->members.empty()) {
         cleanup();
-        return fail("prepared containment leaf is not visible");
+        return fail("prepared containment was not initially empty");
     }
-    std::ifstream maximum_depth(leaf / "cgroup.max.depth");
+    const auto leaf = find_prepared_leaf(root, initial.snapshot->identity);
+    if (!leaf) {
+        cleanup();
+        return fail("prepared containment leaf identity is not visible");
+    }
+    std::ifstream maximum_depth(*leaf / "cgroup.max.depth");
     std::string maximum_depth_value;
     maximum_depth >> maximum_depth_value;
     maximum_depth.close();
@@ -83,13 +114,20 @@ int main() {
     }
 
     std::error_code descendant_error;
-    const std::filesystem::path descendant = leaf / "unexpected-descendant";
+    const std::filesystem::path descendant =
+        *leaf / "unexpected-descendant";
     const bool created_descendant =
         std::filesystem::create_directory(descendant, descendant_error);
     if (created_descendant) {
         (void)std::filesystem::remove(descendant, descendant_error);
         cleanup();
         return fail("prepared containment did not enforce a flat process scope");
+    }
+    if (descendant_error !=
+        std::errc::resource_unavailable_try_again) {
+        cleanup();
+        return fail("flat process scope failed with an unexpected error: " +
+                    descendant_error.message());
     }
 
     auto started = ProcessManager::start_process_contained(
@@ -129,7 +167,7 @@ int main() {
         ProcessManager::release_process_containment(containment,
                                                     operation_control());
     if (!released.succeeded() || containment.active() ||
-        std::filesystem::exists(leaf)) {
+        std::filesystem::exists(*leaf)) {
         cleanup();
         return fail("empty containment did not release cleanly");
     }
