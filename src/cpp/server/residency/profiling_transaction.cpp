@@ -530,8 +530,8 @@ ProfilingTransactionResult ProfilingTransaction::run(ProfilingTransactionContext
             release_phase.phase() == ProfilingPhase::Release &&
             baseline_phase.observation_generation() < workload_phase.observation_generation() &&
             workload_phase.observation_generation() < release_phase.observation_generation() &&
-            baseline_phase.observed_at() < workload_phase.observed_at() &&
-            workload_phase.observed_at() < release_phase.observed_at();
+            baseline_phase.observed_at() <= workload_phase.observed_at() &&
+            workload_phase.observed_at() <= release_phase.observed_at();
         const auto attribution_is_closed =
             claim_sets_equal(baseline_phase.observed_claims(),
                              baseline_phase.attributed_claims()) &&
