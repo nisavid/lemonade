@@ -599,7 +599,7 @@ reconcile_samples(const ProfilingDerivationContract &contract,
     for (std::size_t index = 0; index < contract.sensors.size(); ++index) {
         sensor_indices.emplace(contract.sensors[index].sensor_id, index);
     }
-    const std::set<std::string> owner_scope_ids(
+    const std::set<std::string> expected_owner_scope_id_set(
         expected_owner_scope_ids.begin(), expected_owner_scope_ids.end());
 
     std::vector<SensorValues> values(contract.sensors.size());
@@ -612,7 +612,7 @@ reconcile_samples(const ProfilingDerivationContract &contract,
             sensor_values.total = sample.value;
             continue;
         }
-        if (owner_scope_ids.count(*sample.owner_scope_id) == 0 ||
+        if (expected_owner_scope_id_set.count(*sample.owner_scope_id) == 0 ||
             !sensor_values.owners.emplace(*sample.owner_scope_id, sample.value)
                  .second) {
             return std::nullopt;

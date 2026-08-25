@@ -127,14 +127,16 @@ public:
     virtual ProfilingRawIntervalBeginResult
     begin(const ProfilingRawIntervalReadRequest &request,
           const ProfilingCancellationCheck &should_abort) = 0;
-    // Success returns every retained event after the supplied watermark and
-    // an atomic checkpoint at the returned through-watermark.
+    // Event watermarks are dense: success returns exactly one retained frame
+    // for each watermark after the supplied watermark through the returned
+    // watermark, plus an atomic checkpoint at that watermark.
     virtual ProfilingRawIntervalBatch
     read_since(ProfilingRawIntervalToken token,
                ProfilingEventWatermark after_event_watermark,
                const ProfilingCancellationCheck &should_abort) = 0;
     // Finish must atomically drain and unregister the token without allowing
-    // caller cancellation to skip source cleanup.
+    // caller cancellation to skip source cleanup. Implementations must not
+    // throw.
     virtual ProfilingRawIntervalBatch
     finish(ProfilingRawIntervalToken token,
            ProfilingEventWatermark after_event_watermark) noexcept = 0;
