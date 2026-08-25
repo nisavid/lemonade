@@ -82,7 +82,7 @@ private:
     // Server-owned provider that binds every observation attestation before
     // the result reaches durable overlay activation or a transport.
     residency::ProfilingTransactionResult run_residency_profiling_transaction(
-        std::string transaction_id,
+        residency::ProfilingTransactionContext context,
         residency::ProfilingTransaction::Capture capture,
         std::atomic<bool> *cancel = nullptr);
 
