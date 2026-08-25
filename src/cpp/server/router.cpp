@@ -131,7 +131,8 @@ Router::ExclusiveRequest::ExclusiveRequest(
     ExclusiveRequest&& other) noexcept
     : router_(other.router_),
       generation_(other.generation_),
-      result_(other.result_) {
+      result_(other.result_),
+      deadline_(other.deadline_) {
     other.router_ = nullptr;
 }
 
@@ -343,11 +344,10 @@ void Router::release_prepared_model_load(
 }
 
 void Router::cancel_exclusive_request(uint64_t generation) noexcept {
-    std::lock_guard<std::mutex> lock(load_mutex_);
-    if (exclusive_pending_ &&
-        exclusive_pending_generation_ == generation) {
-        exclusive_pending_ = false;
-        exclusive_pending_generation_ = 0;
+    auto expected = generation;
+    if (exclusive_pending_generation_.compare_exchange_strong(
+            expected, 0, std::memory_order_acq_rel,
+            std::memory_order_acquire)) {
         load_cv_.notify_all();
     }
 }
@@ -549,7 +549,7 @@ Router::PreparedModelLoad Router::prepare_model_load_internal(
     std::string canonical_model_name;
     while (true) {
         canonical_model_name = resolve_model_name(model_name);
-        load_cv_.wait(lock, [this, &canonical_model_name] {
+        wait_for_load_state(lock, [this, &canonical_model_name] {
             auto pending = pending_reload_states_.find(canonical_model_name);
             const bool mutation_in_progress =
                 pending != pending_reload_states_.end() &&
@@ -559,7 +559,7 @@ Router::PreparedModelLoad Router::prepare_model_load_internal(
                 prepared_load_counts_.end();
             return !all_model_mutation_active_ && !is_loading_ &&
                    !mutation_in_progress && !preparation_in_progress &&
-                   !exclusive_pending_ &&
+                   !exclusive_pending() &&
                    (!exclusive_active_ ||
                     exclusive_owner_ == std::this_thread::get_id());
         });
@@ -681,9 +681,9 @@ void Router::apply_routing_helper_reconcile(std::set<std::string> needed, uint64
     // Only the eviction pass must wait for a quiet slot: evict_server mutates
     // loaded_servers_ and blocks on request drain, neither of which is safe to
     // interleave with an in-flight load.
-    load_cv_.wait(lock, [&] {
+    wait_for_load_state(lock, [&] {
         return !is_loading_ &&
-               !exclusive_pending_ &&
+               !exclusive_pending() &&
                (!exclusive_active_ ||
                 exclusive_owner_ == std::this_thread::get_id());
     });
@@ -737,10 +737,10 @@ void Router::reclaim_stale_helper_if_idle(const std::string& model_name) {
         // on a later prune (not guaranteed to run when the load / exclusive
         // session ends). The wait is broken on shutdown so the executor worker
         // can drain and join.
-        load_cv_.wait(lock, [&] {
+        wait_for_load_state(lock, [&] {
             return reclaim_shutdown_ ||
                    (!is_loading_ &&
-                    !exclusive_pending_ &&
+                    !exclusive_pending() &&
                     (!exclusive_active_ || exclusive_owner_ == std::this_thread::get_id()));
         });
         if (reclaim_shutdown_) {
@@ -979,7 +979,36 @@ std::unique_ptr<WrappedServer> Router::create_backend_server(const ModelInfo& mo
 
 Router::ExclusiveRequest Router::request_exclusive(
     std::atomic<bool>* cancel) {
-    std::lock_guard<std::mutex> lock(load_mutex_);
+    return request_exclusive_impl(cancel, std::nullopt);
+}
+
+Router::ExclusiveRequest Router::request_exclusive_until(
+    std::chrono::steady_clock::time_point deadline,
+    std::atomic<bool>* cancel) {
+    return request_exclusive_impl(cancel, deadline);
+}
+
+bool Router::exclusive_pending() const noexcept {
+    return exclusive_pending_generation_.load(std::memory_order_acquire) != 0;
+}
+
+Router::ExclusiveRequest Router::request_exclusive_impl(
+    std::atomic<bool>* cancel,
+    std::optional<std::chrono::steady_clock::time_point> deadline) {
+    std::unique_lock<std::mutex> lock(load_mutex_, std::defer_lock);
+    if (deadline.has_value()) {
+        if (std::chrono::steady_clock::now() >= *deadline)
+            return ExclusiveRequest(
+                nullptr, 0, ExclusiveAcquireResult::DeadlineExceeded);
+        if (!lock.try_lock())
+            return ExclusiveRequest(
+                nullptr, 0, ExclusiveAcquireResult::Retry);
+        if (std::chrono::steady_clock::now() >= *deadline)
+            return ExclusiveRequest(
+                nullptr, 0, ExclusiveAcquireResult::DeadlineExceeded);
+    } else {
+        lock.lock();
+    }
     const auto caller = std::this_thread::get_id();
     if (cancel && cancel->load()) {
         return ExclusiveRequest(
@@ -989,39 +1018,62 @@ Router::ExclusiveRequest Router::request_exclusive(
         return ExclusiveRequest(
             nullptr, 0, ExclusiveAcquireResult::InvalidOrder);
     }
-    if (exclusive_active_ || exclusive_pending_) {
+    if (exclusive_active_ || exclusive_pending()) {
         return ExclusiveRequest(
             nullptr, 0, ExclusiveAcquireResult::Retry);
     }
-    exclusive_pending_ = true;
-    exclusive_pending_generation_ = ++next_exclusive_generation_;
+    if (++next_exclusive_generation_ == 0)
+        ++next_exclusive_generation_;
     exclusive_admission_generation_ = next_load_generation_;
+    exclusive_pending_generation_.store(next_exclusive_generation_,
+                                        std::memory_order_release);
     load_cv_.notify_all();
     return ExclusiveRequest(
-        this,
-        exclusive_pending_generation_,
-        ExclusiveAcquireResult::Retry);
+        this, next_exclusive_generation_, ExclusiveAcquireResult::Retry,
+        deadline);
 }
 
 Router::ExclusiveAcquireResult Router::try_begin_exclusive(
     ExclusiveRequest& request,
     std::atomic<bool>* cancel) {
-    std::lock_guard<std::mutex> lock(load_mutex_);
+    return try_begin_exclusive_impl(request, cancel);
+}
+
+Router::ExclusiveAcquireResult Router::try_begin_exclusive_impl(
+    ExclusiveRequest& request,
+    std::atomic<bool>* cancel) {
     if (request.router_ != this) {
         return request.result_;
     }
-    if (!exclusive_pending_ ||
-        exclusive_pending_generation_ != request.generation_) {
+    auto deadline_exceeded = [&] {
+        cancel_exclusive_request(request.generation_);
+        request.router_ = nullptr;
+        request.result_ = ExclusiveAcquireResult::DeadlineExceeded;
+        return request.result_;
+    };
+    if (request.deadline_.has_value() &&
+        std::chrono::steady_clock::now() >= *request.deadline_) {
+        return deadline_exceeded();
+    }
+    std::unique_lock<std::mutex> lock(load_mutex_, std::defer_lock);
+    if (request.deadline_.has_value()) {
+        if (!lock.try_lock())
+            return ExclusiveAcquireResult::Retry;
+        if (std::chrono::steady_clock::now() >= *request.deadline_)
+            return deadline_exceeded();
+    } else {
+        lock.lock();
+    }
+    if (exclusive_pending_generation_.load(std::memory_order_acquire) !=
+        request.generation_) {
         request.router_ = nullptr;
         request.result_ = ExclusiveAcquireResult::InvalidOrder;
         return request.result_;
     }
     if (cancel && cancel->load()) {
-        exclusive_pending_ = false;
-        exclusive_pending_generation_ = 0;
+        cancel_exclusive_request(request.generation_);
         request.router_ = nullptr;
         request.result_ = ExclusiveAcquireResult::Cancelled;
-        load_cv_.notify_all();
         return request.result_;
     }
     const bool lifecycle_mutation_active = std::any_of(
@@ -1043,10 +1095,15 @@ Router::ExclusiveAcquireResult Router::try_begin_exclusive(
         return ExclusiveAcquireResult::Retry;
     }
 
-    exclusive_pending_ = false;
-    exclusive_pending_generation_ = 0;
     exclusive_active_ = true;
     exclusive_owner_ = std::this_thread::get_id();
+    if (request.deadline_.has_value() &&
+        std::chrono::steady_clock::now() >= *request.deadline_) {
+        exclusive_active_ = false;
+        exclusive_owner_ = std::thread::id{};
+        return deadline_exceeded();
+    }
+    exclusive_pending_generation_.store(0, std::memory_order_release);
     request.router_ = nullptr;
     request.result_ = ExclusiveAcquireResult::Acquired;
     load_cv_.notify_all();
@@ -1061,9 +1118,9 @@ void Router::end_exclusive() {
 }
 
 void Router::wait_for_slot_clearance(std::unique_lock<std::mutex>& lock) {
-    load_cv_.wait(lock, [&] {
+    wait_for_load_state(lock, [&] {
         return !all_model_mutation_active_ &&
-               !exclusive_pending_ &&
+               !exclusive_pending() &&
                (!exclusive_active_ ||
                 exclusive_owner_ == std::this_thread::get_id());
     });
@@ -1075,10 +1132,10 @@ std::string Router::resolve_model_name_after_mutation_gate_locked(
     while (true) {
         const std::string canonical_model_name = resolve_model_name(model_name);
         wait_for_slot_clearance(lock);
-        load_cv_.wait(lock, [this, &canonical_model_name] {
+        wait_for_load_state(lock, [this, &canonical_model_name] {
             auto pending = pending_reload_states_.find(canonical_model_name);
             return !all_model_mutation_active_ &&
-                   !exclusive_pending_ &&
+                   !exclusive_pending() &&
                    (!exclusive_active_ ||
                     exclusive_owner_ == std::this_thread::get_id()) &&
                    (pending == pending_reload_states_.end() ||
@@ -1343,20 +1400,22 @@ void Router::load_model_impl(
     // LOAD SERIALIZATION STRATEGY (from spec: point #2 in Additional Considerations)
     std::unique_lock<std::mutex> lock(load_mutex_);
 
-    load_cv_.wait(lock, [&] {
+    wait_for_load_state(lock, [&] {
+        const auto pending_generation =
+            exclusive_pending_generation_.load(std::memory_order_acquire);
         const bool claim_invalid = !reload_generation_matches_locked(
             canonical_model_name,
             load_generation,
             model_info,
             preparation.existing_model_policy_);
         const bool admitted_before_exclusive =
-            exclusive_pending_ &&
+            pending_generation != 0 &&
             load_generation <= exclusive_admission_generation_;
         return claim_invalid ||
                (!is_loading_ &&
                 (!exclusive_active_ ||
                  exclusive_owner_ == std::this_thread::get_id()) &&
-                (!exclusive_pending_ || admitted_before_exclusive));
+                (pending_generation == 0 || admitted_before_exclusive));
     });
 
     if (!reload_generation_matches_locked(
@@ -2086,7 +2145,7 @@ void Router::evict_if_committed(const std::string& model_name) {
     // An exclusive session may have started (and re-pinned this model via the
     // job snapshot reconcile) since the EVICTING mark was set. Neither state
     // was known when the eviction was decided, so abandon it.
-    if (exclusive_active_ || exclusive_pending_ || server->is_pinned()) {
+    if (exclusive_active_ || exclusive_pending() || server->is_pinned()) {
         server->rescue_from_eviction();
         LOG(INFO, "Router") << "Eviction of " << model_name << " cancelled ("
                             << (server->is_pinned() ? "pinned" : "exclusive session active")

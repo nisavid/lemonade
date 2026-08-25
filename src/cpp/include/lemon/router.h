@@ -1,19 +1,20 @@
 #pragma once
 
 #include <atomic>
-#include <string>
-#include <memory>
+#include <chrono>
+#include <condition_variable>
 #include <deque>
 #include <functional>
 #include <list>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
-#include <condition_variable>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
-#include <optional>
 #include <nlohmann/json.hpp>
 #include <httplib.h>
 #include "gpu_memory_planner.h"
@@ -130,6 +131,7 @@ public:
     // servers, seed the needed set, drive prune). Defined in the test binary.
     friend struct RoutingHelperTestHook;
     friend struct RouterModelLifecycleTestHook;
+    friend struct ProfilingTransactionTestHook;
     Router(RuntimeConfig* config,
 
            ModelManager* model_manager,
@@ -153,6 +155,7 @@ public:
         Acquired,
         Retry,
         Cancelled,
+        DeadlineExceeded,
         InvalidOrder,
     };
 
@@ -173,12 +176,16 @@ public:
         ExclusiveRequest(
             Router* router,
             uint64_t generation,
-            ExclusiveAcquireResult result)
-            : router_(router), generation_(generation), result_(result) {}
+            ExclusiveAcquireResult result,
+            std::optional<std::chrono::steady_clock::time_point> deadline =
+                std::nullopt)
+            : router_(router), generation_(generation), result_(result),
+              deadline_(deadline) {}
 
         Router* router_ = nullptr;
         uint64_t generation_ = 0;
         ExclusiveAcquireResult result_ = ExclusiveAcquireResult::Retry;
+        std::optional<std::chrono::steady_clock::time_point> deadline_;
     };
 
     class PreparedModelLoad {
@@ -378,6 +385,9 @@ public:
     // fence continues blocking fresh work. Destruction abandons that intent.
     [[nodiscard]] ExclusiveRequest request_exclusive(
         std::atomic<bool>* cancel = nullptr);
+    [[nodiscard]] ExclusiveRequest request_exclusive_until(
+        std::chrono::steady_clock::time_point deadline,
+        std::atomic<bool>* cancel = nullptr);
     [[nodiscard]] ExclusiveAcquireResult try_begin_exclusive(
         ExclusiveRequest& request,
         std::atomic<bool>* cancel = nullptr);
@@ -459,10 +469,38 @@ private:
 
     bool exclusive_active_ = false;
     std::thread::id exclusive_owner_;
-    bool exclusive_pending_ = false;
     uint64_t next_exclusive_generation_ = 0;
-    uint64_t exclusive_pending_generation_ = 0;
+    std::atomic<uint64_t> exclusive_pending_generation_{0};
     uint64_t exclusive_admission_generation_ = 0;
+    bool exclusive_pending() const noexcept;
+    ExclusiveRequest request_exclusive_impl(
+        std::atomic<bool>* cancel,
+        std::optional<std::chrono::steady_clock::time_point> deadline);
+    ExclusiveAcquireResult try_begin_exclusive_impl(
+        ExclusiveRequest& request, std::atomic<bool>* cancel);
+    template <typename Predicate>
+    void wait_for_load_state(std::unique_lock<std::mutex>& lock,
+                             Predicate predicate) {
+        // Timed retries are required while lock-free cancellation can clear a
+        // pending generation between predicate evaluation and a CV wait.
+        while (true) {
+            const auto pending_before = exclusive_pending_generation_.load(
+                std::memory_order_acquire);
+            if (predicate()) {
+                return;
+            }
+            const auto pending_after = exclusive_pending_generation_.load(
+                std::memory_order_acquire);
+            if (pending_before != pending_after) {
+                continue;
+            }
+            if (pending_after != 0) {
+                load_cv_.wait_for(lock, std::chrono::milliseconds(25));
+            } else {
+                load_cv_.wait(lock);
+            }
+        }
+    }
     void wait_for_slot_clearance(std::unique_lock<std::mutex>& lock);
     std::string resolve_model_name_after_mutation_gate_locked(
         std::unique_lock<std::mutex>& lock,

@@ -105,7 +105,7 @@ struct RouterModelLifecycleTestHook {
 
     static bool exclusive_request_pending(Router& router) {
         std::lock_guard<std::mutex> lock(router.load_mutex_);
-        return router.exclusive_pending_;
+        return router.exclusive_pending();
     }
 
     static void seed_watchdog_state(
