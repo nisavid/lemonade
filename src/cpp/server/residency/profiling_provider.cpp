@@ -1,6 +1,10 @@
 #include "lemon/residency/profiling_provider.h"
 
 #include <mbedtls/md.h>
+#include <mbedtls/version.h>
+#if MBEDTLS_VERSION_MAJOR >= 4
+#include <psa/crypto.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -10,6 +14,7 @@
 #include <iomanip>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <ratio>
 #include <set>
@@ -282,6 +287,14 @@ void append_string(std::string &bytes, std::string_view value) {
 }
 
 std::optional<std::string> sha256_hex(std::string_view bytes) {
+#if MBEDTLS_VERSION_MAJOR >= 4
+    static std::once_flag initialized;
+    static psa_status_t initialization_status = PSA_ERROR_BAD_STATE;
+    std::call_once(initialized,
+                   [] { initialization_status = psa_crypto_init(); });
+    if (initialization_status != PSA_SUCCESS) return std::nullopt;
+#endif
+
     const auto *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     if (info == nullptr) return std::nullopt;
 
