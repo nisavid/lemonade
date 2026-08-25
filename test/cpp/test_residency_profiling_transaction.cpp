@@ -121,6 +121,16 @@ std::vector<ClaimFamilyClosure> claims(std::uint64_t bytes = 0) {
     };
 }
 
+void omit_required_selector_claim_families(
+    std::vector<ClaimFamilyClosure> &closure) {
+    for (auto &family : closure) {
+        if (family.family == ClaimFamily::SafetyFloor ||
+            family.family == ClaimFamily::CardinalityPool) {
+            family.completeness = ClaimCompleteness::NotApplicable;
+        }
+    }
+}
+
 bool claim_sets_equal(const std::vector<ClaimFamilyClosure> &left,
                       const std::vector<ClaimFamilyClosure> &right) {
     const auto checked_left = check_claim_closure(left);
@@ -588,6 +598,52 @@ void test_rejects_unsafe_evidence(TestState &state, Router &router) {
             value.workload_attestation = phase_bytes(std::move(phase));
         },
         ProfilingTransactionStatus::InvalidEvidence);
+    using ClosureMember = std::vector<ClaimFamilyClosure>
+        ProfilingPhaseAttestationDraft::*;
+    const std::array<std::pair<const char *, ClosureMember>, 6>
+        required_closure_members{{
+            {"observed", &ProfilingPhaseAttestationDraft::observed_claims},
+            {"attributed", &ProfilingPhaseAttestationDraft::attributed_claims},
+            {"external", &ProfilingPhaseAttestationDraft::external_change_claims},
+            {"unattributed", &ProfilingPhaseAttestationDraft::unattributed_claims},
+            {"uncertainty", &ProfilingPhaseAttestationDraft::uncertainty_claims},
+            {"safety", &ProfilingPhaseAttestationDraft::safety_margin_claims},
+        }};
+    const std::array<std::pair<const char *, ProfilingPhase>, 3> phases{{
+        {"baseline", ProfilingPhase::Baseline},
+        {"workload", ProfilingPhase::Workload},
+        {"release", ProfilingPhase::Release},
+    }};
+    for (const auto &phase_entry : phases) {
+        const auto phase_name = phase_entry.first;
+        const auto phase_kind = phase_entry.second;
+        for (const auto &closure_entry : required_closure_members) {
+            const auto closure_name = closure_entry.first;
+            const auto closure_member = closure_entry.second;
+            const auto label = std::string(phase_name) + " " + closure_name +
+                               " claims must cover required selector families";
+            expect_rejected(
+                label.c_str(),
+                [phase_kind, closure_member](auto &ctx, auto &value) {
+                    auto phase = phase_draft(ctx, phase_kind);
+                    omit_required_selector_claim_families(
+                        phase.*closure_member);
+                    auto bytes = phase_bytes(std::move(phase));
+                    switch (phase_kind) {
+                    case ProfilingPhase::Baseline:
+                        value.baseline_attestation = std::move(bytes);
+                        break;
+                    case ProfilingPhase::Workload:
+                        value.workload_attestation = std::move(bytes);
+                        break;
+                    case ProfilingPhase::Release:
+                        value.release_attestation = std::move(bytes);
+                        break;
+                    }
+                },
+                ProfilingTransactionStatus::InvalidEvidence);
+        }
+    }
 
     auto contaminated_phase = phase_draft(context(), ProfilingPhase::Workload);
     contaminated_phase.external_change_claims = claims(4096);

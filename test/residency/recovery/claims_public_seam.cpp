@@ -122,6 +122,84 @@ void require_checked_arithmetic() {
             "maximum plausible closure did not preserve every alternative scope");
 }
 
+void require_constraint_evidence_mapping() {
+    struct ExpectedBinding {
+        ConstraintKind constraint;
+        ConstraintEvidenceKind evidence;
+        ClaimFamily family;
+    };
+    const std::vector<ExpectedBinding> expected{
+        {ConstraintKind::GpuSharedResidency,
+         ConstraintEvidenceKind::ClaimFamily,
+         ClaimFamily::ConsumableCapacity},
+        {ConstraintKind::GpuProviderResolvedCapacity,
+         ConstraintEvidenceKind::ClaimFamily,
+         ClaimFamily::ConsumableCapacity},
+        {ConstraintKind::HostMemAvailableFloor,
+         ConstraintEvidenceKind::ClaimFamily,
+         ClaimFamily::SafetyFloor},
+        {ConstraintKind::HostEffectsProviderResolved,
+         ConstraintEvidenceKind::ClaimFamily,
+         ClaimFamily::SafetyFloor},
+        {ConstraintKind::ModelTypePool,
+         ConstraintEvidenceKind::ClaimFamily,
+         ClaimFamily::CardinalityPool},
+        {ConstraintKind::Ownership,
+         ConstraintEvidenceKind::OwnerCoverage,
+         ClaimFamily::ConsumableCapacity},
+        {ConstraintKind::FlmTypeSlot,
+         ConstraintEvidenceKind::ClaimFamily,
+         ClaimFamily::CardinalityPool},
+        {ConstraintKind::NpuCrossFamily,
+         ConstraintEvidenceKind::ClaimFamily,
+         ClaimFamily::CompatibilityExclusivity},
+        {ConstraintKind::NpuExclusive,
+         ConstraintEvidenceKind::ClaimFamily,
+         ClaimFamily::CompatibilityExclusivity},
+    };
+
+    for (const auto &entry : expected) {
+        const auto requirement = constraint_evidence_requirement(entry.constraint);
+        require(requirement.has_value(),
+                "known constraint omitted an evidence requirement");
+        require(requirement->kind == entry.evidence,
+                "constraint mapped to the wrong evidence kind");
+        if (entry.evidence == ConstraintEvidenceKind::ClaimFamily) {
+            require(requirement->family.has_value() &&
+                        *requirement->family == entry.family,
+                    "constraint mapped to the wrong claim family");
+        } else {
+            require(!requirement->family.has_value(),
+                    "owner coverage carried a dummy claim family");
+        }
+    }
+    require(!constraint_evidence_requirement(
+                 static_cast<ConstraintKind>(999))
+                 .has_value(),
+            "unknown constraint mapped to evidence");
+
+    auto capacity_only_closure = closure();
+    for (auto &family : capacity_only_closure) {
+        if (family.family != ClaimFamily::ConsumableCapacity) {
+            family.completeness = ClaimCompleteness::NotApplicable;
+        }
+    }
+    const auto capacity_only = checked(std::move(capacity_only_closure));
+    require(claim_families_cover_ordinary_constraints(
+                capacity_only,
+                {ConstraintKind::Ownership,
+                 ConstraintKind::GpuSharedResidency}),
+            "capacity evidence did not cover its ordinary selector constraint");
+    require(!claim_families_cover_ordinary_constraints(
+                capacity_only,
+                {ConstraintKind::Ownership,
+                 ConstraintKind::GpuSharedResidency,
+                 ConstraintKind::HostMemAvailableFloor}),
+            "capacity evidence covered an omitted safety-floor constraint");
+    require(!claim_families_cover_ordinary_constraints(capacity_only, {}),
+            "an empty selector was treated as covered");
+}
+
 std::vector<ClaimSource> worked_sources() {
     return {
         ClaimSource{"resident/current", ClaimViewKind::Current,
@@ -241,6 +319,7 @@ void require_checked_transfers_and_release() {
 
 int main() {
     require_checked_arithmetic();
+    require_constraint_evidence_mapping();
     require_worked_projection();
     require_checked_transfers_and_release();
     return 0;

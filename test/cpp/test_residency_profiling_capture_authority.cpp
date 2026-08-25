@@ -224,7 +224,11 @@ ProfilingDerivationContract contract() {
 }
 
 ProfilingTransactionContext context(
-    const ProfilingDerivationContract &derivation_contract = contract()) {
+    const ProfilingDerivationContract &derivation_contract = contract(),
+    std::vector<ConstraintKind> constraints = {
+        ConstraintKind::Ownership,
+        ConstraintKind::GpuSharedResidency,
+    }) {
     const auto contract_sha256 =
         profiling_derivation_contract_sha256(derivation_contract);
     if (!contract_sha256) throw std::runtime_error("invalid test contract");
@@ -234,6 +238,7 @@ ProfilingTransactionContext context(
     result.sequence = 1;
     result.profiling_transaction_id = "profile/capture-authority";
     result.selector = selector();
+    result.selector.catalog_selector.constraints = std::move(constraints);
     result.generations = OverlaySourceGenerations{1, 2, 3, 4, 5, 6, 7};
     result.observation_contract_sha256 = *contract_sha256;
     result.predictor_contract_sha256 = digest('0');
@@ -898,6 +903,31 @@ void test_invalid_and_default_source_never_invoke_driver(
     state.require(source.begin_calls() == 0 && invalid_driver.run_calls == 0 &&
                       invalid_driver.release_calls == 0,
                   "an invalid schedule is rejected before source or driver access");
+
+    DynamicIntervalSource incomplete_source(derivation_contract);
+    ProfilingCaptureAuthority incomplete(
+        derivation_contract, incomplete_source, schedule());
+    CountingDriver incomplete_driver;
+    const auto incomplete_context = context(
+        derivation_contract,
+        {
+            ConstraintKind::Ownership,
+            ConstraintKind::GpuSharedResidency,
+            ConstraintKind::ModelTypePool,
+            ConstraintKind::HostMemAvailableFloor,
+        });
+    const auto incomplete_capture = incomplete.capture(
+        router, incomplete_context, incomplete_driver,
+        [] { return false; });
+
+    require_empty_capture(
+        state,
+        incomplete_capture,
+        "a derivation contract that omits required selector families emits no phase attestations");
+    state.require(incomplete_source.begin_calls() == 0 &&
+                      incomplete_driver.run_calls == 0 &&
+                      incomplete_driver.release_calls == 0,
+                  "incomplete selector coverage is rejected before source or driver access");
 
     ProfilingCaptureAuthority unavailable(derivation_contract, schedule());
     CountingDriver unavailable_driver;

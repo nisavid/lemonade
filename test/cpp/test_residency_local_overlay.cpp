@@ -599,6 +599,17 @@ void require_profiling_input_codec() {
                      OverlayContractStatus::IncompleteClaimClosure,
                      "profiling input accepted an unknown claim family");
 
+    auto omitted_required_family = profiling_draft();
+    for (auto &family : omitted_required_family.attributed_claims) {
+        if (family.family == ClaimFamily::SafetyFloor) {
+            family.completeness = ClaimCompleteness::NotApplicable;
+        }
+    }
+    require_rejected(
+        seal_profiling_input(std::move(omitted_required_family)),
+        OverlayContractStatus::IncompleteClaimClosure,
+        "profiling input accepted a required selector family as not applicable");
+
 }
 
 void require_overlay_object_codec() {

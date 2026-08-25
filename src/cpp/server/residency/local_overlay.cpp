@@ -1273,6 +1273,11 @@ void normalize_profiling_draft(ProfilingInputEnvelopeDraft &draft) {
     normalize_selector(draft.selector);
     normalize_generations(draft.generations);
     const auto checked = checked_claims(std::move(draft.attributed_claims));
+    if (!claim_families_cover_ordinary_constraints(
+            checked, draft.selector.catalog_selector.constraints)) {
+        reject(OverlayContractStatus::IncompleteClaimClosure,
+               "attributed claims omit a required selector family");
+    }
     draft.attributed_claims = claim_closure(checked);
     require_digest(draft.baseline_observation_sha256,
                    "baseline observation digest");

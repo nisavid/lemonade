@@ -28,6 +28,19 @@ enum class ClaimStatus {
     InvalidRelease,
 };
 
+enum class ConstraintEvidenceKind {
+    ClaimFamily,
+    OwnerCoverage,
+};
+
+struct ConstraintEvidenceRequirement {
+    ConstraintEvidenceKind kind;
+    std::optional<ClaimFamily> family;
+};
+
+std::optional<ConstraintEvidenceRequirement>
+constraint_evidence_requirement(ConstraintKind constraint) noexcept;
+
 struct ClaimTotal {
     std::string constraint_id;
     ClaimUnit unit = ClaimUnit::Bytes;
@@ -86,6 +99,9 @@ struct CheckedClaimSetResult {
 };
 
 CheckedClaimSetResult check_claim_closure(std::vector<ClaimFamilyClosure> closure);
+bool claim_families_cover_ordinary_constraints(
+    const CheckedClaimSet &claims,
+    const std::vector<ConstraintKind> &constraints) noexcept;
 CheckedClaimSetResult checked_add(const CheckedClaimSet &left, const CheckedClaimSet &right);
 CheckedClaimSetResult checked_subtract(const CheckedClaimSet &left,
                                       const CheckedClaimSet &right);
