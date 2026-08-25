@@ -231,6 +231,9 @@ ProfilingCollectionClock clock(
     times->push_back(std::chrono::steady_clock::time_point{} + elapsed);
     ProfilingCollectionClock value;
     value.monotonic_now = [times] {
+        if (times->empty()) {
+            throw std::runtime_error("scripted monotonic clock exhausted");
+        }
         const auto result = times->front();
         times->pop_front();
         return result;
