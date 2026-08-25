@@ -11,6 +11,8 @@
 
 namespace lemon::residency {
 
+inline constexpr std::uint64_t max_profiling_interval_frames = 4096;
+
 enum class ProfilingSourceError {
     None,
     Unavailable,
@@ -30,11 +32,13 @@ struct ProfilingRawSample {
 struct ProfilingRawReadRequest {
     std::vector<std::string> sensor_ids;
     std::vector<std::string> owner_scope_ids;
+    std::string owner_scope_set_sha256;
 };
 
 struct ProfilingRawReadResult {
     ProfilingSourceError error = ProfilingSourceError::Unavailable;
     std::vector<ProfilingRawSample> samples;
+    std::string owner_scope_set_sha256;
     std::string diagnostic;
 };
 
@@ -56,6 +60,100 @@ public:
          const ProfilingCancellationCheck &should_abort) override;
 };
 
+enum class ProfilingIntervalSourceError {
+    None,
+    Unavailable,
+    Cancelled,
+    HistoryLost,
+    Failed,
+};
+
+struct ProfilingRawIntervalReadRequest {
+    ProfilingRawReadRequest read;
+    std::string event_semantics_revision_sha256;
+};
+
+struct ProfilingEventWatermark {
+    std::uint64_t value = 0;
+
+    bool operator==(const ProfilingEventWatermark &other) const noexcept {
+        return value == other.value;
+    }
+    bool operator!=(const ProfilingEventWatermark &other) const noexcept {
+        return !(*this == other);
+    }
+};
+
+struct ProfilingRawIntervalFrame {
+    std::string source_epoch_sha256;
+    std::string owner_scope_set_sha256;
+    std::string event_semantics_revision_sha256;
+    ProfilingEventWatermark event_watermark;
+    std::vector<ProfilingRawSample> samples;
+};
+
+struct ProfilingRawIntervalToken {
+    std::uint64_t opaque_id = 0;
+};
+
+struct ProfilingRawIntervalBeginResult {
+    ProfilingIntervalSourceError error =
+        ProfilingIntervalSourceError::Unavailable;
+    ProfilingRawIntervalToken token;
+    ProfilingRawIntervalFrame checkpoint;
+    std::string diagnostic;
+};
+
+struct ProfilingRawIntervalBatch {
+    ProfilingIntervalSourceError error =
+        ProfilingIntervalSourceError::Unavailable;
+    ProfilingEventWatermark after_event_watermark;
+    ProfilingEventWatermark through_event_watermark;
+    std::vector<ProfilingRawIntervalFrame> event_frames;
+    ProfilingRawIntervalFrame checkpoint;
+    std::string diagnostic;
+};
+
+class ProfilingIntervalObservationSource {
+public:
+    virtual ~ProfilingIntervalObservationSource() = default;
+
+    // Calls are synchronous. Implementations must not retain request or
+    // cancellation references, and a successful begin owns one token until
+    // finish drains and unregisters it. The Server serializes calls for one
+    // token; implementations must synchronize any concurrently active tokens.
+    // Success atomically registers the interval before taking its checkpoint.
+    virtual ProfilingRawIntervalBeginResult
+    begin(const ProfilingRawIntervalReadRequest &request,
+          const ProfilingCancellationCheck &should_abort) = 0;
+    // Success returns every retained event after the supplied watermark and
+    // an atomic checkpoint at the returned through-watermark.
+    virtual ProfilingRawIntervalBatch
+    read_since(ProfilingRawIntervalToken token,
+               ProfilingEventWatermark after_event_watermark,
+               const ProfilingCancellationCheck &should_abort) = 0;
+    // Finish must atomically drain and unregister the token without allowing
+    // caller cancellation to skip source cleanup.
+    virtual ProfilingRawIntervalBatch
+    finish(ProfilingRawIntervalToken token,
+           ProfilingEventWatermark after_event_watermark) = 0;
+};
+
+class UnavailableProfilingIntervalObservationSource final
+    : public ProfilingIntervalObservationSource {
+public:
+    ProfilingRawIntervalBeginResult
+    begin(const ProfilingRawIntervalReadRequest &request,
+          const ProfilingCancellationCheck &should_abort) override;
+    ProfilingRawIntervalBatch
+    read_since(ProfilingRawIntervalToken token,
+               ProfilingEventWatermark after_event_watermark,
+               const ProfilingCancellationCheck &should_abort) override;
+    ProfilingRawIntervalBatch
+    finish(ProfilingRawIntervalToken token,
+           ProfilingEventWatermark after_event_watermark) override;
+};
+
 struct ProfilingSensorContract {
     std::string sensor_id;
     std::string constraint_id;
@@ -64,17 +162,33 @@ struct ProfilingSensorContract {
     std::uint64_t safety_ceiling = 0;
 };
 
+struct ProfilingOwnerScopeBinding {
+    std::string owner_scope_id;
+    std::string containment_identity_sha256;
+};
+
+struct ProfilingIntervalContract {
+    std::string event_semantics_revision_sha256;
+    std::chrono::milliseconds max_observation_gap{0};
+    std::chrono::milliseconds baseline_stability_window{0};
+    std::chrono::milliseconds release_stability_window{0};
+    std::uint64_t max_interval_frames = 0;
+};
+
 struct ProfilingDerivationContract {
     std::string provider_id;
     std::string provider_revision_sha256;
     std::vector<ProfilingSensorContract> sensors;
-    std::vector<std::string> owner_scope_ids;
+    std::vector<ProfilingOwnerScopeBinding> owner_scopes;
     std::chrono::seconds freshness_window{0};
     std::chrono::milliseconds max_source_skew{0};
+    ProfilingIntervalContract interval;
 };
 
 std::optional<std::string> profiling_derivation_contract_sha256(
     const ProfilingDerivationContract &contract);
+std::optional<std::string> profiling_owner_scope_set_sha256(
+    const std::vector<ProfilingOwnerScopeBinding> &owner_scopes);
 
 struct ProfilingCollectionClock {
     std::function<std::chrono::steady_clock::time_point()> monotonic_now;

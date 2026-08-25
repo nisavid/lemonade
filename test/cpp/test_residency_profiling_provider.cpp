@@ -149,6 +149,10 @@ static_assert(!HasUnattributedClaims<ProfilingDerivedObservation>::value);
 static_assert(!HasPhase<ProfilingObservationCollectionResult>::value);
 static_assert(!HasLifecycleState<ProfilingObservationCollectionResult>::value);
 static_assert(!HasAttestation<ProfilingObservationCollectionResult>::value);
+static_assert(!HasHealth<ProfilingRawIntervalFrame>::value);
+static_assert(!HasOwnerCoverage<ProfilingRawIntervalFrame>::value);
+static_assert(!HasLifecycleState<ProfilingRawIntervalFrame>::value);
+static_assert(!HasAttestation<ProfilingRawIntervalFrame>::value);
 static_assert(
     std::is_same_v<decltype(ProfilingSensorContract::uncertainty_bound),
                    std::uint64_t>);
@@ -170,7 +174,9 @@ struct TestState {
 
 void test_default_source_is_unavailable(TestState &state) {
     UnavailableProfilingObservationSource source;
-    ProfilingRawReadRequest request{{"sensor/gtt-used"}, {"owner/model-alpha"}};
+    ProfilingRawReadRequest request{{"sensor/gtt-used"},
+                                    {"owner/model-alpha"},
+                                    std::string(64, 'c')};
 
     const auto result = source.read(request, [] { return false; });
 
@@ -183,10 +189,49 @@ void test_default_source_is_unavailable(TestState &state) {
                   "the unavailable source reports a stable diagnostic");
 }
 
+void test_default_interval_source_is_unavailable(TestState &state) {
+    UnavailableProfilingIntervalObservationSource source;
+    ProfilingRawIntervalReadRequest request;
+    request.read = ProfilingRawReadRequest{{"sensor/gtt-used"},
+                                          {"owner/model-alpha"},
+                                          std::string(64, 'c')};
+    request.event_semantics_revision_sha256 = std::string(64, 'd');
+
+    const auto result = source.begin(request, [] { return false; });
+
+    state.require(result.error == ProfilingIntervalSourceError::Unavailable,
+                  "the production interval source defaults to unavailable");
+    state.require(result.token.opaque_id == 0,
+                  "the unavailable interval source cannot return a token");
+    state.require(result.checkpoint.samples.empty(),
+                  "the unavailable interval source cannot return a checkpoint");
+    state.require(result.diagnostic ==
+                      "profiling interval observation source is unavailable",
+                  "the unavailable interval source reports a stable diagnostic");
+
+    const auto batch = source.read_since(
+        {}, ProfilingEventWatermark{41}, [] { return false; });
+    state.require(batch.error == ProfilingIntervalSourceError::Unavailable &&
+                      batch.after_event_watermark.value == 41 &&
+                      batch.through_event_watermark.value == 41 &&
+                      batch.event_frames.empty() &&
+                      batch.checkpoint.samples.empty(),
+                  "the unavailable interval source cannot return history");
+
+    const auto finished = source.finish({}, ProfilingEventWatermark{42});
+    state.require(finished.error ==
+                          ProfilingIntervalSourceError::Unavailable &&
+                      finished.after_event_watermark.value == 42 &&
+                      finished.through_event_watermark.value == 42 &&
+                      finished.event_frames.empty() &&
+                      finished.checkpoint.samples.empty(),
+                  "the unavailable interval source cannot claim a final drain");
+}
+
 std::string digest(char value) { return std::string(64, value); }
 
 constexpr char known_contract_sha256[] =
-    "a1abcdbffca73bbd6f0238f9ff647c417aa46734a364ad78c709f53fe0a963d1";
+    "a62d1c4f2bd4345138b4cffd52e29da00bd1d06788831c4cb7fbe5dded344870";
 
 ProfilingDerivationContract contract() {
     ProfilingDerivationContract value;
@@ -196,9 +241,16 @@ ProfilingDerivationContract contract() {
         ProfilingSensorContract{"sensor/gtt-used", "gpu/gtt",
                                 ClaimFamily::ConsumableCapacity, 512, 4864},
     };
-    value.owner_scope_ids = {"owner/model-alpha"};
+    value.owner_scopes = {
+        ProfilingOwnerScopeBinding{"owner/model-alpha", digest('f')},
+    };
     value.freshness_window = std::chrono::seconds(60);
     value.max_source_skew = std::chrono::milliseconds(20);
+    value.interval.event_semantics_revision_sha256 = digest('9');
+    value.interval.max_observation_gap = std::chrono::milliseconds(50);
+    value.interval.baseline_stability_window = std::chrono::milliseconds(100);
+    value.interval.release_stability_window = std::chrono::milliseconds(200);
+    value.interval.max_interval_frames = 128;
     return value;
 }
 
@@ -254,6 +306,7 @@ ProfilingRawReadResult successful_read(std::uint64_t total = 4096,
                                generation},
         },
         {},
+        {},
     };
 }
 
@@ -272,14 +325,19 @@ public:
         if (on_read_) on_read_();
         if (should_abort && should_abort()) {
             return ProfilingRawReadResult{
-                ProfilingSourceError::Cancelled, {}, "scripted read cancelled"};
+                ProfilingSourceError::Cancelled, {},
+                request.owner_scope_set_sha256, "scripted read cancelled"};
         }
         if (script_.empty()) {
             return ProfilingRawReadResult{
-                ProfilingSourceError::Unavailable, {}, "script exhausted"};
+                ProfilingSourceError::Unavailable, {},
+                request.owner_scope_set_sha256, "script exhausted"};
         }
         auto result = std::move(script_.front());
         script_.pop_front();
+        if (result.owner_scope_set_sha256.empty()) {
+            result.owner_scope_set_sha256 = request.owner_scope_set_sha256;
+        }
         return result;
     }
 
@@ -335,11 +393,11 @@ void test_derivation_contract_identity(TestState &state) {
     auto reordered = derivation_contract;
     reordered.sensors.push_back(ProfilingSensorContract{
         "sensor/vram-used", "gpu/vram", ClaimFamily::ConsumableCapacity, 1, 5});
-    reordered.owner_scope_ids.push_back("owner/model-beta");
+    reordered.owner_scopes.push_back(
+        ProfilingOwnerScopeBinding{"owner/model-beta", digest('8')});
     auto canonical = reordered;
     std::reverse(reordered.sensors.begin(), reordered.sensors.end());
-    std::reverse(reordered.owner_scope_ids.begin(),
-                 reordered.owner_scope_ids.end());
+    std::reverse(reordered.owner_scopes.begin(), reordered.owner_scopes.end());
     const auto canonical_identity =
         profiling_derivation_contract_sha256(canonical);
     const auto reordered_identity =
@@ -348,12 +406,32 @@ void test_derivation_contract_identity(TestState &state) {
         canonical_identity.has_value() && reordered_identity.has_value() &&
             canonical_identity == reordered_identity,
         "sensor and owner ordering does not change contract identity");
+    const auto canonical_owner_set =
+        profiling_owner_scope_set_sha256(canonical.owner_scopes);
+    const auto reordered_owner_set =
+        profiling_owner_scope_set_sha256(reordered.owner_scopes);
+    state.require(canonical_owner_set.has_value() &&
+                      canonical_owner_set == reordered_owner_set,
+                  "owner-scope identity is canonical and order independent");
 
     auto invalid = derivation_contract;
     invalid.sensors.front().safety_ceiling =
         invalid.sensors.front().uncertainty_bound;
     state.require(!profiling_derivation_contract_sha256(invalid).has_value(),
                   "an invalid derivation contract has no identity");
+
+    invalid = derivation_contract;
+    invalid.owner_scopes.push_back(invalid.owner_scopes.front());
+    invalid.owner_scopes.back().owner_scope_id = "owner/model-beta";
+    state.require(!profiling_owner_scope_set_sha256(invalid.owner_scopes)
+                       .has_value(),
+                  "one containment identity cannot be counted twice");
+
+    invalid = derivation_contract;
+    invalid.interval.max_interval_frames =
+        max_profiling_interval_frames + 1;
+    state.require(!profiling_derivation_contract_sha256(invalid).has_value(),
+                  "the interval frame budget has a finite contract bound");
 }
 
 void test_stale_contract_identity_fails_before_source_access(TestState &state) {
@@ -380,12 +458,29 @@ void test_stale_contract_identity_fails_before_source_access(TestState &state) {
          [](auto &value) { value.sensors.front().safety_ceiling = 4865; }},
         {"owner scopes are bound",
          [](auto &value) {
-             value.owner_scope_ids.front() = "owner/model-beta";
+             value.owner_scopes.front().owner_scope_id = "owner/model-beta";
+         }},
+        {"owner containment identity is bound",
+         [](auto &value) {
+             value.owner_scopes.front().containment_identity_sha256 =
+                 digest('7');
          }},
         {"freshness policy is bound",
          [](auto &value) { value.freshness_window = 61s; }},
         {"source skew policy is bound",
          [](auto &value) { value.max_source_skew = 21ms; }},
+        {"event semantics are bound",
+         [](auto &value) {
+             value.interval.event_semantics_revision_sha256 = digest('6');
+         }},
+        {"observation cadence is bound",
+         [](auto &value) { value.interval.max_observation_gap = 51ms; }},
+        {"baseline stability is bound",
+         [](auto &value) { value.interval.baseline_stability_window = 101ms; }},
+        {"release stability is bound",
+         [](auto &value) { value.interval.release_stability_window = 201ms; }},
+        {"interval frame retention is bound",
+         [](auto &value) { value.interval.max_interval_frames = 129; }},
     };
 
     const auto stale_context = context();
@@ -468,6 +563,12 @@ void test_collector_derives_observation_from_raw_samples(TestState &state) {
         state.require(source.requests.front().owner_scope_ids ==
                           std::vector<std::string>{"owner/model-alpha"},
                       "the Server supplies owner scopes");
+        const auto expected_owner_scope_set =
+            profiling_owner_scope_set_sha256(derivation_contract.owner_scopes);
+        state.require(expected_owner_scope_set.has_value() &&
+                          source.requests.front().owner_scope_set_sha256 ==
+                              *expected_owner_scope_set,
+                      "the Server binds the requested containment scope set");
     }
 }
 
@@ -623,6 +724,18 @@ void test_collector_fails_closed(TestState &state) {
 
     {
         auto read = successful_read();
+        read.owner_scope_set_sha256 = digest('1');
+        ScriptedProfilingObservationSource source({std::move(read)});
+        ProfilingObservationCollector collector(contract(), source, clock());
+        const auto result = collector.collect(context(), [] { return false; });
+        state.require(result.status ==
+                              ProfilingCollectionStatus::InvalidObservation &&
+                          !result.observation.has_value(),
+                      "a stale owner-containment binding fails closed");
+    }
+
+    {
+        auto read = successful_read();
         read.error = ProfilingSourceError::Failed;
         read.diagnostic = std::string(300, 'x');
         ScriptedProfilingObservationSource source({std::move(read)});
@@ -771,6 +884,7 @@ void test_collector_fails_closed(TestState &state) {
 int main() {
     TestState state;
     test_default_source_is_unavailable(state);
+    test_default_interval_source_is_unavailable(state);
     test_derivation_contract_identity(state);
     test_stale_contract_identity_fails_before_source_access(state);
     test_collector_derives_observation_from_raw_samples(state);
