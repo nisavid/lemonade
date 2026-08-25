@@ -82,6 +82,62 @@ struct OverlaySourceGenerations {
     std::uint64_t workload = 0;
 };
 
+enum class ProfilingPhase {
+    Baseline,
+    Workload,
+    Release,
+};
+
+enum class ProfilingObservationHealth {
+    Valid,
+    Missing,
+    Stale,
+    Unhealthy,
+    Incoherent,
+    Superseded,
+};
+
+enum class ProfilingOwnerCoverage {
+    Complete,
+    Incomplete,
+    Unknown,
+};
+
+enum class ProfilingLifecycleState {
+    BaselineQuiescent,
+    WorkloadComplete,
+    ReleaseVerified,
+};
+
+struct ProfilingPhaseAttestationDraft {
+    SchemaVersion schema = supported_local_overlay_schema;
+    ProfilingPhase phase = ProfilingPhase::Baseline;
+    std::string deployment_id;
+    std::string profiling_transaction_id;
+    std::string selector_sha256;
+    std::string provider_id;
+    std::string provider_revision_sha256;
+    std::string provenance_sha256;
+    std::string observation_contract_sha256;
+    std::string predictor_contract_sha256;
+    OverlaySourceGenerations generations;
+    std::uint64_t observation_generation = 0;
+    std::string observed_at;
+    std::string fresh_until;
+    std::uint64_t source_skew_milliseconds = 0;
+    std::uint64_t max_source_skew_milliseconds = 0;
+    ProfilingObservationHealth health = ProfilingObservationHealth::Missing;
+    ProfilingOwnerCoverage owner_coverage = ProfilingOwnerCoverage::Unknown;
+    std::vector<ClaimFamilyClosure> observed_claims;
+    std::vector<ClaimFamilyClosure> attributed_claims;
+    std::vector<ClaimFamilyClosure> external_change_claims;
+    std::vector<ClaimFamilyClosure> unattributed_claims;
+    std::vector<ClaimFamilyClosure> uncertainty_claims;
+    std::vector<ClaimFamilyClosure> safety_margin_claims;
+    ProfilingLifecycleState lifecycle_state =
+        ProfilingLifecycleState::BaselineQuiescent;
+};
+
 struct ProfilingInputEnvelopeDraft {
     SchemaVersion schema = supported_local_overlay_schema;
     std::string deployment_id;
@@ -147,9 +203,11 @@ struct OverlayActivationRootDraft {
 };
 
 class ParsedProfilingInputEnvelope;
+class ParsedProfilingPhaseAttestation;
 class ParsedLocalOverlayObject;
 class ParsedOverlayActivationRoot;
 struct ParsedProfilingInputEnvelopeResult;
+struct ParsedProfilingPhaseAttestationResult;
 struct ParsedLocalOverlayObjectResult;
 struct ParsedOverlayActivationRootResult;
 
@@ -198,6 +256,58 @@ private:
     seal_profiling_input(ProfilingInputEnvelopeDraft draft);
     friend ParsedProfilingInputEnvelopeResult
     parse_profiling_input(std::string_view bytes);
+};
+
+class ParsedProfilingPhaseAttestation {
+public:
+    ParsedProfilingPhaseAttestation() = delete;
+    ParsedProfilingPhaseAttestation(
+        const ParsedProfilingPhaseAttestation &) = default;
+    ParsedProfilingPhaseAttestation &
+    operator=(const ParsedProfilingPhaseAttestation &) = default;
+
+    SchemaVersion schema() const noexcept;
+    ProfilingPhase phase() const noexcept;
+    std::string_view deployment_id() const noexcept;
+    std::string_view profiling_transaction_id() const noexcept;
+    std::string_view selector_sha256() const noexcept;
+    std::string_view provider_id() const noexcept;
+    std::string_view provider_revision_sha256() const noexcept;
+    std::string_view provenance_sha256() const noexcept;
+    std::string_view observation_contract_sha256() const noexcept;
+    std::string_view predictor_contract_sha256() const noexcept;
+    const OverlaySourceGenerations &generations() const noexcept;
+    std::uint64_t observation_generation() const noexcept;
+    std::string_view observed_at() const noexcept;
+    std::string_view fresh_until() const noexcept;
+    std::uint64_t source_skew_milliseconds() const noexcept;
+    std::uint64_t max_source_skew_milliseconds() const noexcept;
+    ProfilingObservationHealth health() const noexcept;
+    ProfilingOwnerCoverage owner_coverage() const noexcept;
+    const std::vector<ClaimFamilyClosure> &observed_claims() const noexcept;
+    const std::vector<ClaimFamilyClosure> &attributed_claims() const noexcept;
+    const std::vector<ClaimFamilyClosure> &
+    external_change_claims() const noexcept;
+    const std::vector<ClaimFamilyClosure> &unattributed_claims() const noexcept;
+    const std::vector<ClaimFamilyClosure> &uncertainty_claims() const noexcept;
+    const std::vector<ClaimFamilyClosure> &safety_margin_claims() const noexcept;
+    ProfilingLifecycleState lifecycle_state() const noexcept;
+    std::string_view checksum_sha256() const noexcept;
+    std::string_view canonical_bytes() const noexcept;
+
+private:
+    ParsedProfilingPhaseAttestation(ProfilingPhaseAttestationDraft draft,
+                                    std::string checksum_sha256,
+                                    std::string canonical_bytes);
+
+    ProfilingPhaseAttestationDraft draft_;
+    std::string checksum_sha256_;
+    std::string canonical_bytes_;
+
+    friend ParsedProfilingPhaseAttestationResult
+    seal_profiling_phase_attestation(ProfilingPhaseAttestationDraft draft);
+    friend ParsedProfilingPhaseAttestationResult
+    parse_profiling_phase_attestation(std::string_view bytes);
 };
 
 class ParsedLocalOverlayObject {
@@ -295,6 +405,14 @@ struct ParsedProfilingInputEnvelopeResult {
     bool accepted() const noexcept;
 };
 
+struct ParsedProfilingPhaseAttestationResult {
+    OverlayContractStatus status = OverlayContractStatus::InvalidValue;
+    std::string diagnostic;
+    std::optional<ParsedProfilingPhaseAttestation> candidate;
+
+    bool accepted() const noexcept;
+};
+
 struct ParsedLocalOverlayObjectResult {
     OverlayContractStatus status = OverlayContractStatus::InvalidValue;
     std::string diagnostic;
@@ -315,6 +433,10 @@ ParsedProfilingInputEnvelopeResult
 seal_profiling_input(ProfilingInputEnvelopeDraft draft);
 ParsedProfilingInputEnvelopeResult
 parse_profiling_input(std::string_view bytes);
+ParsedProfilingPhaseAttestationResult
+seal_profiling_phase_attestation(ProfilingPhaseAttestationDraft draft);
+ParsedProfilingPhaseAttestationResult
+parse_profiling_phase_attestation(std::string_view bytes);
 ParsedLocalOverlayObjectResult
 seal_local_overlay(LocalOverlayObjectDraft draft);
 ParsedLocalOverlayObjectResult parse_local_overlay(std::string_view bytes);

@@ -1,0 +1,1408 @@
+{
+  "$defs": {
+    "authority_status": {
+      "const": "active"
+    },
+    "claim_closure": {
+      "items": false,
+      "maxItems": 4,
+      "minItems": 4,
+      "prefixItems": [
+        {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "bounded"
+                },
+                "entries": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "amount": {
+                        "maximum": 18446744073709551615,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "constraint_id": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "pattern": "^[\\u0021-\\u007e]+$",
+                        "type": "string",
+                        "x-max-utf8-bytes": 128
+                      },
+                      "unit": {
+                        "const": "bytes"
+                      }
+                    },
+                    "required": [
+                      "amount",
+                      "constraint_id",
+                      "unit"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 256,
+                  "minItems": 1,
+                  "type": "array",
+                  "x-canonical-order": true
+                },
+                "family": {
+                  "const": "consumable_capacity"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "known_zero"
+                },
+                "entries": {
+                  "maxItems": 0,
+                  "type": "array"
+                },
+                "family": {
+                  "const": "consumable_capacity"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "not_applicable"
+                },
+                "entries": {
+                  "maxItems": 0,
+                  "type": "array"
+                },
+                "family": {
+                  "const": "consumable_capacity"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "bounded"
+                },
+                "entries": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "amount": {
+                        "maximum": 18446744073709551615,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "constraint_id": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "pattern": "^[\\u0021-\\u007e]+$",
+                        "type": "string",
+                        "x-max-utf8-bytes": 128
+                      },
+                      "unit": {
+                        "const": "bytes"
+                      }
+                    },
+                    "required": [
+                      "amount",
+                      "constraint_id",
+                      "unit"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 256,
+                  "minItems": 1,
+                  "type": "array",
+                  "x-canonical-order": true
+                },
+                "family": {
+                  "const": "safety_floor"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "known_zero"
+                },
+                "entries": {
+                  "maxItems": 0,
+                  "type": "array"
+                },
+                "family": {
+                  "const": "safety_floor"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "not_applicable"
+                },
+                "entries": {
+                  "maxItems": 0,
+                  "type": "array"
+                },
+                "family": {
+                  "const": "safety_floor"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "bounded"
+                },
+                "entries": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "amount": {
+                        "maximum": 18446744073709551615,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "constraint_id": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "pattern": "^[\\u0021-\\u007e]+$",
+                        "type": "string",
+                        "x-max-utf8-bytes": 128
+                      },
+                      "unit": {
+                        "const": "count"
+                      }
+                    },
+                    "required": [
+                      "amount",
+                      "constraint_id",
+                      "unit"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 256,
+                  "minItems": 1,
+                  "type": "array",
+                  "x-canonical-order": true
+                },
+                "family": {
+                  "const": "cardinality_pool"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "known_zero"
+                },
+                "entries": {
+                  "maxItems": 0,
+                  "type": "array"
+                },
+                "family": {
+                  "const": "cardinality_pool"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "not_applicable"
+                },
+                "entries": {
+                  "maxItems": 0,
+                  "type": "array"
+                },
+                "family": {
+                  "const": "cardinality_pool"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "bounded"
+                },
+                "entries": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "amount": {
+                        "const": 1,
+                        "type": "integer"
+                      },
+                      "constraint_id": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "pattern": "^[\\u0021-\\u007e]+$",
+                        "type": "string",
+                        "x-max-utf8-bytes": 128
+                      },
+                      "unit": {
+                        "const": "count"
+                      }
+                    },
+                    "required": [
+                      "amount",
+                      "constraint_id",
+                      "unit"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 256,
+                  "minItems": 1,
+                  "type": "array",
+                  "x-canonical-order": true
+                },
+                "family": {
+                  "const": "compatibility_exclusivity"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "known_zero"
+                },
+                "entries": {
+                  "maxItems": 0,
+                  "type": "array"
+                },
+                "family": {
+                  "const": "compatibility_exclusivity"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "completeness": {
+                  "const": "not_applicable"
+                },
+                "entries": {
+                  "maxItems": 0,
+                  "type": "array"
+                },
+                "family": {
+                  "const": "compatibility_exclusivity"
+                }
+              },
+              "required": [
+                "completeness",
+                "entries",
+                "family"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      ],
+      "type": "array",
+      "x-canonical-order": true
+    },
+    "decision_trace_reference": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string",
+      "x-max-utf8-bytes": 64
+    },
+    "deployment_identity": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string",
+      "x-max-utf8-bytes": 64
+    },
+    "expiry": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "method_identity": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "architecture_predicate"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "architecture_predicate_sha256": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "architecture_predicate_sha256"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "deployment_exact"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "architecture_predicate_sha256": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "architecture_predicate_sha256"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "architecture_predicate_sha256": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string",
+              "x-max-utf8-bytes": 64
+            }
+          ]
+        },
+        "calibration_revision_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "method_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[\\u0021-\\u007e]+$",
+          "type": "string",
+          "x-max-utf8-bytes": 128
+        },
+        "method_revision_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "operation_kind": {
+          "enum": [
+            "admission",
+            "explicit_unload",
+            "force_unload",
+            "pressure_reclamation",
+            "startup_load",
+            "service_termination",
+            "dead_backend_pruning",
+            "same_epoch_recovery_cleanup",
+            "prior_epoch_owner_cleanup",
+            "artifact_scope_recovery_cleanup",
+            "saved_pin_mutation",
+            "runtime_pin_mutation",
+            "legacy_pin_batch",
+            "resident_state_recovery_cleanup"
+          ],
+          "maxLength": 31,
+          "minLength": 1,
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "architecture_predicate",
+            "deployment_exact"
+          ],
+          "maxLength": 22,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "architecture_predicate_sha256",
+        "calibration_revision_sha256",
+        "method_id",
+        "method_revision_sha256",
+        "operation_kind",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "object_status": {
+      "const": "qualified"
+    },
+    "previous_root_reference": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        }
+      ]
+    },
+    "root_transition": {
+      "enum": [
+        "qualification",
+        "rollback"
+      ],
+      "maxLength": 13,
+      "minLength": 1,
+      "type": "string"
+    },
+    "safety_margin_claim_closure": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/claim_closure"
+        },
+        {
+          "contains": {
+            "properties": {
+              "completeness": {
+                "const": "bounded"
+              }
+            },
+            "required": [
+              "completeness"
+            ],
+            "type": "object"
+          },
+          "minContains": 1
+        }
+      ]
+    },
+    "schema_version": {
+      "additionalProperties": false,
+      "properties": {
+        "major": {
+          "const": 1
+        },
+        "minor": {
+          "const": 0
+        }
+      },
+      "required": [
+        "major",
+        "minor"
+      ],
+      "type": "object"
+    },
+    "selector_identity": {
+      "additionalProperties": false,
+      "properties": {
+        "backend_build_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "canonical_model_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[\\u0021-\\u007e]+$",
+          "type": "string",
+          "x-max-utf8-bytes": 128
+        },
+        "catalog": {
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "operation_template": {
+                    "const": "ADM"
+                  }
+                },
+                "required": [
+                  "operation_template"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "operation_kind": {
+                    "enum": [
+                      "admission"
+                    ],
+                    "maxLength": 9,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_kind"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "operation_template": {
+                    "const": "LFR"
+                  }
+                },
+                "required": [
+                  "operation_template"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "operation_kind": {
+                    "enum": [
+                      "admission"
+                    ],
+                    "maxLength": 9,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_kind"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "operation_template": {
+                    "const": "NPC"
+                  }
+                },
+                "required": [
+                  "operation_template"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "operation_kind": {
+                    "enum": [
+                      "admission"
+                    ],
+                    "maxLength": 9,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_kind"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "operation_template": {
+                    "const": "PIN"
+                  }
+                },
+                "required": [
+                  "operation_template"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "operation_kind": {
+                    "enum": [
+                      "legacy_pin_batch",
+                      "resident_state_recovery_cleanup",
+                      "runtime_pin_mutation",
+                      "saved_pin_mutation"
+                    ],
+                    "maxLength": 31,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_kind"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "operation_template": {
+                    "const": "PRE"
+                  }
+                },
+                "required": [
+                  "operation_template"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "operation_kind": {
+                    "enum": [
+                      "pressure_reclamation"
+                    ],
+                    "maxLength": 20,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_kind"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "operation_template": {
+                    "const": "REC"
+                  }
+                },
+                "required": [
+                  "operation_template"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "operation_kind": {
+                    "enum": [
+                      "artifact_scope_recovery_cleanup",
+                      "dead_backend_pruning",
+                      "prior_epoch_owner_cleanup",
+                      "same_epoch_recovery_cleanup",
+                      "service_termination"
+                    ],
+                    "maxLength": 31,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_kind"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "operation_template": {
+                    "const": "STA"
+                  }
+                },
+                "required": [
+                  "operation_template"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "operation_kind": {
+                    "enum": [
+                      "startup_load"
+                    ],
+                    "maxLength": 12,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_kind"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "operation_template": {
+                    "const": "UNL"
+                  }
+                },
+                "required": [
+                  "operation_template"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "operation_kind": {
+                    "enum": [
+                      "explicit_unload",
+                      "force_unload"
+                    ],
+                    "maxLength": 15,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_kind"
+                ]
+              }
+            }
+          ],
+          "properties": {
+            "backend_channel": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\u0021-\\u007e]+$",
+              "type": "string",
+              "x-max-utf8-bytes": 128
+            },
+            "base_variant": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\u0021-\\u007e]+$",
+              "type": "string",
+              "x-max-utf8-bytes": 128
+            },
+            "constraints": {
+              "items": {
+                "enum": [
+                  "flm_type_slot",
+                  "gpu_provider_resolved_capacity",
+                  "gpu_shared_residency",
+                  "host_effects_provider_resolved",
+                  "host_memavailable_floor",
+                  "model_type_pool",
+                  "npu_cross_family",
+                  "npu_exclusive",
+                  "ownership"
+                ],
+                "maxLength": 30,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 9,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true,
+              "x-canonical-order": true
+            },
+            "material_profiles": {
+              "additionalProperties": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[\\u0021-\\u007e]+$",
+                "type": "string",
+                "x-max-utf8-bytes": 128
+              },
+              "maxProperties": 32,
+              "minProperties": 1,
+              "propertyNames": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[\\u0021-\\u007e]+$",
+                "type": "string",
+                "x-max-utf8-bytes": 128
+              },
+              "type": "object"
+            },
+            "model_type": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\u0021-\\u007e]+$",
+              "type": "string",
+              "x-max-utf8-bytes": 128
+            },
+            "operation_kind": {
+              "enum": [
+                "admission",
+                "explicit_unload",
+                "force_unload",
+                "pressure_reclamation",
+                "startup_load",
+                "service_termination",
+                "dead_backend_pruning",
+                "same_epoch_recovery_cleanup",
+                "prior_epoch_owner_cleanup",
+                "artifact_scope_recovery_cleanup",
+                "saved_pin_mutation",
+                "runtime_pin_mutation",
+                "legacy_pin_batch",
+                "resident_state_recovery_cleanup"
+              ],
+              "maxLength": 31,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_template": {
+              "enum": [
+                "ADM",
+                "LFR",
+                "NPC",
+                "PIN",
+                "PRE",
+                "REC",
+                "STA",
+                "UNL"
+              ],
+              "maxLength": 3,
+              "minLength": 1,
+              "type": "string"
+            },
+            "platform": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\u0021-\\u007e]+$",
+              "type": "string",
+              "x-max-utf8-bytes": 128
+            },
+            "recovery": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\u0021-\\u007e]+$",
+              "type": "string",
+              "x-max-utf8-bytes": 128
+            },
+            "source_support_baseline": {
+              "maxLength": 40,
+              "minLength": 40,
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string",
+              "x-max-utf8-bytes": 40
+            }
+          },
+          "required": [
+            "backend_channel",
+            "base_variant",
+            "constraints",
+            "material_profiles",
+            "model_type",
+            "operation_kind",
+            "operation_template",
+            "platform",
+            "recovery",
+            "source_support_baseline"
+          ],
+          "type": "object"
+        },
+        "catalog_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "configuration_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "dependency_set_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "device_identity_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "driver_identity_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "model_artifact_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "operation_contract_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "topology_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "workload_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        }
+      },
+      "required": [
+        "backend_build_sha256",
+        "canonical_model_id",
+        "catalog",
+        "catalog_sha256",
+        "configuration_sha256",
+        "dependency_set_sha256",
+        "device_identity_sha256",
+        "driver_identity_sha256",
+        "model_artifact_sha256",
+        "operation_contract_sha256",
+        "topology_sha256",
+        "workload_sha256"
+      ],
+      "type": "object"
+    },
+    "source_generations": {
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "configuration": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "device": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "driver": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "model": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "topology": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "workload": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "backend",
+        "configuration",
+        "device",
+        "driver",
+        "model",
+        "topology",
+        "workload"
+      ],
+      "type": "object"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "maxLength": 20,
+      "minLength": 20,
+      "pattern": "^(?:(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[48]|[2468][048]|[13579][26])00)-02-29)T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$",
+      "type": "string",
+      "x-max-utf8-bytes": 20
+    }
+  },
+  "$id": "residency.profiling_phase_attestation/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "x-residency-assert": {
+        "field": "observed_at",
+        "less_than_path": "fresh_until"
+      }
+    },
+    {
+      "x-residency-assert": {
+        "field": "source_skew_milliseconds",
+        "less_than_or_equal_path": "max_source_skew_milliseconds"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "baseline"
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "properties": {
+          "lifecycle_state": {
+            "const": "baseline_quiescent"
+          }
+        },
+        "required": [
+          "lifecycle_state"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "workload"
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "properties": {
+          "lifecycle_state": {
+            "const": "workload_complete"
+          }
+        },
+        "required": [
+          "lifecycle_state"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "release"
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "properties": {
+          "lifecycle_state": {
+            "const": "release_verified"
+          }
+        },
+        "required": [
+          "lifecycle_state"
+        ]
+      }
+    }
+  ],
+  "properties": {
+    "attributed_claims": {
+      "$ref": "#/$defs/claim_closure"
+    },
+    "checksum_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string",
+      "x-max-utf8-bytes": 64
+    },
+    "deployment_id": {
+      "$ref": "#/$defs/deployment_identity"
+    },
+    "external_change_claims": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/claim_closure"
+        },
+        {
+          "not": {
+            "contains": {
+              "properties": {
+                "completeness": {
+                  "const": "bounded"
+                }
+              },
+              "required": [
+                "completeness"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "fresh_until": {
+      "$ref": "#/$defs/expiry"
+    },
+    "generations": {
+      "$ref": "#/$defs/source_generations"
+    },
+    "health": {
+      "const": "valid"
+    },
+    "lifecycle_state": {
+      "enum": [
+        "baseline_quiescent",
+        "workload_complete",
+        "release_verified"
+      ],
+      "maxLength": 18,
+      "minLength": 1,
+      "type": "string"
+    },
+    "max_source_skew_milliseconds": {
+      "maximum": 18446744073709551615,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "observation_contract_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string",
+      "x-max-utf8-bytes": 64
+    },
+    "observation_generation": {
+      "maximum": 18446744073709551615,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "observed_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "observed_claims": {
+      "$ref": "#/$defs/claim_closure"
+    },
+    "owner_coverage": {
+      "const": "complete"
+    },
+    "phase": {
+      "enum": [
+        "baseline",
+        "workload",
+        "release"
+      ],
+      "maxLength": 8,
+      "minLength": 1,
+      "type": "string"
+    },
+    "predictor_contract_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string",
+      "x-max-utf8-bytes": 64
+    },
+    "profiling_transaction_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[\\u0021-\\u007e]+$",
+      "type": "string",
+      "x-max-utf8-bytes": 128
+    },
+    "provenance_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string",
+      "x-max-utf8-bytes": 64
+    },
+    "provider_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[\\u0021-\\u007e]+$",
+      "type": "string",
+      "x-max-utf8-bytes": 128
+    },
+    "provider_revision_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string",
+      "x-max-utf8-bytes": 64
+    },
+    "safety_margin_claims": {
+      "$ref": "#/$defs/safety_margin_claim_closure"
+    },
+    "schema": {
+      "$ref": "#/$defs/schema_version"
+    },
+    "selector_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string",
+      "x-max-utf8-bytes": 64
+    },
+    "source_skew_milliseconds": {
+      "maximum": 18446744073709551615,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "unattributed_claims": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/claim_closure"
+        },
+        {
+          "not": {
+            "contains": {
+              "properties": {
+                "completeness": {
+                  "const": "bounded"
+                }
+              },
+              "required": [
+                "completeness"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "uncertainty_claims": {
+      "$ref": "#/$defs/claim_closure"
+    }
+  },
+  "required": [
+    "schema",
+    "phase",
+    "deployment_id",
+    "profiling_transaction_id",
+    "selector_sha256",
+    "provider_id",
+    "provider_revision_sha256",
+    "provenance_sha256",
+    "observation_contract_sha256",
+    "predictor_contract_sha256",
+    "generations",
+    "observation_generation",
+    "observed_at",
+    "fresh_until",
+    "source_skew_milliseconds",
+    "max_source_skew_milliseconds",
+    "health",
+    "owner_coverage",
+    "observed_claims",
+    "attributed_claims",
+    "external_change_claims",
+    "unattributed_claims",
+    "uncertainty_claims",
+    "safety_margin_claims",
+    "lifecycle_state",
+    "checksum_sha256"
+  ],
+  "title": "Profiling Phase Attestation",
+  "type": "object",
+  "x-residency-required-keywords": [
+    "x-max-utf8-bytes",
+    "x-residency-assert"
+  ]
+}

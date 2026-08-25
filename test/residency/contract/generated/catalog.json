@@ -4982,6 +4982,163 @@
           "minor": 0
         }
       },
+      "profiling_phase_attestation": {
+        "conditionals": [
+          {
+            "assert": {
+              "field": "observed_at",
+              "less_than_path": "fresh_until"
+            }
+          },
+          {
+            "assert": {
+              "field": "source_skew_milliseconds",
+              "less_than_or_equal_path": "max_source_skew_milliseconds"
+            }
+          },
+          {
+            "if": {
+              "equals": "baseline",
+              "field": "phase"
+            },
+            "require_values": {
+              "lifecycle_state": "baseline_quiescent"
+            }
+          },
+          {
+            "if": {
+              "equals": "workload",
+              "field": "phase"
+            },
+            "require_values": {
+              "lifecycle_state": "workload_complete"
+            }
+          },
+          {
+            "if": {
+              "equals": "release",
+              "field": "phase"
+            },
+            "require_values": {
+              "lifecycle_state": "release_verified"
+            }
+          }
+        ],
+        "fields": {
+          "attributed_claims": {
+            "required": true,
+            "type": "local_overlay_claim_closure"
+          },
+          "checksum_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "deployment_id": {
+            "required": true,
+            "type": "local_overlay_deployment_identity"
+          },
+          "external_change_claims": {
+            "required": true,
+            "type": "local_overlay_zero_claim_closure"
+          },
+          "fresh_until": {
+            "required": true,
+            "type": "local_overlay_expiry"
+          },
+          "generations": {
+            "required": true,
+            "type": "local_overlay_source_generations"
+          },
+          "health": {
+            "required": true,
+            "type": "local_overlay_profiling_health"
+          },
+          "lifecycle_state": {
+            "required": true,
+            "type": "local_overlay_profiling_lifecycle_state"
+          },
+          "max_source_skew_milliseconds": {
+            "required": true,
+            "type": "local_overlay_positive_uint64"
+          },
+          "observation_contract_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "observation_generation": {
+            "required": true,
+            "type": "local_overlay_positive_uint64"
+          },
+          "observed_at": {
+            "required": true,
+            "type": "local_overlay_timestamp"
+          },
+          "observed_claims": {
+            "required": true,
+            "type": "local_overlay_claim_closure"
+          },
+          "owner_coverage": {
+            "required": true,
+            "type": "local_overlay_profiling_owner_coverage"
+          },
+          "phase": {
+            "required": true,
+            "type": "local_overlay_profiling_phase"
+          },
+          "predictor_contract_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "profiling_transaction_id": {
+            "max_bytes": 128,
+            "required": true,
+            "type": "opaque"
+          },
+          "provenance_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "provider_id": {
+            "max_bytes": 128,
+            "required": true,
+            "type": "opaque"
+          },
+          "provider_revision_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "safety_margin_claims": {
+            "required": true,
+            "type": "local_overlay_safety_margin_claim_closure"
+          },
+          "schema": {
+            "required": true,
+            "type": "local_overlay_schema_version"
+          },
+          "selector_sha256": {
+            "required": true,
+            "type": "sha256"
+          },
+          "source_skew_milliseconds": {
+            "required": true,
+            "type": "local_overlay_nonnegative_uint64"
+          },
+          "unattributed_claims": {
+            "required": true,
+            "type": "local_overlay_zero_claim_closure"
+          },
+          "uncertainty_claims": {
+            "required": true,
+            "type": "local_overlay_claim_closure"
+          }
+        },
+        "output": "docs/api/schemas/residency/profiling_phase_attestation.schema.json",
+        "schema_type": "residency.profiling_phase_attestation/1.0",
+        "version": {
+          "major": 1,
+          "minor": 0
+        }
+      },
       "reason": {
         "conditionals": [
           {
@@ -7267,6 +7424,6 @@
     }
   ],
   "schema": "residency.profiles/1.0",
-  "selection_registry_sha256": "bd040081cc1286047433bfe14ac6556636620176fd02c2a2c934561ac7e9ed28",
+  "selection_registry_sha256": "9dbdfad20160c82f3905493d2d5c4bdcf40f2249b25ad919c57fd4462a51b4b7",
   "source_support_baseline": "a505bbc702cc1fcd44ef73c44defabc98c36d505"
 }

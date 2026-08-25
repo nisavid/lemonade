@@ -15,7 +15,7 @@ namespace {
 using namespace lemon::residency;
 
 constexpr std::string_view expected_catalog_sha256 =
-    "de567a516d6dc5b731d5acf0f66fe84ab7cae1d1329d6f6bd9735510a5684d65";
+    "c3b8fcd06079c8733515b04a8082c164562636681c197e7ee686406a95f2bd55";
 
 template <typename T>
 T known_value(const DecodedValue<T> &decoded, std::string_view label) {
@@ -257,7 +257,7 @@ void require_generated_registries(const json &root) {
 
     const auto &registry = root.at("contract_registry");
     const auto &schemas = registry.at("schema_registry");
-    require(schemas.size() == 15, "schema registry count drifted");
+    require(schemas.size() == 16, "schema registry count drifted");
     std::set<std::string> schema_ids;
     for (const auto &[internal_key, schema] : schemas.items()) {
         const auto id = schema.at("schema_type").get<std::string>();

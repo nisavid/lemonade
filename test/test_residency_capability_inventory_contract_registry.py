@@ -24,7 +24,7 @@ class ResidencyCapabilityInventoryContractRegistryTest(
         self.assertEqual(len(registry["reason_registry"]), 87)
         self.assertEqual(len(registry["presentation_registry"]), 27)
         self.assertEqual(len(registry["detail_schema_registry"]), 15)
-        self.assertEqual(len(registry["schema_registry"]), 15)
+        self.assertEqual(len(registry["schema_registry"]), 16)
         catalog_fields = registry["schema_registry"]["residency_profiles"]["fields"]
         self.assertEqual(
             catalog_fields["source_support_baseline"],
