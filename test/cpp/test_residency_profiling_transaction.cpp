@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <future>
 #include <iostream>
@@ -1080,27 +1081,61 @@ void test_exception_releases_gate(TestState &state, Router &router) {
 void test_server_rejects_evidence_after_lifecycle_handoff(
     TestState &state, const std::shared_ptr<RuntimeConfig> &config) {
     auto server = lemon::ServerProfilingTestHook::create(config, options());
-    std::promise<void> handoff_entered;
-    auto handoff_entered_signal = handoff_entered.get_future();
+    std::mutex handoff_mutex;
+    std::condition_variable handoff_changed;
+    bool handoff_entered = false;
+    bool run_completed = false;
     std::promise<void> release_handoff;
     auto release_handoff_signal = release_handoff.get_future().share();
 
     auto run = std::async(std::launch::async, [&] {
-        return lemon::ServerProfilingTestHook::run(
-            *server, context("profile/server-lifecycle-handoff"),
-            [](Router &, const ProfilingTransactionContext &transaction_context,
-               const ProfilingCancellationCheck &) { return capture(transaction_context); },
-            [&](const ProfilingTransactionResult &result) {
-                state.require(result.status == ProfilingTransactionStatus::Accepted,
-                              "Server handoff probe observes accepted transaction");
-                state.require(result.evidence.has_value(),
-                              "Server handoff probe observes accepted evidence");
-                handoff_entered.set_value();
-                release_handoff_signal.wait();
-            });
+        const auto mark_run_completed = [&] {
+            {
+                std::lock_guard<std::mutex> lock(handoff_mutex);
+                run_completed = true;
+            }
+            handoff_changed.notify_one();
+        };
+        try {
+            auto result = lemon::ServerProfilingTestHook::run(
+                *server, context("profile/server-lifecycle-handoff"),
+                [](Router &, const ProfilingTransactionContext &transaction_context,
+                   const ProfilingCancellationCheck &) {
+                    return capture(transaction_context);
+                },
+                [&](const ProfilingTransactionResult &result) {
+                    state.require(
+                        result.status == ProfilingTransactionStatus::Accepted,
+                        "Server handoff probe observes accepted transaction");
+                    state.require(result.evidence.has_value(),
+                                  "Server handoff probe observes accepted evidence");
+                    {
+                        std::lock_guard<std::mutex> lock(handoff_mutex);
+                        handoff_entered = true;
+                    }
+                    handoff_changed.notify_one();
+                    release_handoff_signal.wait();
+                });
+            mark_run_completed();
+            return result;
+        } catch (...) {
+            mark_run_completed();
+            throw;
+        }
     });
 
-    handoff_entered_signal.wait();
+    {
+        std::unique_lock<std::mutex> lock(handoff_mutex);
+        handoff_changed.wait(lock, [&] { return handoff_entered || run_completed; });
+        if (run_completed) {
+            lock.unlock();
+            const auto early_result = run.get();
+            state.require(false, "Server transaction reaches the lifecycle handoff");
+            state.require(early_result.status != ProfilingTransactionStatus::Accepted,
+                          "Server cannot accept evidence without invoking the handoff");
+            return;
+        }
+    }
     lemon::ServerProfilingTestHook::advance_lifecycle_epoch(*server);
     release_handoff.set_value();
 
