@@ -485,9 +485,15 @@ void test_rejects_incomplete_or_rebound_history(TestState &state) {
              value.event_frames.front().event_semantics_revision_sha256 =
                  digest('2');
          }},
-        {"a sample-generation mismatch invalidates the interval",
+        {"mixed sample generations invalidate the interval",
          [](auto &value) {
              value.event_frames.front().samples.front().source_generation = 99;
+         }},
+        {"a sample generation outside its event watermark invalidates the interval",
+         [](auto &value) {
+             for (auto &sample : value.event_frames.front().samples) {
+                 sample.source_generation = 99;
+             }
          }},
         {"a mismatched atomic checkpoint invalidates the interval",
          [](auto &value) {
@@ -589,6 +595,80 @@ void test_enforces_cadence_and_frame_bound(TestState &state) {
                                                InvalidObservation &&
                           scripted.finish_calls == 1,
                       "the whole interval cannot exceed its retained-frame bound");
+    }
+}
+
+void test_frame_bound_remains_finishable(TestState &state) {
+    {
+        auto bounded_contract = contract();
+        bounded_contract.interval.max_interval_frames = 1;
+        auto scripted = source();
+        scripted.finish_result =
+            batch(10, 10, {}, frame(10, 100, 100));
+        ProfilingIntervalRecorder recorder(bounded_contract, scripted, clock());
+
+        const auto started =
+            recorder.begin(context(bounded_contract), [] { return false; });
+        const auto finished = recorder.finish();
+
+        state.require(started.ok() && finished.ok() &&
+                          finished.segment.has_value() &&
+                          !recorder.active() && scripted.finish_calls == 1,
+                      "a one-frame interval can drain and seal unchanged");
+        if (finished.segment) {
+            state.require(finished.segment->frame_count == 1 &&
+                              finished.segment->checkpoint.capture_generation ==
+                                  1,
+                          "an unchanged final drain reuses the retained checkpoint");
+        }
+    }
+
+    {
+        auto bounded_contract = contract();
+        bounded_contract.interval.max_interval_frames = 4;
+        auto scripted = source();
+        scripted.finish_result =
+            batch(12, 12, {}, frame(12, 300, 300));
+        ProfilingIntervalRecorder recorder(bounded_contract, scripted, clock());
+
+        const auto started =
+            recorder.begin(context(bounded_contract), [] { return false; });
+        const auto polled = recorder.poll([] { return false; });
+        const auto finished = recorder.finish();
+
+        state.require(started.ok() && polled.ok() &&
+                          !polled.segment.has_value() && finished.ok() &&
+                          finished.segment.has_value() &&
+                          !recorder.active() && scripted.finish_calls == 1,
+                      "an interval that reaches its frame bound remains finishable");
+        if (finished.segment) {
+            state.require(finished.segment->frame_count == 4 &&
+                              finished.segment->checkpoint.capture_generation ==
+                                  4 &&
+                              finished.segment->through_event_watermark.value ==
+                                  12,
+                          "the final drain adds no frame beyond the bound");
+        }
+    }
+
+    {
+        auto bounded_contract = contract();
+        bounded_contract.interval.max_interval_frames = 1;
+        auto scripted = source();
+        scripted.finish_result =
+            batch(10, 10, {}, frame(10, 200, 200));
+        ProfilingIntervalRecorder recorder(bounded_contract, scripted, clock());
+
+        const auto started =
+            recorder.begin(context(bounded_contract), [] { return false; });
+        const auto finished = recorder.finish();
+
+        state.require(started.ok() &&
+                          finished.status == ProfilingIntervalRecorderStatus::
+                                                 InvalidObservation &&
+                          !finished.segment.has_value() && !recorder.active() &&
+                          scripted.finish_calls == 1,
+                      "a changed final checkpoint cannot bypass the frame bound");
     }
 }
 
@@ -741,6 +821,7 @@ int main() {
     test_rejects_incomplete_or_rebound_history(state);
     test_segment_provenance_binds_checkpoint_evidence(state);
     test_enforces_cadence_and_frame_bound(state);
+    test_frame_bound_remains_finishable(state);
     test_source_failures_discard_interval(state);
     test_failures_and_destruction_release_source(state);
     return state.ok.load() ? 0 : 1;

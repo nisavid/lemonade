@@ -1256,6 +1256,17 @@ struct ProfilingIntervalRecorder::State {
                    contract.interval.event_semantics_revision_sha256;
     }
 
+    bool frame_repeats_last_checkpoint(
+        const ProfilingRawIntervalFrame &frame) const {
+        if (!frame_matches_stream(frame)) return false;
+        const auto claims = derive_claim_amounts(contract, frame.samples, false);
+        const auto provenance = interval_frame_provenance_digest(context, frame);
+        return claims &&
+               claims->source_generation == frame.event_watermark.value &&
+               provenance &&
+               *provenance == last_raw_frame_provenance_sha256;
+    }
+
     bool initialize_segment(ProfilingEventWatermark after) {
         segment = {};
         segment.after_event_watermark = after;
@@ -1425,9 +1436,15 @@ struct ProfilingIntervalRecorder::State {
                                  raw.after_event_watermark.value;
         const auto remaining =
             contract.interval.max_interval_frames - total_frame_count;
+        const bool reuses_final_checkpoint =
+            source_finished && remaining == 0 && event_count == 0 &&
+            raw.event_frames.empty() &&
+            raw.checkpoint.event_watermark == current_event_watermark &&
+            frame_repeats_last_checkpoint(raw.checkpoint);
         if (event_count !=
                 static_cast<std::uint64_t>(raw.event_frames.size()) ||
-            remaining == 0 || event_count >= remaining) {
+            (!reuses_final_checkpoint &&
+             (remaining == 0 || event_count >= remaining))) {
             return fail(ProfilingIntervalRecorderStatus::InvalidObservation,
                         "profiling interval history is incomplete");
         }
@@ -1450,7 +1467,8 @@ struct ProfilingIntervalRecorder::State {
         if (expected != raw.through_event_watermark.value ||
             raw.checkpoint.event_watermark !=
                 raw.through_event_watermark ||
-            !record_frame(raw.checkpoint, timing, true)) {
+            (!reuses_final_checkpoint &&
+             !record_frame(raw.checkpoint, timing, true))) {
             return fail(ProfilingIntervalRecorderStatus::InvalidObservation,
                         "profiling interval checkpoint does not close");
         }

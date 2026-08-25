@@ -89,6 +89,8 @@ struct ProfilingRawIntervalFrame {
     std::string source_epoch_sha256;
     std::string owner_scope_set_sha256;
     std::string event_semantics_revision_sha256;
+    // All samples share a source generation equal to this watermark. This
+    // source order remains independent from the Server capture generation.
     ProfilingEventWatermark event_watermark;
     std::vector<ProfilingRawSample> samples;
 };
