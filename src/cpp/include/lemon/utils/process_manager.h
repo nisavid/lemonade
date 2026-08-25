@@ -1,16 +1,15 @@
 #pragma once
 
-#include <string>
-#include <vector>
+#include "lemon/utils/process_containment.h"
+#include "lemon/utils/process_handle.h"
+
 #include <functional>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace lemon {
 namespace utils {
-
-struct ProcessHandle {
-    void* handle;
-    int pid;
-};
 
 // Returns true to continue, false to kill the process
 using OutputLineCallback = std::function<bool(const std::string& line)>;
@@ -24,6 +23,32 @@ public:
         bool inherit_output = false,
         bool filter_health_logs = false,
         const std::vector<std::pair<std::string, std::string>>& env_vars = {});
+
+    static ProcessContainmentPrepareResult prepare_process_containment(
+        const ProcessContainmentRequest &request,
+        const ProcessContainmentOperationControl &control);
+
+    static ProcessContainmentStartResult start_process_contained(
+        PreparedProcessContainment &containment,
+        const std::string &executable,
+        const std::vector<std::string> &args,
+        const ProcessContainmentOperationControl &control,
+        const std::string &working_dir = "",
+        bool inherit_output = false,
+        bool filter_health_logs = false,
+        const std::vector<std::pair<std::string, std::string>> &env_vars = {});
+
+    static ProcessContainmentSnapshotResult snapshot_process_containment(
+        PreparedProcessContainment &containment,
+        const ProcessContainmentOperationControl &control);
+
+    static ProcessContainmentOperationResult kill_process_containment(
+        PreparedProcessContainment &containment,
+        std::chrono::milliseconds timeout);
+
+    static ProcessContainmentOperationResult release_process_containment(
+        PreparedProcessContainment &containment,
+        const ProcessContainmentOperationControl &control);
 
     // Blocks until process exits or callback returns false (which kills the process)
     // Returns exit code, or -1 if killed by callback

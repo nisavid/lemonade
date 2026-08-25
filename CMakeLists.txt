@@ -1026,6 +1026,7 @@ if(WIN32)
     list(APPEND SOURCES_CORE src/cpp/server/platform/metrics_windows.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/platform/suspend_stub.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/archive_windows.cpp)
+    list(APPEND SOURCES_CORE src/cpp/server/utils/platform/process_containment_stub.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/process_windows.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/network_windows.cpp)
 elseif(APPLE)
@@ -1035,6 +1036,7 @@ elseif(APPLE)
     list(APPEND SOURCES_CORE src/cpp/server/platform/metrics_macos.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/platform/suspend_stub.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/archive_unix.cpp)
+    list(APPEND SOURCES_CORE src/cpp/server/utils/platform/process_containment_stub.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/process_macos.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/network_unix.cpp)
     set_source_files_properties(src/cpp/server/macos_system_info.mm PROPERTIES LANGUAGE OBJCXX)
@@ -1044,6 +1046,8 @@ elseif(UNIX)
     list(APPEND SOURCES_CORE src/cpp/server/platform/metrics_linux.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/platform/suspend_linux.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/archive_unix.cpp)
+    list(APPEND SOURCES_CORE src/cpp/server/utils/platform/process_containment_linux.cpp)
+    list(APPEND SOURCES_CORE src/cpp/server/utils/platform/process_containment_linux_ops.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/process_linux.cpp)
     list(APPEND SOURCES_CORE src/cpp/server/utils/platform/network_unix.cpp)
 endif()
@@ -2576,6 +2580,8 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_executable(test_process_manager
             test/cpp/test_process_manager.cpp
             src/cpp/server/utils/process_manager.cpp
+            src/cpp/server/utils/platform/process_containment_linux.cpp
+            src/cpp/server/utils/platform/process_containment_linux_ops.cpp
             src/cpp/server/utils/platform/process_linux.cpp
         )
         target_include_directories(test_process_manager PRIVATE
@@ -2585,6 +2591,92 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         find_package(Threads REQUIRED)
         target_link_libraries(test_process_manager PRIVATE Threads::Threads)
         add_cpp_ci_test(ProcessManagerTest CI ON COMMAND test_process_manager)
+    endif()
+endif()
+
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_PROCESS_CONTAINMENT_LINUX_INTEGRATION_TEST_SRC
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_process_containment_linux_integration.cpp"
+    )
+    if(EXISTS "${_PROCESS_CONTAINMENT_LINUX_INTEGRATION_TEST_SRC}")
+        add_executable(test_process_containment_linux_integration
+            test/cpp/test_process_containment_linux_integration.cpp
+            src/cpp/server/utils/process_manager.cpp
+            src/cpp/server/utils/platform/process_containment_linux.cpp
+            src/cpp/server/utils/platform/process_containment_linux_ops.cpp
+            src/cpp/server/utils/platform/process_linux.cpp
+        )
+        target_include_directories(test_process_containment_linux_integration PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/utils
+            ${CMAKE_CURRENT_BINARY_DIR}/include
+        )
+        find_package(Threads REQUIRED)
+        target_link_libraries(test_process_containment_linux_integration PRIVATE Threads::Threads)
+        add_cpp_ci_test(
+            ProcessContainmentLinuxIntegration
+            CI OFF
+            COMMAND test_process_containment_linux_integration
+        )
+        set_tests_properties(ProcessContainmentLinuxIntegration PROPERTIES
+            SKIP_RETURN_CODE 77
+        )
+    endif()
+endif()
+
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_PROCESS_CONTAINMENT_TEST_SRC
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_process_containment.cpp"
+    )
+    if(EXISTS "${_PROCESS_CONTAINMENT_TEST_SRC}")
+        add_executable(test_process_containment
+            test/cpp/test_process_containment.cpp
+            src/cpp/server/utils/process_manager.cpp
+            src/cpp/server/utils/platform/process_containment_linux.cpp
+            src/cpp/server/utils/platform/process_containment_linux_ops.cpp
+            src/cpp/server/utils/platform/process_linux.cpp
+        )
+        target_include_directories(test_process_containment PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/utils
+            ${CMAKE_CURRENT_BINARY_DIR}/include
+        )
+        find_package(Threads REQUIRED)
+        target_link_libraries(test_process_containment PRIVATE Threads::Threads)
+        add_cpp_ci_test(
+            ProcessContainmentTest
+            CI ON
+            COMMAND test_process_containment
+        )
+    endif()
+endif()
+
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_PROCESS_CONTAINMENT_LINUX_DETERMINISTIC_TEST_SRC
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_process_containment_linux_deterministic.cpp"
+    )
+    if(EXISTS "${_PROCESS_CONTAINMENT_LINUX_DETERMINISTIC_TEST_SRC}")
+        add_executable(test_process_containment_linux_deterministic
+            test/cpp/test_process_containment_linux_deterministic.cpp
+            test/cpp/test_process_containment_linux_deterministic_races.cpp
+            test/cpp/process_containment_linux_fake_ops.cpp
+            src/cpp/server/utils/process_manager.cpp
+            src/cpp/server/utils/platform/process_containment_linux.cpp
+            src/cpp/server/utils/platform/process_linux.cpp
+        )
+        target_include_directories(test_process_containment_linux_deterministic PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/utils
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/cpp
+            ${CMAKE_CURRENT_BINARY_DIR}/include
+        )
+        find_package(Threads REQUIRED)
+        target_link_libraries(test_process_containment_linux_deterministic PRIVATE Threads::Threads)
+        add_cpp_ci_test(
+            ProcessContainmentLinuxDeterministic
+            CI ON
+            COMMAND test_process_containment_linux_deterministic
+        )
     endif()
 endif()
 
