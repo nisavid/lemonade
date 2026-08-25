@@ -526,20 +526,15 @@ void test_rejects_unsafe_evidence(TestState &state, Router &router) {
             value.workload_attestation = phase_bytes(std::move(phase));
         },
         ProfilingTransactionStatus::InvalidEvidence);
-    expect_rejected(
-        "external demand contamination is rejected",
-        [](auto &, auto &value) {
-            auto document = json::parse(value.workload_attestation);
-            auto &family = document["external_change_claims"][0];
-            family["completeness"] = "bounded";
-            family["entries"] = json::array({json{
-                {"amount", 1},
-                {"constraint_id", "gpu/gtt"},
-                {"unit", "bytes"},
-            }});
-            value.workload_attestation = document.dump();
-        },
-        ProfilingTransactionStatus::InvalidEvidence);
+
+    auto contaminated_phase = phase_draft(context(), ProfilingPhase::Workload);
+    contaminated_phase.external_change_claims = claims(4096);
+    auto contaminated =
+        seal_profiling_phase_attestation(std::move(contaminated_phase));
+    state.require(contaminated.status ==
+                      OverlayContractStatus::InvalidClaimClosure &&
+                      !contaminated.candidate.has_value(),
+                  "phase attestation accepted external-demand contamination");
 
     auto stale_options = options();
     stale_options.utc_now = [] { return "2026-08-23T10:06:00Z"; };

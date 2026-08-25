@@ -448,10 +448,8 @@ def _local_overlay_field_schema(
     if spec["type"] == "local_overlay_required_true":
         return {"const": True}
     if spec["type"] == "local_overlay_profiling_phase":
-        return _string_schema(
-            values=("baseline", "workload", "release"),
-            max_length=len("baseline"),
-        )
+        values = ("baseline", "workload", "release")
+        return _string_schema(values=values, max_length=max(map(len, values)))
     if spec["type"] == "local_overlay_profiling_health":
         return {"const": "valid"}
     if spec["type"] == "local_overlay_profiling_owner_coverage":
