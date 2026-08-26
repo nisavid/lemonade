@@ -542,12 +542,7 @@ public:
 
         const auto *release_result = release_guard.release();
         if (release_result == nullptr || !release_result->succeeded()) {
-            return finish_failed_capture(
-                select_capture_failure_diagnostic(
-                    workload_result, release_result,
-                    workload_observed_actionable_observer_failure.load(
-                        std::memory_order_acquire),
-                    {}));
+            return finish_after_release({});
         }
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -701,6 +696,8 @@ private:
             }
             condition_.notify_all();
         } catch (...) {
+            actionable_observer_failed_.store(
+                true, std::memory_order_release);
             fail_observer("profiling observer failed");
         }
     }
