@@ -423,6 +423,7 @@ struct DynamicIntervalScenario {
     };
     std::vector<DynamicFrameReading> release_events = {{100, 100}};
     std::shared_ptr<ReleaseSettleProbe> release_settle_probe;
+    std::shared_ptr<std::atomic<bool>> stall_reads_until_abort;
     std::optional<DynamicFrameReading> release_stability_event;
     std::optional<DynamicFrameReading> final_drain_event;
     bool throw_on_finish = false;
@@ -498,6 +499,17 @@ public:
                 ProfilingIntervalSourceError::Cancelled,
                 after_event_watermark,
                 "dynamic read cancelled");
+        }
+        while (scenario_.stall_reads_until_abort &&
+               scenario_.stall_reads_until_abort->load(
+                   std::memory_order_acquire)) {
+            if (should_abort && should_abort()) {
+                return failure_batch(
+                    ProfilingIntervalSourceError::Cancelled,
+                    after_event_watermark,
+                    "dynamic stalled read cancelled");
+            }
+            std::this_thread::yield();
         }
         std::lock_guard<std::mutex> lock(mutex_);
         ++read_calls_;
@@ -965,18 +977,16 @@ public:
 
 ProfilingWorkloadStepResult reported_step_result(
     ProfilingWorkloadStepStatus status,
-    std::string diagnostic) {
+    std::string_view diagnostic) noexcept {
     switch (status) {
     case ProfilingWorkloadStepStatus::Succeeded:
         return ProfilingWorkloadStepResult::success();
     case ProfilingWorkloadStepStatus::Cancelled:
-        return ProfilingWorkloadStepResult::cancelled(
-            std::move(diagnostic));
+        return ProfilingWorkloadStepResult::cancelled(diagnostic);
     case ProfilingWorkloadStepStatus::Failed:
-        return ProfilingWorkloadStepResult::failed(std::move(diagnostic));
+        return ProfilingWorkloadStepResult::failed(diagnostic);
     case ProfilingWorkloadStepStatus::Ambiguous:
-        return ProfilingWorkloadStepResult::ambiguous(
-            std::move(diagnostic));
+        return ProfilingWorkloadStepResult::ambiguous(diagnostic);
     default:
         return ProfilingWorkloadStepResult::ambiguous(
             "workload step returned an unknown result");
@@ -1020,6 +1030,167 @@ public:
     DynamicIntervalSource &source_;
     ProfilingWorkloadStepStatus run_status_;
     ProfilingWorkloadStepStatus release_status_;
+    std::size_t run_calls = 0;
+    std::size_t release_calls = 0;
+};
+
+enum class PretransitionFailureStep {
+    Run,
+    Release,
+};
+
+class PretransitionFailureDriver final : public ProfilingWorkloadDriver {
+public:
+    explicit PretransitionFailureDriver(
+        DynamicIntervalSource &source,
+        std::shared_ptr<std::atomic<bool>> stall_reads_until_abort,
+        PretransitionFailureStep failure_step)
+        : source_(source),
+          stall_reads_until_abort_(std::move(stall_reads_until_abort)),
+          failure_step_(failure_step) {}
+
+    ProfilingWorkloadStepResult run(
+        Router &,
+        const ProfilingTransactionContext &,
+        const ProfilingCancellationCheck &) override {
+        ++run_calls;
+        if (failure_step_ == PretransitionFailureStep::Release) {
+            source_.publish_workload();
+            return ProfilingWorkloadStepResult::success();
+        }
+        stall_reads_until_abort_->store(true, std::memory_order_release);
+        return ProfilingWorkloadStepResult::failed(
+            "model load failed before the workload transition");
+    }
+
+    ProfilingWorkloadStepResult release(
+        Router &,
+        const ProfilingTransactionContext &) noexcept override {
+        ++release_calls;
+        if (failure_step_ == PretransitionFailureStep::Release) {
+            stall_reads_until_abort_->store(
+                true, std::memory_order_release);
+            return ProfilingWorkloadStepResult::failed(
+                "model release failed before the release transition");
+        }
+        return ProfilingWorkloadStepResult::success();
+    }
+
+    DynamicIntervalSource &source_;
+    std::shared_ptr<std::atomic<bool>> stall_reads_until_abort_;
+    PretransitionFailureStep failure_step_;
+    std::size_t run_calls = 0;
+    std::size_t release_calls = 0;
+};
+
+class WorkloadBoundaryCancellation {
+public:
+    explicit WorkloadBoundaryCancellation(std::thread::id owner_thread)
+        : owner_thread_(owner_thread) {}
+
+    void arm() noexcept {
+        state_.store(State::Armed, std::memory_order_release);
+    }
+
+    bool should_abort() noexcept {
+        auto observed = state_.load(std::memory_order_acquire);
+        if (observed == State::Armed &&
+            std::this_thread::get_id() == owner_thread_) {
+            state_.compare_exchange_strong(
+                observed, State::OwnerCheckPassed,
+                std::memory_order_acq_rel);
+            return false;
+        }
+        if (observed == State::OwnerCheckPassed &&
+            std::this_thread::get_id() != owner_thread_) {
+            state_.store(State::Cancelled, std::memory_order_release);
+            return true;
+        }
+        return observed == State::Cancelled;
+    }
+
+    bool cancelled() const noexcept {
+        return state_.load(std::memory_order_acquire) == State::Cancelled;
+    }
+
+private:
+    enum class State {
+        Disarmed,
+        Armed,
+        OwnerCheckPassed,
+        Cancelled,
+    };
+
+    std::thread::id owner_thread_;
+    std::atomic<State> state_{State::Disarmed};
+};
+
+class BoundaryCancellationDriver final : public ProfilingWorkloadDriver {
+public:
+    BoundaryCancellationDriver(
+        DynamicIntervalSource &source,
+        WorkloadBoundaryCancellation &cancellation)
+        : source_(source), cancellation_(cancellation) {}
+
+    ProfilingWorkloadStepResult run(
+        Router &,
+        const ProfilingTransactionContext &,
+        const ProfilingCancellationCheck &) override {
+        ++run_calls;
+        source_.publish_workload();
+        cancellation_.arm();
+        return ProfilingWorkloadStepResult::success();
+    }
+
+    ProfilingWorkloadStepResult release(
+        Router &,
+        const ProfilingTransactionContext &) noexcept override {
+        ++release_calls;
+        return ProfilingWorkloadStepResult::ambiguous(
+            "workload release remained ambiguous after boundary cancellation");
+    }
+
+    DynamicIntervalSource &source_;
+    WorkloadBoundaryCancellation &cancellation_;
+    std::size_t run_calls = 0;
+    std::size_t release_calls = 0;
+};
+
+class DiagnosticPolicyDriver final : public ProfilingWorkloadDriver {
+public:
+    DiagnosticPolicyDriver(
+        std::atomic<bool> &caller_cancelled,
+        ProfilingWorkloadStepStatus run_status,
+        std::string_view run_diagnostic,
+        ProfilingWorkloadStepStatus release_status,
+        std::string_view release_diagnostic)
+        : caller_cancelled_(caller_cancelled), run_status_(run_status),
+          run_diagnostic_(run_diagnostic),
+          release_status_(release_status),
+          release_diagnostic_(release_diagnostic) {}
+
+    ProfilingWorkloadStepResult run(
+        Router &,
+        const ProfilingTransactionContext &,
+        const ProfilingCancellationCheck &) override {
+        ++run_calls;
+        caller_cancelled_.store(true, std::memory_order_release);
+        return reported_step_result(run_status_, run_diagnostic_);
+    }
+
+    ProfilingWorkloadStepResult release(
+        Router &,
+        const ProfilingTransactionContext &) noexcept override {
+        ++release_calls;
+        return reported_step_result(
+            release_status_, release_diagnostic_);
+    }
+
+    std::atomic<bool> &caller_cancelled_;
+    ProfilingWorkloadStepStatus run_status_;
+    std::string_view run_diagnostic_;
+    ProfilingWorkloadStepStatus release_status_;
+    std::string_view release_diagnostic_;
     std::size_t run_calls = 0;
     std::size_t release_calls = 0;
 };
@@ -1499,7 +1670,9 @@ void test_workload_failure_and_cancellation_close_the_interval(
         throwing_capture,
         "a workload exception publishes no lifecycle attestations");
     state.require(
-        throwing_driver.run_calls == 1 &&
+        throwing_capture.diagnostic ==
+                "profiling workload threw before reporting a result" &&
+            throwing_driver.run_calls == 1 &&
             throwing_driver.release_calls == 1 &&
             !throwing_driver.release_failed &&
             throwing_source.finish_calls() == 1 &&
@@ -1526,6 +1699,8 @@ void test_workload_failure_and_cancellation_close_the_interval(
         "caller cancellation publishes no lifecycle attestations");
     state.require(
         caller_cancelled.load(std::memory_order_acquire) &&
+            cancelled_capture.diagnostic ==
+                "workload release was not verified" &&
             cancelled_driver.run_calls == 1 &&
             cancelled_driver.release_calls == 1 &&
             !cancelled_driver.release_failed &&
@@ -1606,6 +1781,132 @@ void test_reported_workload_results_gate_phase_evidence(
                 source.observer_thread_exited(),
             reported_result_case.cleanup_message);
     }
+
+    struct DiagnosticPolicyCase {
+        ProfilingWorkloadStepStatus run_status;
+        std::string_view run_diagnostic;
+        ProfilingWorkloadStepStatus release_status;
+        std::string_view release_diagnostic;
+        std::string_view expected_diagnostic;
+    };
+    const std::array<DiagnosticPolicyCase, 5> diagnostic_policy_cases{{
+        {ProfilingWorkloadStepStatus::Failed,
+         "model load failed",
+         ProfilingWorkloadStepStatus::Ambiguous,
+         "workload release remained ambiguous",
+         "workload release remained ambiguous"},
+        {ProfilingWorkloadStepStatus::Failed,
+         "model load failed",
+         ProfilingWorkloadStepStatus::Ambiguous,
+         {},
+         "profiling workload release was not verified"},
+        {ProfilingWorkloadStepStatus::Failed,
+         "model load failed",
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         "model load failed"},
+        {ProfilingWorkloadStepStatus::Ambiguous,
+         {},
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         "profiling workload did not complete"},
+        {ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         "profiling interval capture cancelled"},
+    }};
+
+    for (const auto &diagnostic_policy_case : diagnostic_policy_cases) {
+        std::atomic<bool> caller_cancelled{false};
+        auto shared_clock = std::make_shared<SharedCaptureClock>();
+        DynamicIntervalSource source(derivation_contract, shared_clock);
+        DiagnosticPolicyDriver driver(
+            caller_cancelled, diagnostic_policy_case.run_status,
+            diagnostic_policy_case.run_diagnostic,
+            diagnostic_policy_case.release_status,
+            diagnostic_policy_case.release_diagnostic);
+        ProfilingCaptureAuthority authority(
+            derivation_contract, source, schedule(shared_clock));
+        const auto captured = authority.capture(
+            router, transaction_context, driver, [&] {
+                return caller_cancelled.load(std::memory_order_acquire);
+            });
+        require_empty_capture(
+            state, captured,
+            "a rejected diagnostic-policy case publishes no phase-evidence candidate");
+        state.require(
+            caller_cancelled.load(std::memory_order_acquire) &&
+                captured.diagnostic ==
+                    diagnostic_policy_case.expected_diagnostic &&
+                driver.run_calls == 1 && driver.release_calls == 1 &&
+                source.finish_calls() == 1 && !source.active() &&
+                source.observer_thread_exited(),
+            "diagnostic policy preserves release, workload, and cancellation precedence with exact cleanup");
+    }
+}
+
+void test_reported_step_failure_stops_before_boundary_wait(
+    TestState &state,
+    Router &router) {
+    const auto derivation_contract = contract();
+    const auto transaction_context = context(derivation_contract);
+    for (const auto failure_step : {
+             PretransitionFailureStep::Run,
+             PretransitionFailureStep::Release,
+         }) {
+        auto stalled_reads = std::make_shared<std::atomic<bool>>(false);
+        DynamicIntervalScenario scenario;
+        scenario.stall_reads_until_abort = stalled_reads;
+        auto shared_clock = std::make_shared<SharedCaptureClock>();
+        DynamicIntervalSource source(
+            derivation_contract, shared_clock, std::move(scenario));
+        PretransitionFailureDriver driver(
+            source, stalled_reads, failure_step);
+        ProfilingCaptureAuthority authority(
+            derivation_contract, source, schedule(shared_clock));
+
+        const auto captured = authority.capture(
+            router, transaction_context, driver, [] { return false; });
+
+        require_empty_capture(
+            state, captured,
+            "a pre-transition step failure publishes no phase-evidence candidate");
+        state.require(
+            driver.run_calls == 1 && driver.release_calls == 1 &&
+                source.finish_calls() == 1 && !source.active() &&
+                source.observer_thread_exited(),
+            "a pre-transition step failure stops observation and cleans up without waiting for a phase boundary");
+    }
+}
+
+void test_boundary_cancellation_preserves_release_ambiguity(
+    TestState &state,
+    Router &router) {
+    const auto derivation_contract = contract();
+    const auto transaction_context = context(derivation_contract);
+    auto shared_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource source(derivation_contract, shared_clock);
+    WorkloadBoundaryCancellation cancellation(std::this_thread::get_id());
+    BoundaryCancellationDriver driver(source, cancellation);
+    ProfilingCaptureAuthority authority(
+        derivation_contract, source, schedule(shared_clock));
+
+    const auto captured = authority.capture(
+        router, transaction_context, driver,
+        [&cancellation] { return cancellation.should_abort(); });
+
+    require_empty_capture(
+        state, captured,
+        "workload-boundary cancellation publishes no phase-evidence candidate");
+    state.require(
+        cancellation.cancelled() &&
+            captured.diagnostic ==
+                "workload release remained ambiguous after boundary cancellation" &&
+            driver.run_calls == 1 && driver.release_calls == 1 &&
+            source.finish_calls() == 1 && !source.active() &&
+            source.observer_thread_exited(),
+        "workload-boundary cancellation preserves release ambiguity and cleans up exactly once");
 }
 
 void test_predispatch_abort_never_enters_workload_ownership(
@@ -1857,6 +2158,10 @@ int main() {
         test_workload_failure_and_cancellation_close_the_interval(
             state, router);
         test_reported_workload_results_gate_phase_evidence(state, router);
+        test_reported_step_failure_stops_before_boundary_wait(
+            state, router);
+        test_boundary_cancellation_preserves_release_ambiguity(
+            state, router);
         test_predispatch_abort_never_enters_workload_ownership(
             state, router);
         test_release_settling_abort_closes_owned_workload(state, router);
