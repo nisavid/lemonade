@@ -623,6 +623,11 @@ void require_profiling_input_codec() {
     require_rejected(parse_profiling_input(" " + canonical),
                      OverlayContractStatus::NonCanonical,
                      "profiling input accepted noncanonical whitespace");
+    require_rejected(
+        parse_profiling_input(tamper_once(canonical, "\"minor\":0",
+                                          "\"minor\":-0")),
+        OverlayContractStatus::NonCanonical,
+        "profiling input did not defer signed zero to canonical-byte checking");
     require_rejected(parse_profiling_input("{"),
                      OverlayContractStatus::MalformedJson,
                      "profiling input accepted malformed JSON");
