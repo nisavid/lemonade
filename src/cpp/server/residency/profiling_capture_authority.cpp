@@ -98,6 +98,7 @@ ProfilingTransactionCapture capture_failure(std::string_view diagnostic) {
 std::string_view select_capture_failure_diagnostic(
     const ProfilingWorkloadStepResult &workload_result,
     const ProfilingWorkloadStepResult *release_result,
+    bool workload_observed_actionable_observer_failure,
     std::string_view fallback_diagnostic) noexcept {
     if (release_result == nullptr) {
         return "profiling workload release was not verified";
@@ -108,6 +109,7 @@ std::string_view select_capture_failure_diagnostic(
                          "profiling workload release was not verified"}
                    : release_result->diagnostic();
     }
+    if (workload_observed_actionable_observer_failure) return {};
     if (!workload_result.succeeded()) {
         return workload_result.diagnostic().empty()
                    ? std::string_view{
@@ -475,12 +477,24 @@ public:
         WorkloadReleaseGuard release_guard(router_, context_, workload_);
         auto workload_result = ProfilingWorkloadStepResult::ambiguous(
             "profiling workload result was not reported");
+        std::atomic<bool> workload_observed_actionable_observer_failure{
+            false};
         release_guard.enter();
         try {
-            workload_result = workload_.run(router_, context_, [this] {
-                return observer_failed_.load(std::memory_order_acquire) ||
-                       cancelled(should_abort_);
-            });
+            workload_result = workload_.run(
+                router_, context_,
+                [this,
+                 &workload_observed_actionable_observer_failure] {
+                    const bool observer_failed = observer_failed_.load(
+                        std::memory_order_acquire);
+                    if (observer_failed &&
+                        actionable_observer_failed_.load(
+                            std::memory_order_acquire)) {
+                        workload_observed_actionable_observer_failure.store(
+                            true, std::memory_order_release);
+                    }
+                    return observer_failed || cancelled(should_abort_);
+                });
         } catch (...) {
             workload_result = ProfilingWorkloadStepResult::ambiguous(
                 "profiling workload threw before reporting a result");
@@ -491,16 +505,14 @@ public:
                 return finish_failed_capture(
                     select_capture_failure_diagnostic(
                         workload_result, release_result,
+                        workload_observed_actionable_observer_failure.load(
+                            std::memory_order_acquire),
                         fallback_diagnostic));
             };
         const bool capture_cancelled = cancelled(should_abort_);
         if (capture_cancelled) {
             return finish_after_release(
-                actionable_observer_failed_.load(
-                    std::memory_order_acquire)
-                    ? std::string_view{}
-                    : std::string_view{
-                          "profiling interval capture cancelled"});
+                "profiling interval capture cancelled");
         }
         if (!workload_result.succeeded()) {
             return finish_after_release({});
@@ -532,7 +544,10 @@ public:
         if (release_result == nullptr || !release_result->succeeded()) {
             return finish_failed_capture(
                 select_capture_failure_diagnostic(
-                    workload_result, release_result, {}));
+                    workload_result, release_result,
+                    workload_observed_actionable_observer_failure.load(
+                        std::memory_order_acquire),
+                    {}));
         }
         {
             std::lock_guard<std::mutex> lock(mutex_);
