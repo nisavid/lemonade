@@ -141,8 +141,10 @@ consistency rather than three independent sensors. The current AMD SMI CLI
 [selects the APU memory type](https://github.com/ROCm/rocm-systems/blob/920418c4848ee640db2ee9997ddefe81a5043e32/projects/amdsmi/amdsmi_cli/amdsmi_helpers.py#L1295-L1355)
 and calls the
 [public memory-usage API](https://github.com/ROCm/rocm-systems/blob/920418c4848ee640db2ee9997ddefe81a5043e32/projects/amdsmi/amdsmi_cli/subcommands/default.py#L195-L215);
-the lower-level implementation
-[maps `RSMI_MEM_TYPE_GTT` to `mem_info_gtt_used` and reads it](https://github.com/ROCm/rocm-systems/blob/920418c4848ee640db2ee9997ddefe81a5043e32/projects/amdsmi/rocm_smi/src/rocm_smi.cc#L4270-L4340).
+the lower-level implementation maps
+[`kDevMemUsedGTT` to `mem_info_gtt_used`](https://github.com/ROCm/rocm-systems/blob/920418c4848ee640db2ee9997ddefe81a5043e32/projects/amdsmi/rocm_smi/src/rocm_smi_device.cc#L102-L107),
+then maps `RSMI_MEM_TYPE_GTT` to that attribute and
+[reads it](https://github.com/ROCm/rocm-systems/blob/920418c4848ee640db2ee9997ddefe81a5043e32/projects/amdsmi/rocm_smi/src/rocm_smi.cc#L4270-L4340).
 
 The fork's Linux status metric reads the same GTT attribute, but on an APU it
 sums GTT and VRAM used bytes before the renderer labels the value `VRAM`. It is
