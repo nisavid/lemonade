@@ -1,6 +1,7 @@
-# Linux AMD GTT whole-interval evidence
+# Linux AMD GTT interval and differential evidence
 
 Research snapshot: 2026-08-26 UTC
+Decision recheck: 2026-08-26 UTC
 
 Repository baselines:
 
@@ -9,15 +10,24 @@ Repository baselines:
 - Linux stable tag `v7.1.8`: `25c76bea853d0db65b51fb4697a47cbfd9e35e76`;
 - Linux mainline research snapshot: `45c13f3f9e3bb15fd89ff2864c6f627a3b4b4229`.
 
+The decision recheck compared current upstream `main` at
+`92fe3aa88998fb94f8614da4859bac8fc3476ef0`; none of the relevant Lemonade
+metric or system-information paths changed after the research baseline.
+
 ## Answer
 
-No evaluated stable Linux, DRM, ROCm, or Lemonade interface can supply the
-accepted activation-capable interval for Hatchery's AMD GTT domain. The current
-interfaces divide into point observations, incomplete event streams, and
-enforcement mechanisms that do not cover AMD GTT. Their safe common evidence
-ceiling is non-authorizing observation. The cell must remain unavailable or use
-its cataloged fallback unless a later decision selects and qualifies a different
-whole-interval boundary.
+No evaluated stable Linux, DRM, ROCm, or Lemonade interface can supply a
+mutation-complete profiling observation interval for Hatchery's AMD GTT domain.
+The current interfaces divide into authoritative point observations, incomplete
+event streams, and enforcement mechanisms that do not cover AMD GTT. This
+prevents treating a poller as the existing dense interval source; it does not
+make point observations diagnostic-only under every evidence boundary.
+
+The selected first-release boundary permits repeated controlled differential
+points to authorize an exact-fingerprint retained-GTT calibration. It does not
+let that retained result stand in for an unobserved load or request transient.
+Full admission authority still requires a separately complete conservative
+lifecycle envelope.
 
 The accepted source contract requires one atomic registration/checkpoint
 boundary, a source epoch, a dense watermark that advances exactly once for every
@@ -34,13 +44,70 @@ record acquisitions, not resource mutations; incrementing only when values diffe
 would erase the intervening allocation. Neither convention can detect the lost
 history.
 
+## Selected first-release boundary
+
+The activation-capable point boundary is a Server-owned differential
+retained-footprint calibration, not a sampled interval. It binds the exact
+deployment, boot, device, kernel and driver, backend and dependency closure,
+model artifact, normalized configuration, workload, containment, and catalog
+identities. The Server exclusively owns the intervention and queues competing
+Lemonade model work.
+
+Before each boot epoch, the existing
+[campaign noise procedure](hatchery-campaign-parameters.md#noise-and-baseline-procedure)
+uses no-target controls to freeze the maximum quiescent GTT plateau range plus
+read and timing uncertainty as `N_gtt`; attribution uncertainty remains the
+disjoint `X_gtt` term. The campaign revision freezes `N_gtt`, `X_gtt`, one
+nonnegative safety margin `M_gtt`, positive calibration and validation
+repetition counts, and their disjoint partition before any model observation.
+It also freezes the plateau selection rule: 50 ms nominal cadence, at most
+100 ms between read initiations, an exact five-second contiguous window, and at
+least 50 valid points per plateau. Each window begins with the first scheduled
+acquisition on or after the Server-owned phase-ready marker and includes every
+scheduled acquisition whose start falls before the five-second end boundary.
+The baseline, load, and release markers are respectively emitted after the
+exclusive gate becomes quiescent, after the model load reports completion, and
+after release reports completion. A window is stable only when every read and
+identity check succeeds, its maximum minus minimum GTT use is at most `N_gtt`,
+and no actor identity changes. A gap, invalid point, wider range, or actor
+change rejects the repetition; collection never resets or selects a later
+favorable subwindow.
+
+Every repetition performs stable baseline -> loaded plateau -> verified
+release, with multiple authoritative `mem_info_gtt_used` points at each plateau.
+For calibration repetition `r`, checked signed arithmetic derives
+`D_r = max(loaded_r) - min(baseline_r)`. Every `D_r` must be nonnegative; let
+`D_gtt` be their maximum in the frozen calibration partition. The candidate
+retained bound is `B_retained_gtt = D_gtt + N_gtt + X_gtt + M_gtt`, with checked
+addition. Every disjoint validation repetition derives the same checked delta,
+which must remain at or below that bound. For every repetition, form the release
+envelope from that repetition's pre-load plateau as
+`[max(0, min(baseline_r) - N_gtt), max(baseline_r) + N_gtt]`, rejecting upper
+overflow; every post-release point must lie inside it. A validation exceedance
+rejects the candidate and cannot enlarge the same revision. Identity drift,
+background movement beyond the allowance, missing release, or arithmetic
+failure also rejects the whole transaction.
+
+The bound is never an average or percentile. DRM fdinfo is owner-corroboration
+evidence when it is complete; missing process attribution is recorded rather
+than converted to zero and does not change the global counter's point accuracy.
+The causal attribution comes from the exclusive Server-owned A-B-A intervention
+and its release closure.
+
+This result covers stable retained GTT occupancy only. The catalog must supply a
+separate conservative bound for startup, load, prompt processing, generation,
+allocator, and overlap transients before the result can participate in a
+complete admission manifest. Point sampling may corroborate or falsify that
+separately justified envelope and its residual, but it cannot prove their
+completeness or claim mutation-complete history.
+
 ## Candidate assessment
 
 | Candidate | Strongest supported claim | Missing contract properties | Fail-closed disposition |
 | --- | --- | --- | --- |
-| Fork AMD GTT point source | One global point bracketed by two contained-owner scans for a stable process/descriptor set, with shared GTT rejected | Global and owner counters are not one kernel-atomic snapshot; no resource epoch, mutation cursor, retained history, atomic interval begin, or drain | Keep as a point source; never adapt it to the interval authority by polling |
-| Upstream Lemonade, `mem_info_gtt_used`, libdrm, ROCm SMI, or AMD SMI point queries | Current per-device or per-process usage | No whole-interval history; process totals do not close the device domain | Diagnostics and fresh checkpoints only |
-| DRM fdinfo | Current resident usage per DRM client, with explicit shared usage | No subscription, ordering, epoch, or loss signal; shared objects make client sums non-additive | Owner projection at a point only; reject ambiguous sharing |
+| Fork AMD GTT point source | One global point bracketed by two contained-owner scans for a stable process/descriptor set, with shared GTT rejected | Global and owner counters are not one kernel-atomic snapshot; no resource epoch, mutation cursor, retained history, atomic interval begin, or drain | Retain as a point source; the Server may compose its points into differential calibration but never adapt it into an interval cursor |
+| Upstream Lemonade, `mem_info_gtt_used`, libdrm, ROCm SMI, or AMD SMI point queries | Authoritative current per-device or per-process usage | No mutation-complete history; process totals do not close the device domain | Global GTT points may enter the differential retained-footprint boundary; otherwise diagnostics and checkpoints only |
+| DRM fdinfo | Current resident usage per DRM client, with explicit shared usage | No subscription, ordering, epoch, or loss signal; shared objects make client sums non-additive | Corroborate owner attribution when complete; reject ambiguity rather than infer zero |
 | ROCprofiler HIP/HSA allocation and KFD event tracing | Target-process API allocations plus selected SVM migration, mapping, fault, queue, and dropped-event records | Does not cover every TTM GTT resource-manager mutation or every external DRM client; API allocation is not committed physical placement | Correlation evidence only |
 | AMDGPU tracepoints through tracefs/perf | Selected BO creation, requested move, VM, and submission activity; trace-buffer transport loss can be detected | Existing events do not describe each committed GTT counter change, complete device identity, and stable owner projection; `amdgpu_bo_move` fires before the move | Exact-kernel diagnostic trace only |
 | Generic `gpu_mem_total` tracepoint | Its schema represents GPU-memory allocation, free, import, and unimport by GPU id, PID, and size | AMDGPU does not emit it; PID still lacks a stable owner generation and atomic subscription baseline | Unavailable for AMD GTT |
@@ -66,6 +133,24 @@ owner projection. See
 [`amdgpu_kms.c`](https://github.com/torvalds/linux/blob/45c13f3f9e3bb15fd89ff2864c6f627a3b4b4229/drivers/gpu/drm/amd/amdgpu/amdgpu_kms.c#L803-L812)
 and
 [`ttm_resource.c`](https://github.com/torvalds/linux/blob/45c13f3f9e3bb15fd89ff2864c6f627a3b4b4229/drivers/gpu/drm/ttm/ttm_resource.c#L617-L635).
+
+AMD SMI maps its GTT usage query to `mem_info_gtt_used`; a tool using
+`AMDGPU_INFO_GTT_USAGE` reaches the same TTM manager value through the ioctl
+above. Agreement among those tools therefore confirms path and value
+consistency rather than three independent sensors. The current AMD SMI CLI
+[selects the APU memory type](https://github.com/ROCm/rocm-systems/blob/920418c4848ee640db2ee9997ddefe81a5043e32/projects/amdsmi/amdsmi_cli/amdsmi_helpers.py#L1295-L1355)
+and calls the
+[public memory-usage API](https://github.com/ROCm/rocm-systems/blob/920418c4848ee640db2ee9997ddefe81a5043e32/projects/amdsmi/amdsmi_cli/subcommands/default.py#L195-L215);
+the lower-level implementation
+[maps `RSMI_MEM_TYPE_GTT` to `mem_info_gtt_used` and reads it](https://github.com/ROCm/rocm-systems/blob/920418c4848ee640db2ee9997ddefe81a5043e32/projects/amdsmi/rocm_smi/src/rocm_smi.cc#L4270-L4340).
+
+The fork's Linux status metric reads the same GTT attribute, but on an APU it
+sums GTT and VRAM used bytes before the renderer labels the value `VRAM`. It is
+a useful global GPU-memory corroboration, while a direct
+`mem_info_gtt_used` read is the precise GTT-only input. See
+[`metrics_linux.cpp`](https://github.com/nisavid/lemonade/blob/f0e172f5500c32128dd0eb64b512b5efb0bf97df/src/cpp/server/platform/metrics_linux.cpp#L19-L39)
+and its
+[`GTT read`](https://github.com/nisavid/lemonade/blob/f0e172f5500c32128dd0eb64b512b5efb0bf97df/src/cpp/server/platform/metrics_linux.cpp#L146-L188).
 
 DRM fdinfo defines `drm-resident-<region>` as a client's currently resident
 buffers. Its deprecated amdgpu `drm-memory-<region>` key is an alias. A separate
@@ -273,10 +358,10 @@ interval for this shared integrated-GPU cell: the guest or rebound driver still
 creates unattributed GTT demand, and the topology itself supplies no mutation
 ledger, target projection, or history-loss detector.
 
-## What would clear the gate
+## What would clear the mutation-complete interval gate
 
 One of these two kernel/driver authorities would need to exist and be qualified
-for the exact deployment before activation:
+for the exact deployment before claiming mutation-complete interval evidence:
 
 1. **Event authority.** AMDGPU or TTM exposes a stable device-bound source epoch,
    an atomic subscribe-plus-current-GTT checkpoint, one globally ordered dense
@@ -291,19 +376,40 @@ for the exact deployment before activation:
    or represented by an equally complete domain boundary; and process exit,
    cgroup teardown, reset, and release are explicitly drained and verified.
 
-The second route could justify a new enforced-bound policy even without replaying
-every mutation, but it would be a deliberate evidence-boundary decision. It must
-not be represented as satisfying the existing dense-event contract.
+The second route could justify an enforced-bound policy without replaying every
+mutation, but it must not be represented as satisfying the existing dense-event
+contract. Neither route is required for the narrower differential
+retained-footprint boundary selected for the first release.
 
-## Decision input
+## Decision
 
-The evidence decision can now distinguish three truthful states:
+[Choose the first-release whole-interval evidence boundary](https://github.com/nisavid/lemonade/issues/139)
+keeps two claims separate for the first release:
 
-- retain the current strict interval contract and keep this exact cell
-  non-authorizing;
-- fund a kernel/driver event authority before activation; or
-- define and qualify a distinct dmem-based enforced-bound authority after AMDGPU
-  exposes complete GTT charging.
+- controlled A-B-A global GTT points may authorize an exact-fingerprint
+  differential retained-footprint calibration when the Server owns the
+  intervention and every identity, stability, noise, uncertainty, and release
+  check passes;
+- the complete load and request transient envelope remains a separate cataloged
+  conservative bound, and a mutation-complete source remains an optional
+  stronger future authority.
+
+[Implement the isolated residency profiling transaction](https://github.com/nisavid/lemonade/issues/120)
+therefore retains activation-capable scope but splits its evidence model. The
+differential path may produce only the retained GTT component; the transaction
+may activate it only when a separately complete transient envelope and every
+other required claim family close the admission manifest. The existing dense
+interval path remains a stronger alternate source, while the point adapter can
+never serve as that complete interval capture authority.
+
+The differential retained result is method-specific component evidence, not a
+confidence class. Under a catalog-preauthorized local-instantiation rule, the
+completed composite manifest may carry `calibrated_instance` confidence only
+after the separate transient envelope and every non-footprint claim close. The
+overlay does not change shared catalog confidence, grants no portable predictor
+authority, and cannot generalize to another model or operation.
 
 No current fact supports converting point polling, AMDGPU tracepoints,
-ROCprofiler records, or device-access isolation into an activation cursor.
+ROCprofiler records, or device-access isolation into an activation cursor. The
+differential method instead derives one explicitly narrower retained effect
+from a controlled intervention and never claims to have observed every mutation.
