@@ -496,7 +496,11 @@ public:
         const bool capture_cancelled = cancelled(should_abort_);
         if (capture_cancelled) {
             return finish_after_release(
-                "profiling interval capture cancelled");
+                actionable_observer_failed_.load(
+                    std::memory_order_acquire)
+                    ? std::string_view{}
+                    : std::string_view{
+                          "profiling interval capture cancelled"});
         }
         if (!workload_result.succeeded()) {
             return finish_after_release({});
@@ -706,6 +710,11 @@ private:
             const auto polled = recorder_.poll(
                 [this] { return observer_should_abort(); });
             if (!polled.ok()) {
+                if (polled.status !=
+                    ProfilingIntervalRecorderStatus::Cancelled) {
+                    actionable_observer_failed_.store(
+                        true, std::memory_order_release);
+                }
                 fail_observer(polled.diagnostic.empty()
                                   ? "profiling workload observation failed"
                                   : polled.diagnostic);
@@ -944,6 +953,7 @@ private:
     std::mutex mutex_;
     std::condition_variable condition_;
     SharedState state_;
+    std::atomic<bool> actionable_observer_failed_{false};
     std::atomic<bool> observer_failed_{false};
     bool stop_requested_ = false;
     std::string diagnostic_;
