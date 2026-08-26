@@ -21,7 +21,7 @@ from .contract import (
 from .path import _path_tokens
 
 EXPECTED_REGISTRY_DIGEST = (
-    "344cea1742fb10f23b4a8c173315f76be8f735c95e5b145ef451cb58ed6289b3"
+    "6f1ecdfe73bbfc0cf0443aad9033e7ac241931621c6f49e3589dbf1fbc0159cb"
 )
 EXPECTED_REGISTRY_KEYS = [
     "schema",

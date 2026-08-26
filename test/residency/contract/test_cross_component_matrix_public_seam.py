@@ -15,7 +15,7 @@ from typing import Any
 repo_root = Path(__file__).resolve().parents[3]
 failure = "TASK-013 residency cross-component matrix is unavailable\n"
 expected_catalog_sha256 = (
-    "6bccfe672b0531ce9be71aaf7eeeaa2136ae170b0c965bc01acf1a5a4236f2a5"
+    "745ef80ee43157cca3b94edfc4d2f26bb76356e631defde98c83efd8215fb1c1"
 )
 generated_paths = (
     "docs/api/schemas/residency/artifact_quarantine_record.schema.json",

@@ -1,9 +1,11 @@
+#include "durable_local_overlay_test_factory.h"
 #include "journal_persistence_test_support.h"
 #include "lemon/residency/durable_local_overlay.h"
 
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -180,7 +182,9 @@ ParsedProfilingInputEnvelope profile_for(std::string deployment_id,
                                          std::uint64_t sequence,
                                          const ObservationBundle &observations,
                                          std::string fresh_until =
-                                             "2026-08-23T10:05:00Z") {
+                                             "2026-08-23T10:05:00Z",
+                                         char ownership_recovery_digest = 'c',
+                                         char action_lease_digest = 'd') {
     ProfilingInputEnvelopeDraft draft;
     draft.schema = supported_profiling_input_schema;
     draft.deployment_id = std::move(deployment_id);
@@ -195,8 +199,10 @@ ParsedProfilingInputEnvelope profile_for(std::string deployment_id,
     method_evidence.release_observation_sha256 = observations.release_sha256;
     draft.method_evidence = std::move(method_evidence);
     draft.completion.manifest_claims = claims(4096);
-    draft.completion.ownership_recovery_evidence_sha256 = digest('c');
-    draft.completion.action_lease_closure_sha256 = digest('d');
+    draft.completion.ownership_recovery_evidence_sha256 =
+        digest(ownership_recovery_digest);
+    draft.completion.action_lease_closure_sha256 =
+        digest(action_lease_digest);
     draft.observation_contract_sha256 = digest('e');
     draft.predictor_contract_sha256 = digest('f');
     draft.observed_at = "2026-08-23T10:00:00Z";
@@ -334,32 +340,50 @@ LocalOverlayStoreLimits generous_limits() {
     return LocalOverlayStoreLimits{64 * 1024, 128};
 }
 
-LocalOverlayStoreResult
-activate_qualification(LocalOverlayStore &store,
-                       PublishedLocalOverlay &&expected,
-                       ParsedProfilingInputEnvelope profile,
-                       ParsedLocalOverlayObject overlay,
-                       ObservationBundle observations, char decision_trace,
-                       std::string activated_at) {
-    return store.activate(
-        std::move(expected),
-        LocalOverlayActivation::qualification(
-            std::move(profile), std::move(overlay),
-            std::move(observations.baseline),
-            std::move(observations.workload),
-            std::move(observations.release), digest(decision_trace),
-            std::move(activated_at)));
+LocalOverlayActivation qualification_candidate(
+    ParsedProfilingInputEnvelope profile, ParsedLocalOverlayObject overlay,
+    ObservationBundle observations, char decision_trace,
+    std::string activated_at) {
+    return LocalOverlayActivation::unresolved_qualification(
+        std::move(profile), std::move(overlay),
+        std::move(observations.baseline), std::move(observations.workload),
+        std::move(observations.release), digest(decision_trace),
+        std::move(activated_at));
 }
 
-LocalOverlayStoreResult
-qualify(LocalOverlayStore &store, PublishedLocalOverlay &&expected,
-        std::uint64_t sequence, char decision_trace,
-        std::string activated_at) {
+LocalOverlayStoreResult activate_resolved_fixture_qualification(
+    LocalOverlayStore &store, PublishedLocalOverlay &&expected,
+    ParsedProfilingInputEnvelope profile, ParsedLocalOverlayObject overlay,
+    ObservationBundle observations, char decision_trace,
+    std::string activated_at) {
+    auto activation = qualification_candidate(
+        std::move(profile), std::move(overlay), std::move(observations),
+        decision_trace, std::move(activated_at));
+    activation = detail::LocalOverlayStoreTestFactory::resolve_qualification(
+        std::move(activation));
+    return store.activate(std::move(expected), std::move(activation));
+}
+
+LocalOverlayStoreResult activate_unresolved_qualification(
+    LocalOverlayStore &store, PublishedLocalOverlay &&expected,
+    ParsedProfilingInputEnvelope profile, ParsedLocalOverlayObject overlay,
+    ObservationBundle observations, char decision_trace,
+    std::string activated_at) {
+    return store.activate(
+        std::move(expected),
+        qualification_candidate(
+            std::move(profile), std::move(overlay), std::move(observations),
+            decision_trace, std::move(activated_at)));
+}
+
+LocalOverlayStoreResult qualify_resolved_storage_fixture(
+    LocalOverlayStore &store, PublishedLocalOverlay &&expected,
+    std::uint64_t sequence, char decision_trace, std::string activated_at) {
     const auto deployment_id = std::string(expected.deployment_id());
     auto observations = observations_for(sequence);
     auto profile = profile_for(deployment_id, sequence, observations);
     auto overlay = overlay_for(profile);
-    return activate_qualification(
+    return activate_resolved_fixture_qualification(
         store, std::move(expected), std::move(profile), std::move(overlay),
         std::move(observations), decision_trace, std::move(activated_at));
 }
@@ -382,8 +406,9 @@ published_fixture(PlatformContract platform = PlatformContract::Linux) {
     require(empty.status == LocalOverlayStoreStatus::Empty &&
                 empty.authority.has_value(),
             "published fixture did not start empty");
-    auto activated = qualify(store, std::move(*empty.authority), 1, '4',
-                             "2026-08-23T10:02:00Z");
+    auto activated = qualify_resolved_storage_fixture(
+        store, std::move(*empty.authority), 1, '4',
+        "2026-08-23T10:02:00Z");
     require(activated.status == LocalOverlayStoreStatus::Activated &&
                 activated.authority.has_value() &&
                 activated.authority->active_overlay() != nullptr,
@@ -414,10 +439,12 @@ void require_empty_activate_and_same_deployment_visibility() {
     auto profile = profile_for(deployment_id, 1, observations);
     auto overlay = overlay_for(profile);
     const auto overlay_sha256 = std::string(overlay.checksum_sha256());
-    auto activation = LocalOverlayActivation::qualification(
+    auto activation = LocalOverlayActivation::unresolved_qualification(
         std::move(profile), std::move(overlay), observations.baseline,
         observations.workload, observations.release, digest('4'),
         "2026-08-23T10:02:00Z");
+    activation = detail::LocalOverlayStoreTestFactory::resolve_qualification(
+        std::move(activation));
     auto activated = store.activate(std::move(*empty.authority),
                                     std::move(activation));
     require(activated.status == LocalOverlayStoreStatus::Activated &&
@@ -578,16 +605,18 @@ void require_stale_cas_conflicts_before_object_writes() {
                 second.authority.has_value(),
             "two empty readers did not receive CAS capabilities");
 
-    auto winner = qualify(first_store, std::move(*first.authority), 1, '4',
-                          "2026-08-23T10:02:00Z");
+    auto winner = qualify_resolved_storage_fixture(
+        first_store, std::move(*first.authority), 1, '4',
+        "2026-08-23T10:02:00Z");
     require(winner.status == LocalOverlayStoreStatus::Activated &&
                 winner.authority.has_value(),
             "first fake-store activation did not publish");
     const auto committed_root = std::string(winner.authority->root_bytes());
 
     storage.reset_observations();
-    auto loser = qualify(second_store, std::move(*second.authority), 1, '5',
-                         "2026-08-23T10:03:00Z");
+    auto loser = qualify_resolved_storage_fixture(
+        second_store, std::move(*second.authority), 1, '5',
+        "2026-08-23T10:03:00Z");
     const auto after = storage.snapshot();
     require(loser.status == LocalOverlayStoreStatus::ConflictBeforeWrite &&
                 !loser.authority.has_value() &&
@@ -605,16 +634,18 @@ void require_full_history_rejects_qualification_before_writes() {
                 empty.authority.has_value(),
             "history-limit fixture did not start empty");
 
-    auto first = qualify(store, std::move(*empty.authority), 1, '4',
-                         "2026-08-23T10:02:00Z");
+    auto first = qualify_resolved_storage_fixture(
+        store, std::move(*empty.authority), 1, '4',
+        "2026-08-23T10:02:00Z");
     require(first.status == LocalOverlayStoreStatus::Activated &&
                 first.authority.has_value(),
             "history-limit fixture did not publish its only root");
     const auto first_root = std::string(first.authority->root_bytes());
 
     storage.reset_observations();
-    auto rejected = qualify(store, std::move(*first.authority), 2, '5',
-                            "2026-08-23T10:04:00Z");
+    auto rejected = qualify_resolved_storage_fixture(
+        store, std::move(*first.authority), 2, '5',
+        "2026-08-23T10:04:00Z");
     const auto after = storage.snapshot();
     require(rejected.status == LocalOverlayStoreStatus::LimitExceeded &&
                 !rejected.authority.has_value() &&
@@ -640,16 +671,18 @@ void require_full_history_rejects_rollback_before_writes() {
                 empty.authority.has_value(),
             "rollback history-limit fixture did not start empty");
 
-    auto first = qualify(store, std::move(*empty.authority), 1, '4',
-                         "2026-08-23T10:02:00Z");
+    auto first = qualify_resolved_storage_fixture(
+        store, std::move(*empty.authority), 1, '4',
+        "2026-08-23T10:02:00Z");
     require(first.status == LocalOverlayStoreStatus::Activated &&
                 first.authority.has_value(),
             "rollback history-limit fixture did not publish sequence one");
     const auto first_root = std::string(first.authority->root_bytes());
     const auto first_overlay =
         std::string(first.authority->active_overlay()->checksum_sha256());
-    auto second = qualify(store, std::move(*first.authority), 2, '5',
-                          "2026-08-23T10:04:00Z");
+    auto second = qualify_resolved_storage_fixture(
+        store, std::move(*first.authority), 2, '5',
+        "2026-08-23T10:04:00Z");
     require(second.status == LocalOverlayStoreStatus::Activated &&
                 second.authority.has_value(),
             "rollback history-limit fixture did not fill its history");
@@ -681,7 +714,8 @@ void require_observation_admission_fails_before_writes() {
     for (const auto failure : {LocalOverlayStoreStatus::MissingObject,
                                LocalOverlayStoreStatus::DigestMismatch,
                                LocalOverlayStoreStatus::LimitExceeded}) {
-        for (const auto observation_index : {0, 1, 2}) {
+        for (const std::size_t observation_index :
+             std::array<std::size_t, 3>{0, 1, 2}) {
             auto storage = JournalTestStorage::fresh();
             auto store = storage.make_overlay_store(generous_limits());
             auto empty = store.snapshot(
@@ -710,7 +744,7 @@ void require_observation_admission_fails_before_writes() {
             }
 
             storage.reset_observations();
-            auto rejected = activate_qualification(
+            auto rejected = activate_resolved_fixture_qualification(
                 store, std::move(*empty.authority), std::move(profile),
                 std::move(overlay), std::move(observations), '4',
                 "2026-08-23T10:02:00Z");
@@ -739,7 +773,7 @@ void require_differential_evidence_fails_before_writes() {
     auto overlay = overlay_for(profile);
 
     storage.reset_observations();
-    auto rejected = activate_qualification(
+    auto rejected = activate_unresolved_qualification(
         store, std::move(*empty.authority), std::move(profile),
         std::move(overlay), std::move(observations), '4',
         "2026-08-23T10:02:00Z");
@@ -749,6 +783,62 @@ void require_differential_evidence_fails_before_writes() {
                 after.authority_root_bytes.empty() &&
                 !after.authority_mutation_attempted,
             "differential evidence entered the three-observation store");
+}
+
+void require_unresolved_mutation_evidence_fails_before_writes() {
+    auto storage = JournalTestStorage::fresh();
+    auto store = storage.make_overlay_store(generous_limits());
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "unresolved mutation-evidence fixture did not start empty");
+
+    auto observations = observations_for(1);
+    auto profile = profile_for(
+        std::string(empty.authority->deployment_id()), 1, observations);
+    auto overlay = overlay_for(profile);
+
+    storage.reset_observations();
+    auto rejected = activate_unresolved_qualification(
+        store, std::move(*empty.authority), std::move(profile),
+        std::move(overlay), std::move(observations), '4',
+        "2026-08-23T10:02:00Z");
+    const auto after = storage.snapshot();
+    require(rejected.status == LocalOverlayStoreStatus::UnsupportedStorage &&
+                !rejected.authority.has_value() &&
+                after.authority_root_bytes.empty() &&
+                !after.authority_mutation_attempted,
+            "literal mutation observations authorized durable activation");
+}
+
+void require_completion_digest_references_do_not_authorize_activation() {
+    auto storage = JournalTestStorage::fresh();
+    auto store = storage.make_overlay_store(generous_limits());
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "completion-reference fixture did not start empty");
+
+    auto observations = observations_for(1);
+    auto profile = profile_for(
+        std::string(empty.authority->deployment_id()), 1, observations,
+        "2026-08-23T10:05:00Z", '0', '9');
+    require(profile.ownership_recovery_evidence_sha256() == digest('0') &&
+                profile.action_lease_closure_sha256() == digest('9'),
+            "completion-reference fixture did not preserve its opaque refs");
+    auto overlay = overlay_for(profile);
+
+    storage.reset_observations();
+    auto rejected = activate_unresolved_qualification(
+        store, std::move(*empty.authority), std::move(profile),
+        std::move(overlay), std::move(observations), '4',
+        "2026-08-23T10:02:00Z");
+    const auto after = storage.snapshot();
+    require(rejected.status == LocalOverlayStoreStatus::UnsupportedStorage &&
+                !rejected.authority.has_value() &&
+                after.authority_root_bytes.empty() &&
+                !after.authority_mutation_attempted,
+            "opaque completion references authorized durable activation");
 }
 
 void require_claim_admission_fails_before_writes() {
@@ -773,7 +863,7 @@ void require_claim_admission_fails_before_writes() {
                                  claims(200));
 
         storage.reset_observations();
-        auto rejected = activate_qualification(
+        auto rejected = activate_resolved_fixture_qualification(
             store, std::move(*empty.authority), std::move(profile),
             std::move(overlay), std::move(observations), '4',
             "2026-08-23T10:02:00Z");
@@ -805,7 +895,7 @@ void require_claim_admission_fails_before_writes() {
         profile, std::move(bound), std::move(uncertainty),
         std::move(safety_margin));
     storage.reset_observations();
-    auto rejected = activate_qualification(
+    auto rejected = activate_resolved_fixture_qualification(
         store, std::move(*empty.authority), std::move(profile),
         std::move(overlay), std::move(observations), '4',
         "2026-08-23T10:02:00Z");
@@ -837,7 +927,7 @@ void require_qualification_at_fresh_until_fails_before_writes() {
             "freshness-boundary overlay was not canonical");
 
     storage.reset_observations();
-    auto rejected = activate_qualification(
+    auto rejected = activate_resolved_fixture_qualification(
         store, std::move(*empty.authority), std::move(profile),
         std::move(*sealed_overlay.candidate), std::move(observations), '4',
         freshness_boundary);
@@ -867,7 +957,7 @@ void require_activation_at_fresh_until_fails_before_writes() {
             "the input was fresh");
 
     storage.reset_observations();
-    auto rejected = activate_qualification(
+    auto rejected = activate_resolved_fixture_qualification(
         store, std::move(*empty.authority), std::move(profile),
         std::move(overlay), std::move(observations), '4', freshness_boundary);
     const auto after = storage.snapshot();
@@ -921,7 +1011,7 @@ void require_same_observation_digest_is_deduplicated() {
         std::string(empty.authority->deployment_id()), 1, observations);
     auto overlay = overlay_for(profile);
     storage.reset_observations();
-    auto activated = activate_qualification(
+    auto activated = activate_resolved_fixture_qualification(
         store, std::move(*empty.authority), std::move(profile),
         std::move(overlay), observations, '4', "2026-08-23T10:02:00Z");
     require(activated.status == LocalOverlayStoreStatus::Activated &&
@@ -944,8 +1034,9 @@ void require_rollback_advances_generation_and_preserves_history() {
                 empty.authority.has_value(),
             "rollback fixture did not start empty");
 
-    auto first = qualify(store, std::move(*empty.authority), 1, '4',
-                         "2026-08-23T10:02:00Z");
+    auto first = qualify_resolved_storage_fixture(
+        store, std::move(*empty.authority), 1, '4',
+        "2026-08-23T10:02:00Z");
     require(first.status == LocalOverlayStoreStatus::Activated &&
                 first.authority.has_value(),
             "rollback fixture did not publish sequence one");
@@ -954,8 +1045,9 @@ void require_rollback_advances_generation_and_preserves_history() {
         std::string(first.authority->active_overlay()->checksum_sha256());
     const auto first_observations = observations_for(1);
 
-    auto second = qualify(store, std::move(*first.authority), 2, '5',
-                          "2026-08-23T10:04:00Z");
+    auto second = qualify_resolved_storage_fixture(
+        store, std::move(*first.authority), 2, '5',
+        "2026-08-23T10:04:00Z");
     require(second.status == LocalOverlayStoreStatus::Activated &&
                 second.authority.has_value() &&
                 second.authority->generation() == 2 &&
@@ -1017,22 +1109,25 @@ void require_rollback_can_select_another_prior_overlay() {
                 empty.authority.has_value(),
             "rollback-of-rollback fixture did not start empty");
 
-    auto first = qualify(store, std::move(*empty.authority), 1, '4',
-                         "2026-08-23T10:02:00Z");
+    auto first = qualify_resolved_storage_fixture(
+        store, std::move(*empty.authority), 1, '4',
+        "2026-08-23T10:02:00Z");
     require(first.status == LocalOverlayStoreStatus::Activated &&
                 first.authority.has_value(),
             "rollback-of-rollback fixture did not publish sequence one");
     const auto first_overlay =
         std::string(first.authority->active_overlay()->checksum_sha256());
-    auto second = qualify(store, std::move(*first.authority), 2, '5',
-                          "2026-08-23T10:03:00Z");
+    auto second = qualify_resolved_storage_fixture(
+        store, std::move(*first.authority), 2, '5',
+        "2026-08-23T10:03:00Z");
     require(second.status == LocalOverlayStoreStatus::Activated &&
                 second.authority.has_value(),
             "rollback-of-rollback fixture did not publish sequence two");
     const auto second_overlay =
         std::string(second.authority->active_overlay()->checksum_sha256());
-    auto third = qualify(store, std::move(*second.authority), 3, '6',
-                         "2026-08-23T10:04:00Z");
+    auto third = qualify_resolved_storage_fixture(
+        store, std::move(*second.authority), 3, '6',
+        "2026-08-23T10:04:00Z");
     require(third.status == LocalOverlayStoreStatus::Activated &&
                 third.authority.has_value(),
             "rollback-of-rollback fixture did not publish sequence three");
@@ -1123,7 +1218,8 @@ void require_copied_store_and_object_corruption_fail_closed() {
                 "same-address overlay corruption was not distinguished");
     }
 
-    for (const auto missing_observation : {0, 1, 2}) {
+    for (const std::size_t missing_observation :
+         std::array<std::size_t, 3>{0, 1, 2}) {
         auto fixture = published_fixture();
         const std::array<std::string, 3> observation_sha256{
             fixture.observations.baseline_sha256,
@@ -1140,7 +1236,8 @@ void require_copied_store_and_object_corruption_fail_closed() {
                 "missing observation did not fail closed");
     }
 
-    for (const auto corrupt_observation : {0, 1, 2}) {
+    for (const std::size_t corrupt_observation :
+         std::array<std::size_t, 3>{0, 1, 2}) {
         auto fixture = published_fixture();
         const std::array<std::string, 3> observation_sha256{
             fixture.observations.baseline_sha256,
@@ -1190,14 +1287,16 @@ void require_historic_observation_corruption_fails_closed() {
         require(empty.status == LocalOverlayStoreStatus::Empty &&
                     empty.authority.has_value(),
                 "historic observation fixture did not start empty");
-        auto first = qualify(store, std::move(*empty.authority), 1, '4',
-                             "2026-08-23T10:02:00Z");
+        auto first = qualify_resolved_storage_fixture(
+            store, std::move(*empty.authority), 1, '4',
+            "2026-08-23T10:02:00Z");
         require(first.status == LocalOverlayStoreStatus::Activated &&
                     first.authority.has_value(),
                 "historic observation fixture did not publish generation one");
         const auto first_root = std::string(first.authority->root_bytes());
-        auto second = qualify(store, std::move(*first.authority), 2, '5',
-                              "2026-08-23T10:04:00Z");
+        auto second = qualify_resolved_storage_fixture(
+            store, std::move(*first.authority), 2, '5',
+            "2026-08-23T10:04:00Z");
         require(second.status == LocalOverlayStoreStatus::Activated &&
                     second.authority.has_value() &&
                     second.authority->generation() == 2,
@@ -1414,16 +1513,16 @@ void require_concurrent_activators_share_one_owner_lock() {
     storage.pause_after(
         lemon::residency::testing::FaultOperation::ObjectPublish);
     std::thread first_thread([&] {
-        first_result.emplace(
-            qualify(first_store, std::move(*first.authority), 1, '4',
-                    "2026-08-23T10:02:00Z"));
+        first_result.emplace(qualify_resolved_storage_fixture(
+            first_store, std::move(*first.authority), 1, '4',
+            "2026-08-23T10:02:00Z"));
     });
     require(storage.wait_until_paused(5000),
             "first activator did not pause while holding authority");
     std::thread second_thread([&] {
-        second_result.emplace(
-            qualify(second_store, std::move(*second.authority), 1, '5',
-                    "2026-08-23T10:03:00Z"));
+        second_result.emplace(qualify_resolved_storage_fixture(
+            second_store, std::move(*second.authority), 1, '5',
+            "2026-08-23T10:03:00Z"));
     });
     require(storage.wait_until_lock_waiter(5000),
             "second activator did not wait on the shared owner lock");
@@ -1555,12 +1654,14 @@ void require_object_publication_crash_boundaries() {
                             std::string(overlay.checksum_sha256()),
                             std::string(overlay.canonical_bytes()));
                     }
-                    auto activation = LocalOverlayActivation::qualification(
+                    auto activation = LocalOverlayActivation::unresolved_qualification(
                         std::move(input), std::move(overlay),
                         std::move(observations.baseline),
                         std::move(observations.workload),
                         std::move(observations.release), digest('5'),
                         "2026-08-23T10:03:00Z");
+                    activation = detail::LocalOverlayStoreTestFactory::
+                        resolve_qualification(std::move(activation));
                     fixture.storage.reset_observations();
                     fixture.storage.arm_fault(operation, position,
                                               FaultAction::Crash);
@@ -1608,12 +1709,14 @@ void require_pointer_publication_crash_boundaries() {
                     std::string(expected.authority->deployment_id()), 2,
                     observations);
                 auto overlay = overlay_for(input);
-                auto activation = LocalOverlayActivation::qualification(
+                auto activation = LocalOverlayActivation::unresolved_qualification(
                     std::move(input), std::move(overlay),
                     std::move(observations.baseline),
                     std::move(observations.workload),
                     std::move(observations.release), digest('5'),
                     "2026-08-23T10:03:00Z");
+                activation = detail::LocalOverlayStoreTestFactory::
+                    resolve_qualification(std::move(activation));
                 fixture.storage.reset_observations();
                 fixture.storage.arm_fault(operation, position,
                                           FaultAction::Crash);
@@ -1640,6 +1743,8 @@ int main() {
     require_full_history_rejects_rollback_before_writes();
     require_observation_admission_fails_before_writes();
     require_differential_evidence_fails_before_writes();
+    require_unresolved_mutation_evidence_fails_before_writes();
+    require_completion_digest_references_do_not_authorize_activation();
     require_claim_admission_fails_before_writes();
     require_qualification_at_fresh_until_fails_before_writes();
     require_historic_activation_freshness_boundary_fails_closed();

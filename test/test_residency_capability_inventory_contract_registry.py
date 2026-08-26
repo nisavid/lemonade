@@ -34,6 +34,12 @@ class ResidencyCapabilityInventoryContractRegistryTest(
             local_overlay_schemas["profiling_input_envelope"]["schema_type"],
             "residency.profiling_input_envelope/2.0",
         )
+        profiling_fields = local_overlay_schemas["profiling_input_envelope"]["fields"]
+        for field in ("sequence", "max_clock_skew_milliseconds"):
+            self.assertEqual(
+                profiling_fields[field],
+                {"required": True, "type": "local_overlay_positive_uint64"},
+            )
         for schema_key in (
             "profiling_phase_attestation",
             "deployment_local_overlay_object",

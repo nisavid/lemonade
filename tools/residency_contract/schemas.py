@@ -57,6 +57,7 @@ REQUIRED_SCHEMA_KEYWORDS = (
     "x-max-utf8-bytes",
     "x-nfc",
     "x-residency-assert",
+    "x-residency-json-integer",
 )
 
 
@@ -123,6 +124,14 @@ def _object(properties: Mapping[str, Any], required: Iterable[str]) -> dict[str,
     }
 
 
+def _json_integer(**keywords: Any) -> dict[str, Any]:
+    return {
+        "type": "integer",
+        "x-residency-json-integer": True,
+        **keywords,
+    }
+
+
 def _resolve(registry: Mapping[str, Any], reference: str) -> Any:
     value: Any = registry
     for part in reference.split("."):
@@ -148,9 +157,9 @@ def _enum_ref(registry: Mapping[str, Any], reference: str) -> dict[str, Any]:
 def _local_overlay_claim_family(
     family: str, unit: str, *, compatibility: bool = False
 ) -> dict[str, Any]:
-    amount = {"type": "integer", "minimum": 1, "maximum": UINT64_MAX}
+    amount = _json_integer(minimum=1, maximum=UINT64_MAX)
     if compatibility:
-        amount = {"const": 1, "type": "integer"}
+        amount = _json_integer(const=1)
     entry = _object(
         {
             "amount": amount,
@@ -209,7 +218,7 @@ def _local_overlay_claim_closure() -> dict[str, Any]:
 def _local_overlay_retained_gtt_claim() -> dict[str, Any]:
     return _object(
         {
-            "amount": {"type": "integer", "minimum": 1, "maximum": UINT64_MAX},
+            "amount": _json_integer(minimum=1, maximum=UINT64_MAX),
             "constraint_id": _opaque(),
             "unit": {"const": "bytes"},
         },
@@ -412,7 +421,7 @@ def _local_overlay_selector_identity(registry: Mapping[str, Any]) -> dict[str, A
 
 
 def _local_overlay_source_generations() -> dict[str, Any]:
-    generation = {"type": "integer", "minimum": 1, "maximum": UINT64_MAX}
+    generation = _json_integer(minimum=1, maximum=UINT64_MAX)
     fields = (
         "backend",
         "configuration",
@@ -500,8 +509,8 @@ def _local_overlay_definitions(
         "safety_margin_claim_closure": _local_overlay_safety_margin_claim_closure(),
         "schema_version": _object(
             {
-                "major": {"const": version.get("major")},
-                "minor": {"const": version.get("minor")},
+                "major": _json_integer(const=version.get("major")),
+                "minor": _json_integer(const=version.get("minor")),
             },
             ("major", "minor"),
         ),
@@ -519,11 +528,11 @@ def _local_overlay_field_schema(
 ) -> dict[str, Any] | None:
     del name, registry, catalog
     if spec["type"] == "local_overlay_positive_uint64":
-        return {"type": "integer", "minimum": 1, "maximum": UINT64_MAX}
+        return _json_integer(minimum=1, maximum=UINT64_MAX)
     if spec["type"] == "local_overlay_nonnegative_uint64":
-        return {"type": "integer", "minimum": 0, "maximum": UINT64_MAX}
+        return _json_integer(minimum=0, maximum=UINT64_MAX)
     if spec["type"] == "local_overlay_confidence_basis_points":
-        return {"type": "integer", "minimum": 1, "maximum": 10000}
+        return _json_integer(minimum=1, maximum=10000)
     if spec["type"] == "local_overlay_required_true":
         return {"const": True}
     if spec["type"] == "local_overlay_profiling_phase":

@@ -52,6 +52,12 @@ private:
 
 enum class LocalOverlayActivationKind { Qualification, Rollback };
 
+namespace detail {
+#ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
+class LocalOverlayStoreTestFactory;
+#endif
+} // namespace detail
+
 class LocalOverlayActivation {
 public:
     LocalOverlayActivation() = delete;
@@ -61,13 +67,13 @@ public:
     LocalOverlayActivation &operator=(LocalOverlayActivation &&) noexcept = default;
 
     static LocalOverlayActivation
-    qualification(ParsedProfilingInputEnvelope profiling_input,
-                  ParsedLocalOverlayObject overlay,
-                  std::string baseline_observation_bytes,
-                  std::string workload_observation_bytes,
-                  std::string release_observation_bytes,
-                  std::string decision_trace_sha256,
-                  std::string activated_at);
+    unresolved_qualification(ParsedProfilingInputEnvelope profiling_input,
+                             ParsedLocalOverlayObject overlay,
+                             std::string baseline_observation_bytes,
+                             std::string workload_observation_bytes,
+                             std::string release_observation_bytes,
+                             std::string decision_trace_sha256,
+                             std::string activated_at);
     static LocalOverlayActivation rollback(std::string overlay_sha256,
                                            std::string decision_trace_sha256,
                                            std::string activated_at);
@@ -94,17 +100,20 @@ private:
     std::optional<std::string> release_observation_bytes_;
     std::string decision_trace_sha256_;
     std::string activated_at_;
+#ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
+    bool qualification_resolved_for_test_ = false;
+#endif
 
     friend class LocalOverlayStore;
+#ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
+    friend class detail::LocalOverlayStoreTestFactory;
+#endif
 };
 
 class LocalOverlayStore;
 
 namespace detail {
 class DurableFileAdapter;
-#ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
-class LocalOverlayStoreTestFactory;
-#endif
 } // namespace detail
 
 class PublishedLocalOverlay {

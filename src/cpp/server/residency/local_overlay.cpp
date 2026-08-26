@@ -1432,7 +1432,6 @@ json completion_document(const ProfilingCompletionDraft &completion) {
 json profiling_payload(const ProfilingInputEnvelopeDraft &draft) {
     return json{
         {"completion", completion_document(draft.completion)},
-        {"confidence", "calibrated_instance"},
         {"deployment_id", draft.deployment_id},
         {"fresh_until", draft.fresh_until},
         {"generations", generations_document(draft.generations)},
@@ -1563,7 +1562,7 @@ ProfilingCompletionDraft parse_completion(const json &value) {
 ParsedProfilingDocument parse_profiling_document(const json &document) {
     require_exact_keys(
         document,
-        {"checksum_sha256", "completion", "confidence", "deployment_id",
+        {"checksum_sha256", "completion", "deployment_id",
          "fresh_until", "generations", "max_clock_skew_milliseconds",
          "method_evidence", "observation_contract_sha256", "observed_at",
          "predictor_contract_sha256", "profiling_transaction_id", "schema",
@@ -1583,11 +1582,6 @@ ParsedProfilingDocument parse_profiling_document(const json &document) {
     draft.method_evidence =
         parse_method_evidence(required(document, "method_evidence"));
     draft.completion = parse_completion(required(document, "completion"));
-    if (require_string(required(document, "confidence"),
-                       "profiling confidence") != "calibrated_instance") {
-        reject(OverlayContractStatus::UnknownValue,
-               "profiling confidence is unknown");
-    }
     draft.observation_contract_sha256 =
         require_string(required(document, "observation_contract_sha256"),
                        "observation contract digest");

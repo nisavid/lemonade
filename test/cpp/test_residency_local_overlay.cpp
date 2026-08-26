@@ -603,15 +603,14 @@ void require_profiling_input_codec() {
                                       "manifest_claims",
                                       "ownership_recovery_evidence_sha256"},
             "profiling completion serialized an open or incomplete shape");
-    require(document.at("confidence") == "calibrated_instance",
-            "complete profiling evidence did not derive calibrated-instance "
-            "confidence");
-    require(!document.contains("attribution_complete") &&
+    require(!document.contains("confidence") &&
+                !document.contains("attribution_complete") &&
                 !document.contains("external_demand_absent") &&
                 !method_evidence.contains("owner_projection_claim") &&
                 canonical.find("\"selector_sha256\"") == std::string::npos,
             "profiling input serialized a legacy proof flag, a fabricated "
-            "owner projection, or a derived selector digest");
+            "owner projection, premature confidence, or a derived selector "
+            "digest");
     auto reparsed = parse_profiling_input(canonical);
     require(reparsed.accepted(), reparsed.diagnostic);
     require(reparsed.candidate->canonical_bytes() == canonical &&
@@ -630,6 +629,12 @@ void require_profiling_input_codec() {
     require_rejected(parse_profiling_input(with_unknown_root_field(canonical)),
                      OverlayContractStatus::UnknownField,
                      "profiling input accepted an unknown field");
+    require_rejected(
+        parse_profiling_input(tamper_once(
+            canonical, "\"completion\":",
+            "\"confidence\":\"calibrated_instance\",\"completion\":")),
+        OverlayContractStatus::UnknownField,
+        "profiling input accepted premature confidence");
     require_rejected(
         parse_profiling_input(tamper_once(
             canonical,
