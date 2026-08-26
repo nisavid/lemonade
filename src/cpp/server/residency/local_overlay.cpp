@@ -256,11 +256,14 @@ std::string require_string(const json &value, std::string_view label) {
 }
 
 std::uint64_t require_u64(const json &value, std::string_view label) {
-    if (!value.is_number_unsigned()) {
-        reject(OverlayContractStatus::InvalidValue,
-               std::string(label) + " must be an unsigned integer");
+    if (value.is_number_unsigned()) {
+        return value.get<std::uint64_t>();
     }
-    return value.get<std::uint64_t>();
+    if (value.is_number_integer() && value.get<std::int64_t>() == 0) {
+        return 0;
+    }
+    reject(OverlayContractStatus::InvalidValue,
+           std::string(label) + " must be an unsigned integer");
 }
 
 bool require_bool(const json &value, std::string_view label) {
