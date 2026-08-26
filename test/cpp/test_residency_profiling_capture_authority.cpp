@@ -270,26 +270,31 @@ ProfilingTransactionContext context(
     result.generations = OverlaySourceGenerations{1, 2, 3, 4, 5, 6, 7};
     result.observation_contract_sha256 = *contract_sha256;
     result.predictor_contract_sha256 = digest('0');
+    result.ownership_recovery_evidence_sha256 = digest('7');
+    result.action_lease_closure_sha256 = digest('8');
 
     ProfilingInputEnvelopeDraft input;
-    input.schema = supported_local_overlay_schema;
+    input.schema = supported_profiling_input_schema;
     input.deployment_id = result.deployment_id;
     input.sequence = result.sequence;
     input.profiling_transaction_id = result.profiling_transaction_id;
     input.selector = result.selector;
     input.generations = result.generations;
-    input.attributed_claims = claims();
-    input.baseline_observation_sha256 = digest('c');
-    input.workload_observation_sha256 = digest('d');
-    input.release_observation_sha256 = digest('e');
+    MutationCompleteIntervalEvidenceDraft method_evidence;
+    method_evidence.baseline_observation_sha256 = digest('c');
+    method_evidence.workload_observation_sha256 = digest('d');
+    method_evidence.release_observation_sha256 = digest('e');
+    input.method_evidence = std::move(method_evidence);
+    input.completion.manifest_claims = claims();
+    input.completion.ownership_recovery_evidence_sha256 =
+        result.ownership_recovery_evidence_sha256;
+    input.completion.action_lease_closure_sha256 =
+        result.action_lease_closure_sha256;
     input.observation_contract_sha256 = result.observation_contract_sha256;
     input.predictor_contract_sha256 = result.predictor_contract_sha256;
     input.observed_at = "2026-08-23T10:00:00Z";
     input.fresh_until = "2026-08-23T10:10:00Z";
     input.max_clock_skew_milliseconds = 1000;
-    input.attribution_complete = true;
-    input.external_demand_absent = true;
-    input.lifecycle_release_verified = true;
     const auto sealed = seal_profiling_input(std::move(input));
     if (!sealed.accepted()) {
         throw std::runtime_error("profiling context selector could not seal");

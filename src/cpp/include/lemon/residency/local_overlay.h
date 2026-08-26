@@ -8,10 +8,12 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace lemon::residency {
 
+inline constexpr SchemaVersion supported_profiling_input_schema{2, 0};
 inline constexpr SchemaVersion supported_local_overlay_schema{1, 0};
 inline constexpr std::size_t max_local_overlay_input_bytes = 64 * 1024;
 inline constexpr std::size_t max_local_overlay_identifier_bytes = 128;
@@ -138,25 +140,44 @@ struct ProfilingPhaseAttestationDraft {
         ProfilingLifecycleState::BaselineQuiescent;
 };
 
+struct MutationCompleteIntervalEvidenceDraft {
+    std::string baseline_observation_sha256;
+    std::string workload_observation_sha256;
+    std::string release_observation_sha256;
+};
+
+struct DifferentialRetainedGttEvidenceDraft {
+    ClaimAmount retained_gtt_claim;
+    std::string calibration_evidence_sha256;
+    std::string transient_envelope_sha256;
+    ProfilingOwnerCoverage owner_projection_coverage =
+        ProfilingOwnerCoverage::Unknown;
+};
+
+using ProfilingMethodEvidenceDraft =
+    std::variant<MutationCompleteIntervalEvidenceDraft,
+                 DifferentialRetainedGttEvidenceDraft>;
+
+struct ProfilingCompletionDraft {
+    std::vector<ClaimFamilyClosure> manifest_claims;
+    std::string ownership_recovery_evidence_sha256;
+    std::string action_lease_closure_sha256;
+};
+
 struct ProfilingInputEnvelopeDraft {
-    SchemaVersion schema = supported_local_overlay_schema;
+    SchemaVersion schema = supported_profiling_input_schema;
     std::string deployment_id;
     std::uint64_t sequence = 0;
     std::string profiling_transaction_id;
     LocalOverlaySelectorIdentity selector;
     OverlaySourceGenerations generations;
-    std::vector<ClaimFamilyClosure> attributed_claims;
-    std::string baseline_observation_sha256;
-    std::string workload_observation_sha256;
-    std::string release_observation_sha256;
+    ProfilingMethodEvidenceDraft method_evidence;
+    ProfilingCompletionDraft completion;
     std::string observation_contract_sha256;
     std::string predictor_contract_sha256;
     std::string observed_at;
     std::string fresh_until;
     std::uint64_t max_clock_skew_milliseconds = 0;
-    bool attribution_complete = false;
-    bool external_demand_absent = false;
-    bool lifecycle_release_verified = false;
 };
 
 struct LocalOverlayMethodIdentity {
@@ -230,18 +251,19 @@ public:
     const LocalOverlaySelectorIdentity &selector() const noexcept;
     std::string_view selector_sha256() const noexcept;
     const OverlaySourceGenerations &generations() const noexcept;
-    const std::vector<ClaimFamilyClosure> &attributed_claims() const noexcept;
-    std::string_view baseline_observation_sha256() const noexcept;
-    std::string_view workload_observation_sha256() const noexcept;
-    std::string_view release_observation_sha256() const noexcept;
+    const ProfilingMethodEvidenceDraft &method_evidence() const noexcept;
+    const MutationCompleteIntervalEvidenceDraft *
+    mutation_complete_interval() const noexcept;
+    const DifferentialRetainedGttEvidenceDraft *
+    differential_retained_gtt() const noexcept;
+    const std::vector<ClaimFamilyClosure> &manifest_claims() const noexcept;
+    std::string_view ownership_recovery_evidence_sha256() const noexcept;
+    std::string_view action_lease_closure_sha256() const noexcept;
     std::string_view observation_contract_sha256() const noexcept;
     std::string_view predictor_contract_sha256() const noexcept;
     std::string_view observed_at() const noexcept;
     std::string_view fresh_until() const noexcept;
     std::uint64_t max_clock_skew_milliseconds() const noexcept;
-    bool attribution_complete() const noexcept;
-    bool external_demand_absent() const noexcept;
-    bool lifecycle_release_verified() const noexcept;
     std::string_view checksum_sha256() const noexcept;
     std::string_view canonical_bytes() const noexcept;
 

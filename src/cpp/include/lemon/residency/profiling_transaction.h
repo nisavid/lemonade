@@ -47,6 +47,8 @@ struct ProfilingTransactionContext {
     OverlaySourceGenerations generations;
     std::string observation_contract_sha256;
     std::string predictor_contract_sha256;
+    std::string ownership_recovery_evidence_sha256;
+    std::string action_lease_closure_sha256;
 };
 
 struct ProfilingTransactionCapture {

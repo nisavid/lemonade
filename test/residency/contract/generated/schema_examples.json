@@ -259,39 +259,41 @@
       "transition": "qualification"
     },
     "profiling_input_envelope": {
-      "attributed_claims": [
-        {
-          "completeness": "bounded",
-          "entries": [
-            {
-              "amount": 4096,
-              "constraint_id": "gpu/gtt",
-              "unit": "bytes"
-            }
-          ],
-          "family": "consumable_capacity"
-        },
-        {
-          "completeness": "known_zero",
-          "entries": [],
-          "family": "safety_floor"
-        },
-        {
-          "completeness": "known_zero",
-          "entries": [],
-          "family": "cardinality_pool"
-        },
-        {
-          "completeness": "not_applicable",
-          "entries": [],
-          "family": "compatibility_exclusivity"
-        }
-      ],
-      "attribution_complete": true,
-      "baseline_observation_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "checksum_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "completion": {
+        "action_lease_closure_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "manifest_claims": [
+          {
+            "completeness": "bounded",
+            "entries": [
+              {
+                "amount": 4096,
+                "constraint_id": "gpu/gtt",
+                "unit": "bytes"
+              }
+            ],
+            "family": "consumable_capacity"
+          },
+          {
+            "completeness": "known_zero",
+            "entries": [],
+            "family": "safety_floor"
+          },
+          {
+            "completeness": "known_zero",
+            "entries": [],
+            "family": "cardinality_pool"
+          },
+          {
+            "completeness": "not_applicable",
+            "entries": [],
+            "family": "compatibility_exclusivity"
+          }
+        ],
+        "ownership_recovery_evidence_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "confidence": "calibrated_instance",
       "deployment_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "external_demand_absent": true,
       "fresh_until": "2026-09-23T10:01:00Z",
       "generations": {
         "backend": 2,
@@ -302,15 +304,25 @@
         "topology": 4,
         "workload": 7
       },
-      "lifecycle_release_verified": true,
       "max_clock_skew_milliseconds": 1,
+      "method_evidence": {
+        "calibration_evidence_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "covered_effect": "retained_gtt",
+        "method": "differential_retained_gtt",
+        "owner_projection_coverage": "incomplete",
+        "retained_gtt_claim": {
+          "amount": 4096,
+          "constraint_id": "gpu/gtt",
+          "unit": "bytes"
+        },
+        "transient_envelope_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
       "observation_contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "observed_at": "2026-01-01T00:00:00Z",
       "predictor_contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "profiling_transaction_id": "profiling_transaction_id-1",
-      "release_observation_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "schema": {
-        "major": 1,
+        "major": 2,
         "minor": 0
       },
       "selector": {
@@ -344,8 +356,7 @@
         "topology_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
         "workload_sha256": "7777777777777777777777777777777777777777777777777777777777777777"
       },
-      "sequence": 1,
-      "workload_observation_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      "sequence": 1
     },
     "profiling_phase_attestation": {
       "attributed_claims": [
@@ -5461,29 +5472,22 @@
               }
             ],
             "fields": {
-              "attributed_claims": {
-                "required": true,
-                "type": "local_overlay_claim_closure"
-              },
-              "attribution_complete": {
-                "required": true,
-                "type": "local_overlay_required_true"
-              },
-              "baseline_observation_sha256": {
-                "required": true,
-                "type": "sha256"
-              },
               "checksum_sha256": {
                 "required": true,
                 "type": "sha256"
               },
+              "completion": {
+                "required": true,
+                "type": "local_overlay_profiling_completion"
+              },
+              "confidence": {
+                "required": true,
+                "type": "literal",
+                "value": "calibrated_instance"
+              },
               "deployment_id": {
                 "required": true,
                 "type": "local_overlay_deployment_identity"
-              },
-              "external_demand_absent": {
-                "required": true,
-                "type": "local_overlay_required_true"
               },
               "fresh_until": {
                 "required": true,
@@ -5493,13 +5497,13 @@
                 "required": true,
                 "type": "local_overlay_source_generations"
               },
-              "lifecycle_release_verified": {
-                "required": true,
-                "type": "local_overlay_required_true"
-              },
               "max_clock_skew_milliseconds": {
                 "required": true,
                 "type": "local_overlay_positive_uint64"
+              },
+              "method_evidence": {
+                "required": true,
+                "type": "local_overlay_profiling_method_evidence"
               },
               "observation_contract_sha256": {
                 "required": true,
@@ -5518,10 +5522,6 @@
                 "required": true,
                 "type": "opaque"
               },
-              "release_observation_sha256": {
-                "required": true,
-                "type": "sha256"
-              },
               "schema": {
                 "required": true,
                 "type": "local_overlay_schema_version"
@@ -5533,16 +5533,12 @@
               "sequence": {
                 "required": true,
                 "type": "local_overlay_positive_uint64"
-              },
-              "workload_observation_sha256": {
-                "required": true,
-                "type": "sha256"
               }
             },
             "output": "docs/api/schemas/residency/profiling_input_envelope.schema.json",
-            "schema_type": "residency.profiling_input_envelope/1.0",
+            "schema_type": "residency.profiling_input_envelope/2.0",
             "version": {
-              "major": 1,
+              "major": 2,
               "minor": 0
             }
           },
@@ -7988,7 +7984,7 @@
         }
       ],
       "schema": "residency.profiles/1.0",
-      "selection_registry_sha256": "9dbdfad20160c82f3905493d2d5c4bdcf40f2249b25ad919c57fd4462a51b4b7",
+      "selection_registry_sha256": "f3ccfe7c931b00898349233e313169100e33ff22b06f2d94a60db1b9835f22ca",
       "source_support_baseline": "a505bbc702cc1fcd44ef73c44defabc98c36d505"
     },
     "resource_diagnostic": {

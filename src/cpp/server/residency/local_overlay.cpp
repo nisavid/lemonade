@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace lemon::residency {
@@ -25,7 +26,7 @@ namespace {
 using json = nlohmann::json;
 
 constexpr char profiling_input_domain[] =
-    "lemonade.residency.local-overlay-profiling-input/v1\0";
+    "lemonade.residency.local-overlay-profiling-input/v2\0";
 constexpr char profiling_phase_attestation_domain[] =
     "lemonade.residency.profiling-phase-attestation/v1\0";
 constexpr char local_overlay_domain[] =
@@ -67,6 +68,11 @@ std::string bounded_diagnostic(std::string message) {
 bool schema_is_supported(SchemaVersion schema) noexcept {
     return schema.major == supported_local_overlay_schema.major &&
            schema.minor == supported_local_overlay_schema.minor;
+}
+
+bool profiling_input_schema_is_supported(SchemaVersion schema) noexcept {
+    return schema.major == supported_profiling_input_schema.major &&
+           schema.minor == supported_profiling_input_schema.minor;
 }
 
 bool is_lower_hex(std::string_view value, std::size_t size) noexcept {
@@ -303,20 +309,36 @@ json parse_json(std::string_view bytes) {
     }
 }
 
-SchemaVersion parse_schema(const json &value) {
+SchemaVersion parse_schema_value(const json &value,
+                                 std::string_view diagnostic) {
     require_exact_keys(value, {"major", "minor"}, "schema");
     const auto major = require_u64(required(value, "major"), "schema major");
     const auto minor = require_u64(required(value, "minor"), "schema minor");
     if (major > std::numeric_limits<std::uint32_t>::max() ||
         minor > std::numeric_limits<std::uint32_t>::max()) {
         reject(OverlayContractStatus::UnsupportedSchema,
-               "overlay schema is unsupported");
+               std::string(diagnostic));
     }
-    const SchemaVersion schema{static_cast<std::uint32_t>(major),
-                               static_cast<std::uint32_t>(minor)};
+    return SchemaVersion{static_cast<std::uint32_t>(major),
+                         static_cast<std::uint32_t>(minor)};
+}
+
+SchemaVersion parse_schema(const json &value) {
+    const auto schema =
+        parse_schema_value(value, "overlay schema is unsupported");
     if (!schema_is_supported(schema)) {
         reject(OverlayContractStatus::UnsupportedSchema,
                "overlay schema is unsupported");
+    }
+    return schema;
+}
+
+SchemaVersion parse_profiling_input_schema(const json &value) {
+    const auto schema = parse_schema_value(
+        value, "profiling input schema is unsupported");
+    if (!profiling_input_schema_is_supported(schema)) {
+        reject(OverlayContractStatus::UnsupportedSchema,
+               "profiling input schema is unsupported");
     }
     return schema;
 }
@@ -689,16 +711,30 @@ std::vector<ClaimFamilyClosure> claim_closure(const CheckedClaimSet &claims) {
     return result;
 }
 
+json claim_amount_document(const ClaimAmount &claim) {
+    return json{
+        {"amount", claim.amount},
+        {"constraint_id", claim.constraint_id},
+        {"unit", claim_unit_wire(claim.unit)},
+    };
+}
+
+ClaimAmount parse_claim_amount(const json &value, std::string_view label) {
+    require_exact_keys(value, {"amount", "constraint_id", "unit"}, label);
+    return ClaimAmount{
+        require_string(required(value, "constraint_id"), "constraint ID"),
+        parse_claim_unit(
+            require_string(required(value, "unit"), "claim unit")),
+        require_u64(required(value, "amount"), "claim amount"),
+    };
+}
+
 json claim_closure_document(const std::vector<ClaimFamilyClosure> &closure) {
     json result = json::array();
     for (const auto &family : closure) {
         json entries = json::array();
         for (const auto &entry : family.entries) {
-            entries.push_back(json{
-                {"amount", entry.amount},
-                {"constraint_id", entry.constraint_id},
-                {"unit", claim_unit_wire(entry.unit)},
-            });
+            entries.push_back(claim_amount_document(entry));
         }
         result.push_back(json{
             {"completeness", claim_completeness_wire(family.completeness)},
@@ -739,15 +775,8 @@ std::vector<ClaimFamilyClosure> parse_claim_closure(const json &value,
         family.completeness = parse_claim_completeness(require_string(
             required(family_value, "completeness"), "claim completeness"));
         for (const auto &entry_value : entry_values) {
-            require_exact_keys(entry_value, {"amount", "constraint_id", "unit"},
-                               "claim amount");
-            family.entries.push_back(ClaimAmount{
-                require_string(required(entry_value, "constraint_id"),
-                               "constraint ID"),
-                parse_claim_unit(require_string(required(entry_value, "unit"),
-                                                "claim unit")),
-                require_u64(required(entry_value, "amount"), "claim amount"),
-            });
+            family.entries.push_back(
+                parse_claim_amount(entry_value, "claim amount"));
         }
         closure.push_back(std::move(family));
     }
@@ -1258,10 +1287,77 @@ parse_profiling_phase_document(const json &document) {
     };
 }
 
+CheckedClaimSet normalize_profiling_completion(
+    ProfilingCompletionDraft &completion,
+    const std::vector<ConstraintKind> &constraints) {
+    auto manifest = checked_claims(std::move(completion.manifest_claims));
+    if (!claim_families_cover_ordinary_constraints(manifest, constraints)) {
+        reject(OverlayContractStatus::IncompleteClaimClosure,
+               "profiling manifest omits a required selector family");
+    }
+    completion.manifest_claims = claim_closure(manifest);
+    require_digest(completion.ownership_recovery_evidence_sha256,
+                   "ownership and recovery evidence digest");
+    require_digest(completion.action_lease_closure_sha256,
+                   "action-lease closure digest");
+    return manifest;
+}
+
+void normalize_method_evidence(ProfilingMethodEvidenceDraft &evidence,
+                               const CheckedClaimSet &manifest) {
+    if (evidence.valueless_by_exception()) {
+        reject(OverlayContractStatus::InvalidValue,
+               "profiling method evidence is unavailable");
+    }
+    if (auto *interval =
+            std::get_if<MutationCompleteIntervalEvidenceDraft>(&evidence)) {
+        require_digest(interval->baseline_observation_sha256,
+                       "baseline observation digest");
+        require_digest(interval->workload_observation_sha256,
+                       "workload observation digest");
+        require_digest(interval->release_observation_sha256,
+                       "release observation digest");
+        return;
+    }
+
+    auto &differential =
+        std::get<DifferentialRetainedGttEvidenceDraft>(evidence);
+    require_identifier(differential.retained_gtt_claim.constraint_id,
+                       "retained-GTT constraint ID");
+    if (differential.retained_gtt_claim.unit != ClaimUnit::Bytes ||
+        differential.retained_gtt_claim.amount == 0) {
+        reject(OverlayContractStatus::InvalidClaimClosure,
+               "retained-GTT evidence must be a positive byte claim");
+    }
+    require_digest(differential.calibration_evidence_sha256,
+                   "calibration evidence digest");
+    require_digest(differential.transient_envelope_sha256,
+                   "transient envelope digest");
+    if (profiling_owner_coverage_wire(
+            differential.owner_projection_coverage)
+            .empty()) {
+        reject(OverlayContractStatus::UnknownValue,
+               "owner projection coverage is unknown");
+    }
+
+    const auto &capacity = manifest.entries(ClaimFamily::ConsumableCapacity);
+    const auto covering = std::find_if(
+        capacity.begin(), capacity.end(), [&](const ClaimTotal &claim) {
+            return claim.constraint_id ==
+                       differential.retained_gtt_claim.constraint_id &&
+                   claim.unit == differential.retained_gtt_claim.unit &&
+                   claim.amount >= differential.retained_gtt_claim.amount;
+        });
+    if (covering == capacity.end()) {
+        reject(OverlayContractStatus::IncompleteClaimClosure,
+               "profiling manifest does not cover the retained-GTT claim");
+    }
+}
+
 void normalize_profiling_draft(ProfilingInputEnvelopeDraft &draft) {
-    if (!schema_is_supported(draft.schema)) {
+    if (!profiling_input_schema_is_supported(draft.schema)) {
         reject(OverlayContractStatus::UnsupportedSchema,
-               "overlay schema is unsupported");
+               "profiling input schema is unsupported");
     }
     require_digest(draft.deployment_id, "deployment ID");
     if (draft.sequence == 0) {
@@ -1272,19 +1368,9 @@ void normalize_profiling_draft(ProfilingInputEnvelopeDraft &draft) {
                        "profiling transaction ID");
     normalize_selector(draft.selector);
     normalize_generations(draft.generations);
-    const auto checked = checked_claims(std::move(draft.attributed_claims));
-    if (!claim_families_cover_ordinary_constraints(
-            checked, draft.selector.catalog_selector.constraints)) {
-        reject(OverlayContractStatus::IncompleteClaimClosure,
-               "attributed claims omit a required selector family");
-    }
-    draft.attributed_claims = claim_closure(checked);
-    require_digest(draft.baseline_observation_sha256,
-                   "baseline observation digest");
-    require_digest(draft.workload_observation_sha256,
-                   "workload observation digest");
-    require_digest(draft.release_observation_sha256,
-                   "release observation digest");
+    const auto manifest = normalize_profiling_completion(
+        draft.completion, draft.selector.catalog_selector.constraints);
+    normalize_method_evidence(draft.method_evidence, manifest);
     require_digest(draft.observation_contract_sha256,
                    "observation contract digest");
     require_digest(draft.predictor_contract_sha256,
@@ -1295,34 +1381,70 @@ void normalize_profiling_draft(ProfilingInputEnvelopeDraft &draft) {
         reject(OverlayContractStatus::InvalidValue,
                "maximum clock skew must be nonzero");
     }
-    if (!draft.attribution_complete || !draft.external_demand_absent ||
-        !draft.lifecycle_release_verified) {
-        reject(OverlayContractStatus::IncompleteIdentity,
-               "profiling input does not close attribution and lifecycle "
-               "evidence");
+}
+
+json method_evidence_document(const ProfilingMethodEvidenceDraft &evidence) {
+    if (const auto *interval =
+            std::get_if<MutationCompleteIntervalEvidenceDraft>(&evidence)) {
+        return json{
+            {"baseline_observation_sha256",
+             interval->baseline_observation_sha256},
+            {"covered_effect", "complete_lifecycle"},
+            {"external_change_absent", true},
+            {"lifecycle_envelope_complete", true},
+            {"method", "mutation_complete_interval"},
+            {"owner_projection_coverage", "complete"},
+            {"release_observation_sha256",
+             interval->release_observation_sha256},
+            {"workload_observation_sha256",
+             interval->workload_observation_sha256},
+        };
     }
+
+    const auto &differential =
+        std::get<DifferentialRetainedGttEvidenceDraft>(evidence);
+    return json{
+        {"calibration_evidence_sha256",
+         differential.calibration_evidence_sha256},
+        {"covered_effect", "retained_gtt"},
+        {"method", "differential_retained_gtt"},
+        {"owner_projection_coverage",
+         profiling_owner_coverage_wire(
+             differential.owner_projection_coverage)},
+        {"retained_gtt_claim",
+         claim_amount_document(differential.retained_gtt_claim)},
+        {"transient_envelope_sha256",
+         differential.transient_envelope_sha256},
+    };
+}
+
+json completion_document(const ProfilingCompletionDraft &completion) {
+    return json{
+        {"action_lease_closure_sha256",
+         completion.action_lease_closure_sha256},
+        {"manifest_claims",
+         claim_closure_document(completion.manifest_claims)},
+        {"ownership_recovery_evidence_sha256",
+         completion.ownership_recovery_evidence_sha256},
+    };
 }
 
 json profiling_payload(const ProfilingInputEnvelopeDraft &draft) {
     return json{
-        {"attributed_claims", claim_closure_document(draft.attributed_claims)},
-        {"attribution_complete", draft.attribution_complete},
-        {"baseline_observation_sha256", draft.baseline_observation_sha256},
+        {"completion", completion_document(draft.completion)},
+        {"confidence", "calibrated_instance"},
         {"deployment_id", draft.deployment_id},
-        {"external_demand_absent", draft.external_demand_absent},
         {"fresh_until", draft.fresh_until},
         {"generations", generations_document(draft.generations)},
-        {"lifecycle_release_verified", draft.lifecycle_release_verified},
         {"max_clock_skew_milliseconds", draft.max_clock_skew_milliseconds},
+        {"method_evidence", method_evidence_document(draft.method_evidence)},
         {"observation_contract_sha256", draft.observation_contract_sha256},
         {"observed_at", draft.observed_at},
         {"predictor_contract_sha256", draft.predictor_contract_sha256},
         {"profiling_transaction_id", draft.profiling_transaction_id},
-        {"release_observation_sha256", draft.release_observation_sha256},
         {"schema", schema_document(draft.schema)},
         {"selector", selector_document(draft.selector)},
         {"sequence", draft.sequence},
-        {"workload_observation_sha256", draft.workload_observation_sha256},
     };
 }
 
@@ -1361,20 +1483,94 @@ struct ParsedProfilingDocument {
     std::string checksum;
 };
 
+ProfilingMethodEvidenceDraft parse_method_evidence(const json &value) {
+    const auto method = require_string(required(value, "method"),
+                                       "profiling evidence method");
+    if (method == "mutation_complete_interval") {
+        require_exact_keys(
+            value,
+            {"baseline_observation_sha256", "covered_effect",
+             "external_change_absent", "lifecycle_envelope_complete",
+             "method", "owner_projection_coverage",
+             "release_observation_sha256", "workload_observation_sha256"},
+            "mutation-complete interval evidence");
+        if (require_string(required(value, "covered_effect"),
+                           "covered effect") != "complete_lifecycle" ||
+            parse_profiling_owner_coverage(require_string(
+                required(value, "owner_projection_coverage"),
+                "owner projection coverage")) !=
+                ProfilingOwnerCoverage::Complete ||
+            !require_bool(required(value, "external_change_absent"),
+                          "external-change absence") ||
+            !require_bool(required(value, "lifecycle_envelope_complete"),
+                          "lifecycle envelope completeness")) {
+            reject(OverlayContractStatus::InvalidValue,
+                   "mutation-complete interval evidence has invalid closed "
+                   "semantics");
+        }
+        return MutationCompleteIntervalEvidenceDraft{
+            require_string(required(value, "baseline_observation_sha256"),
+                           "baseline observation digest"),
+            require_string(required(value, "workload_observation_sha256"),
+                           "workload observation digest"),
+            require_string(required(value, "release_observation_sha256"),
+                           "release observation digest"),
+        };
+    }
+    if (method == "differential_retained_gtt") {
+        require_exact_keys(
+            value,
+            {"calibration_evidence_sha256", "covered_effect", "method",
+             "owner_projection_coverage", "retained_gtt_claim",
+             "transient_envelope_sha256"},
+            "differential retained-GTT evidence");
+        if (require_string(required(value, "covered_effect"),
+                           "covered effect") != "retained_gtt") {
+            reject(OverlayContractStatus::InvalidValue,
+                   "differential evidence has an invalid covered effect");
+        }
+        return DifferentialRetainedGttEvidenceDraft{
+            parse_claim_amount(required(value, "retained_gtt_claim"),
+                               "retained-GTT claim"),
+            require_string(required(value, "calibration_evidence_sha256"),
+                           "calibration evidence digest"),
+            require_string(required(value, "transient_envelope_sha256"),
+                           "transient envelope digest"),
+            parse_profiling_owner_coverage(require_string(
+                required(value, "owner_projection_coverage"),
+                "owner projection coverage")),
+        };
+    }
+    reject(OverlayContractStatus::UnknownValue,
+           "profiling evidence method is unknown");
+}
+
+ProfilingCompletionDraft parse_completion(const json &value) {
+    require_exact_keys(value,
+                       {"action_lease_closure_sha256", "manifest_claims",
+                        "ownership_recovery_evidence_sha256"},
+                       "profiling completion");
+    return ProfilingCompletionDraft{
+        parse_claim_closure(required(value, "manifest_claims"),
+                            "profiling manifest claims"),
+        require_string(required(value, "ownership_recovery_evidence_sha256"),
+                       "ownership and recovery evidence digest"),
+        require_string(required(value, "action_lease_closure_sha256"),
+                       "action-lease closure digest"),
+    };
+}
+
 ParsedProfilingDocument parse_profiling_document(const json &document) {
     require_exact_keys(
         document,
-        {"attributed_claims", "attribution_complete",
-         "baseline_observation_sha256", "checksum_sha256", "deployment_id",
-         "external_demand_absent", "fresh_until", "generations",
-         "lifecycle_release_verified", "max_clock_skew_milliseconds",
-         "observation_contract_sha256", "observed_at",
-         "predictor_contract_sha256", "profiling_transaction_id",
-         "release_observation_sha256", "schema", "selector", "sequence",
-         "workload_observation_sha256"},
+        {"checksum_sha256", "completion", "confidence", "deployment_id",
+         "fresh_until", "generations", "max_clock_skew_milliseconds",
+         "method_evidence", "observation_contract_sha256", "observed_at",
+         "predictor_contract_sha256", "profiling_transaction_id", "schema",
+         "selector", "sequence"},
         "profiling input");
     ProfilingInputEnvelopeDraft draft;
-    draft.schema = parse_schema(required(document, "schema"));
+    draft.schema = parse_profiling_input_schema(required(document, "schema"));
     draft.deployment_id =
         require_string(required(document, "deployment_id"), "deployment ID");
     draft.sequence =
@@ -1384,17 +1580,14 @@ ParsedProfilingDocument parse_profiling_document(const json &document) {
                        "profiling transaction ID");
     draft.selector = parse_selector(required(document, "selector"));
     draft.generations = parse_generations(required(document, "generations"));
-    draft.attributed_claims = parse_claim_closure(
-        required(document, "attributed_claims"), "attributed claims");
-    draft.baseline_observation_sha256 =
-        require_string(required(document, "baseline_observation_sha256"),
-                       "baseline observation digest");
-    draft.workload_observation_sha256 =
-        require_string(required(document, "workload_observation_sha256"),
-                       "workload observation digest");
-    draft.release_observation_sha256 =
-        require_string(required(document, "release_observation_sha256"),
-                       "release observation digest");
+    draft.method_evidence =
+        parse_method_evidence(required(document, "method_evidence"));
+    draft.completion = parse_completion(required(document, "completion"));
+    if (require_string(required(document, "confidence"),
+                       "profiling confidence") != "calibrated_instance") {
+        reject(OverlayContractStatus::UnknownValue,
+               "profiling confidence is unknown");
+    }
     draft.observation_contract_sha256 =
         require_string(required(document, "observation_contract_sha256"),
                        "observation contract digest");
@@ -1408,14 +1601,6 @@ ParsedProfilingDocument parse_profiling_document(const json &document) {
     draft.max_clock_skew_milliseconds =
         require_u64(required(document, "max_clock_skew_milliseconds"),
                     "maximum clock skew");
-    draft.attribution_complete = require_bool(
-        required(document, "attribution_complete"), "attribution completeness");
-    draft.external_demand_absent =
-        require_bool(required(document, "external_demand_absent"),
-                     "external-demand absence");
-    draft.lifecycle_release_verified =
-        require_bool(required(document, "lifecycle_release_verified"),
-                     "lifecycle release verification");
     return ParsedProfilingDocument{
         std::move(draft),
         require_string(required(document, "checksum_sha256"),
@@ -1894,24 +2079,36 @@ ParsedProfilingInputEnvelope::generations() const noexcept {
     return draft_.generations;
 }
 
+const ProfilingMethodEvidenceDraft &
+ParsedProfilingInputEnvelope::method_evidence() const noexcept {
+    return draft_.method_evidence;
+}
+
+const MutationCompleteIntervalEvidenceDraft *
+ParsedProfilingInputEnvelope::mutation_complete_interval() const noexcept {
+    return std::get_if<MutationCompleteIntervalEvidenceDraft>(
+        &draft_.method_evidence);
+}
+
+const DifferentialRetainedGttEvidenceDraft *
+ParsedProfilingInputEnvelope::differential_retained_gtt() const noexcept {
+    return std::get_if<DifferentialRetainedGttEvidenceDraft>(
+        &draft_.method_evidence);
+}
+
 const std::vector<ClaimFamilyClosure> &
-ParsedProfilingInputEnvelope::attributed_claims() const noexcept {
-    return draft_.attributed_claims;
+ParsedProfilingInputEnvelope::manifest_claims() const noexcept {
+    return draft_.completion.manifest_claims;
+}
+
+std::string_view ParsedProfilingInputEnvelope::
+    ownership_recovery_evidence_sha256() const noexcept {
+    return draft_.completion.ownership_recovery_evidence_sha256;
 }
 
 std::string_view
-ParsedProfilingInputEnvelope::baseline_observation_sha256() const noexcept {
-    return draft_.baseline_observation_sha256;
-}
-
-std::string_view
-ParsedProfilingInputEnvelope::workload_observation_sha256() const noexcept {
-    return draft_.workload_observation_sha256;
-}
-
-std::string_view
-ParsedProfilingInputEnvelope::release_observation_sha256() const noexcept {
-    return draft_.release_observation_sha256;
+ParsedProfilingInputEnvelope::action_lease_closure_sha256() const noexcept {
+    return draft_.completion.action_lease_closure_sha256;
 }
 
 std::string_view
@@ -1935,18 +2132,6 @@ std::string_view ParsedProfilingInputEnvelope::fresh_until() const noexcept {
 std::uint64_t
 ParsedProfilingInputEnvelope::max_clock_skew_milliseconds() const noexcept {
     return draft_.max_clock_skew_milliseconds;
-}
-
-bool ParsedProfilingInputEnvelope::attribution_complete() const noexcept {
-    return draft_.attribution_complete;
-}
-
-bool ParsedProfilingInputEnvelope::external_demand_absent() const noexcept {
-    return draft_.external_demand_absent;
-}
-
-bool ParsedProfilingInputEnvelope::lifecycle_release_verified() const noexcept {
-    return draft_.lifecycle_release_verified;
 }
 
 std::string_view

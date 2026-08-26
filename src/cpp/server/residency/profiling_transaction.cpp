@@ -590,24 +590,27 @@ ProfilingTransactionResult ProfilingTransaction::run(ProfilingTransactionContext
         }
 
         ProfilingInputEnvelopeDraft input;
-        input.schema = supported_local_overlay_schema;
+        input.schema = supported_profiling_input_schema;
         input.deployment_id = std::move(context.deployment_id);
         input.sequence = context.sequence;
         input.profiling_transaction_id = std::move(context.profiling_transaction_id);
         input.selector = std::move(context.selector);
         input.generations = context.generations;
-        input.attributed_claims = workload_phase.attributed_claims();
-        input.baseline_observation_sha256 = *baseline_sha256;
-        input.workload_observation_sha256 = *workload_sha256;
-        input.release_observation_sha256 = *release_sha256;
+        MutationCompleteIntervalEvidenceDraft method_evidence;
+        method_evidence.baseline_observation_sha256 = *baseline_sha256;
+        method_evidence.workload_observation_sha256 = *workload_sha256;
+        method_evidence.release_observation_sha256 = *release_sha256;
+        input.method_evidence = std::move(method_evidence);
+        input.completion.manifest_claims = workload_phase.attributed_claims();
+        input.completion.ownership_recovery_evidence_sha256 =
+            std::move(context.ownership_recovery_evidence_sha256);
+        input.completion.action_lease_closure_sha256 =
+            std::move(context.action_lease_closure_sha256);
         input.observation_contract_sha256 = std::move(context.observation_contract_sha256);
         input.predictor_contract_sha256 = std::move(context.predictor_contract_sha256);
         input.observed_at = release_phase.observed_at();
         input.fresh_until = std::move(fresh_until);
         input.max_clock_skew_milliseconds = common_skew;
-        input.attribution_complete = true;
-        input.external_demand_absent = true;
-        input.lifecycle_release_verified = true;
 
         ParsedProfilingInputEnvelopeResult sealed;
         try {

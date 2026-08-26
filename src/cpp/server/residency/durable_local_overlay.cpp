@@ -220,10 +220,10 @@ bool rollback_target_was_reachable(
 bool qualification_claims_are_safe(
     const ParsedProfilingInputEnvelope &input,
     const ParsedLocalOverlayObject &overlay) {
-    auto attributed = check_claim_closure(input.attributed_claims());
+    auto manifest = check_claim_closure(input.manifest_claims());
     auto conservative = check_claim_closure(overlay.conservative_claims());
-    if (!attributed.accepted() || !conservative.accepted() ||
-        !checked_subtract(*conservative.claims, *attributed.claims)
+    if (!manifest.accepted() || !conservative.accepted() ||
+        !checked_subtract(*conservative.claims, *manifest.claims)
              .accepted()) {
         return false;
     }
@@ -235,30 +235,30 @@ bool qualification_claims_are_safe(
         ClaimFamily::CompatibilityExclusivity,
     };
     for (const auto family : families) {
-        const auto attributed_completeness =
-            attributed.claims->completeness(family);
+        const auto manifest_completeness =
+            manifest.claims->completeness(family);
         const auto conservative_completeness =
             conservative.claims->completeness(family);
-        if ((attributed_completeness == ClaimCompleteness::KnownZero &&
+        if ((manifest_completeness == ClaimCompleteness::KnownZero &&
              conservative_completeness == ClaimCompleteness::NotApplicable) ||
-            (attributed_completeness == ClaimCompleteness::Bounded &&
+            (manifest_completeness == ClaimCompleteness::Bounded &&
              conservative_completeness != ClaimCompleteness::Bounded)) {
             return false;
         }
     }
 
-    for (const auto &attributed_family : input.attributed_claims()) {
-        if (attributed_family.completeness != ClaimCompleteness::Bounded) {
+    for (const auto &manifest_family : input.manifest_claims()) {
+        if (manifest_family.completeness != ClaimCompleteness::Bounded) {
             continue;
         }
         for (const auto &safety_family : overlay.safety_margin_claims()) {
-            if (safety_family.family != attributed_family.family) {
+            if (safety_family.family != manifest_family.family) {
                 continue;
             }
-            for (const auto &attributed_entry : attributed_family.entries) {
+            for (const auto &manifest_entry : manifest_family.entries) {
                 for (const auto &safety_entry : safety_family.entries) {
                     if (safety_entry.constraint_id ==
-                        attributed_entry.constraint_id) {
+                        manifest_entry.constraint_id) {
                         return true;
                     }
                 }
@@ -498,6 +498,17 @@ public:
                 parsed_overlay.candidate->profiling_input_sha256()) {
                 return {LocalOverlayStoreStatus::DigestMismatch, std::nullopt};
             }
+            if (parsed_input.candidate->differential_retained_gtt() !=
+                nullptr) {
+                return {LocalOverlayStoreStatus::UnsupportedStorage,
+                        std::nullopt};
+            }
+            const auto *interval =
+                parsed_input.candidate->mutation_complete_interval();
+            if (interval == nullptr) {
+                return {LocalOverlayStoreStatus::CorruptOrRollback,
+                        std::nullopt};
+            }
 
             auto read_observation = [&](std::string_view sha256,
                                         std::string &bytes)
@@ -531,11 +542,11 @@ public:
             for (const auto &[sha256, bytes] :
                  std::array<std::pair<std::string_view, std::string *>, 3>{
                      std::pair<std::string_view, std::string *>{
-                         parsed_input.candidate->baseline_observation_sha256(),
+                         interval->baseline_observation_sha256,
                          &baseline_observation_bytes},
-                     {parsed_input.candidate->workload_observation_sha256(),
+                     {interval->workload_observation_sha256,
                       &workload_observation_bytes},
-                     {parsed_input.candidate->release_observation_sha256(),
+                     {interval->release_observation_sha256,
                       &release_observation_bytes}}) {
                 const auto observation_status =
                     read_observation(sha256, *bytes);
@@ -1014,6 +1025,7 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
 
     const ParsedProfilingInputEnvelope *selected_input = nullptr;
     const ParsedLocalOverlayObject *selected_overlay = nullptr;
+    const MutationCompleteIntervalEvidenceDraft *selected_interval = nullptr;
     const std::string *selected_baseline_observation_bytes = nullptr;
     const std::string *selected_workload_observation_bytes = nullptr;
     const std::string *selected_release_observation_bytes = nullptr;
@@ -1036,6 +1048,15 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
         }
         selected_input = &*activation.profiling_input_;
         selected_overlay = &*activation.overlay_;
+        if (selected_input->differential_retained_gtt() != nullptr) {
+            return release_with_status(
+                LocalOverlayStoreStatus::UnsupportedStorage);
+        }
+        selected_interval = selected_input->mutation_complete_interval();
+        if (selected_interval == nullptr) {
+            return release_with_status(
+                LocalOverlayStoreStatus::CorruptOrRollback);
+        }
         selected_baseline_observation_bytes =
             &*activation.baseline_observation_bytes_;
         selected_workload_observation_bytes =
@@ -1090,10 +1111,10 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
                 LocalOverlayStoreStatus::UnsupportedStorage);
         }
         if (*baseline_sha256 !=
-                selected_input->baseline_observation_sha256() ||
+                selected_interval->baseline_observation_sha256 ||
             *workload_sha256 !=
-                selected_input->workload_observation_sha256() ||
-            *release_sha256 != selected_input->release_observation_sha256()) {
+                selected_interval->workload_observation_sha256 ||
+            *release_sha256 != selected_interval->release_observation_sha256) {
             return release_with_status(LocalOverlayStoreStatus::DigestMismatch);
         }
     } else {
@@ -1130,6 +1151,11 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
         if (selected_overlay == nullptr || selected_input == nullptr ||
             activation.activated_at_ < selected_overlay->qualified_at() ||
             activation.activated_at_ >= selected_overlay->expires_at()) {
+            return release_with_status(
+                LocalOverlayStoreStatus::CorruptOrRollback);
+        }
+        selected_interval = selected_input->mutation_complete_interval();
+        if (selected_interval == nullptr) {
             return release_with_status(
                 LocalOverlayStoreStatus::CorruptOrRollback);
         }
@@ -1220,17 +1246,17 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
 
     if (activation.kind_ == LocalOverlayActivationKind::Qualification) {
         if (auto failed = publish_object(
-                selected_input->baseline_observation_sha256(),
+                selected_interval->baseline_observation_sha256,
                 *selected_baseline_observation_bytes)) {
             return std::move(*failed);
         }
         if (auto failed = publish_object(
-                selected_input->workload_observation_sha256(),
+                selected_interval->workload_observation_sha256,
                 *selected_workload_observation_bytes)) {
             return std::move(*failed);
         }
         if (auto failed = publish_object(
-                selected_input->release_observation_sha256(),
+                selected_interval->release_observation_sha256,
                 *selected_release_observation_bytes)) {
             return std::move(*failed);
         }

@@ -182,24 +182,58 @@ ParsedProfilingInputEnvelope profile_for(std::string deployment_id,
                                          std::string fresh_until =
                                              "2026-08-23T10:05:00Z") {
     ProfilingInputEnvelopeDraft draft;
+    draft.schema = supported_profiling_input_schema;
     draft.deployment_id = std::move(deployment_id);
     draft.sequence = sequence;
     draft.profiling_transaction_id =
         "profiling/" + std::to_string(sequence);
     draft.selector = selector();
     draft.generations = OverlaySourceGenerations{1, 2, 3, 4, 5, 6, 7};
-    draft.attributed_claims = claims(4096);
-    draft.baseline_observation_sha256 = observations.baseline_sha256;
-    draft.workload_observation_sha256 = observations.workload_sha256;
-    draft.release_observation_sha256 = observations.release_sha256;
+    MutationCompleteIntervalEvidenceDraft method_evidence;
+    method_evidence.baseline_observation_sha256 = observations.baseline_sha256;
+    method_evidence.workload_observation_sha256 = observations.workload_sha256;
+    method_evidence.release_observation_sha256 = observations.release_sha256;
+    draft.method_evidence = std::move(method_evidence);
+    draft.completion.manifest_claims = claims(4096);
+    draft.completion.ownership_recovery_evidence_sha256 = digest('c');
+    draft.completion.action_lease_closure_sha256 = digest('d');
     draft.observation_contract_sha256 = digest('e');
     draft.predictor_contract_sha256 = digest('f');
     draft.observed_at = "2026-08-23T10:00:00Z";
     draft.fresh_until = std::move(fresh_until);
     draft.max_clock_skew_milliseconds = 1000;
-    draft.attribution_complete = true;
-    draft.external_demand_absent = true;
-    draft.lifecycle_release_verified = true;
+    auto sealed = seal_profiling_input(std::move(draft));
+    require(sealed.accepted(), sealed.diagnostic);
+    return std::move(*sealed.candidate);
+}
+
+ParsedProfilingInputEnvelope differential_profile_for(
+    std::string deployment_id, std::uint64_t sequence,
+    std::string fresh_until = "2026-08-23T10:05:00Z") {
+    ProfilingInputEnvelopeDraft draft;
+    draft.schema = supported_profiling_input_schema;
+    draft.deployment_id = std::move(deployment_id);
+    draft.sequence = sequence;
+    draft.profiling_transaction_id =
+        "profiling/differential/" + std::to_string(sequence);
+    draft.selector = selector();
+    draft.generations = OverlaySourceGenerations{1, 2, 3, 4, 5, 6, 7};
+    DifferentialRetainedGttEvidenceDraft method_evidence;
+    method_evidence.retained_gtt_claim =
+        ClaimAmount{"gpu/gtt", ClaimUnit::Bytes, 4096};
+    method_evidence.calibration_evidence_sha256 = digest('a');
+    method_evidence.transient_envelope_sha256 = digest('b');
+    method_evidence.owner_projection_coverage =
+        ProfilingOwnerCoverage::Incomplete;
+    draft.method_evidence = std::move(method_evidence);
+    draft.completion.manifest_claims = claims(4096);
+    draft.completion.ownership_recovery_evidence_sha256 = digest('c');
+    draft.completion.action_lease_closure_sha256 = digest('d');
+    draft.observation_contract_sha256 = digest('e');
+    draft.predictor_contract_sha256 = digest('f');
+    draft.observed_at = "2026-08-23T10:00:00Z";
+    draft.fresh_until = std::move(fresh_until);
+    draft.max_clock_skew_milliseconds = 1000;
     auto sealed = seal_profiling_input(std::move(draft));
     require(sealed.accepted(), sealed.diagnostic);
     return std::move(*sealed.candidate);
@@ -689,6 +723,32 @@ void require_observation_admission_fails_before_writes() {
                     "write");
         }
     }
+}
+
+void require_differential_evidence_fails_before_writes() {
+    auto storage = JournalTestStorage::fresh();
+    auto store = storage.make_overlay_store(generous_limits());
+    auto empty = store.snapshot(TrustedLocalOverlayReplayFloor::uninitialized());
+    require(empty.status == LocalOverlayStoreStatus::Empty &&
+                empty.authority.has_value(),
+            "differential activation fixture did not start empty");
+
+    auto observations = observations_for(1);
+    auto profile = differential_profile_for(
+        std::string(empty.authority->deployment_id()), 1);
+    auto overlay = overlay_for(profile);
+
+    storage.reset_observations();
+    auto rejected = activate_qualification(
+        store, std::move(*empty.authority), std::move(profile),
+        std::move(overlay), std::move(observations), '4',
+        "2026-08-23T10:02:00Z");
+    const auto after = storage.snapshot();
+    require(rejected.status == LocalOverlayStoreStatus::UnsupportedStorage &&
+                !rejected.authority.has_value() &&
+                after.authority_root_bytes.empty() &&
+                !after.authority_mutation_attempted,
+            "differential evidence entered the three-observation store");
 }
 
 void require_claim_admission_fails_before_writes() {
@@ -1579,6 +1639,7 @@ int main() {
     require_full_history_rejects_qualification_before_writes();
     require_full_history_rejects_rollback_before_writes();
     require_observation_admission_fails_before_writes();
+    require_differential_evidence_fails_before_writes();
     require_claim_admission_fails_before_writes();
     require_qualification_at_fresh_until_fails_before_writes();
     require_historic_activation_freshness_boundary_fails_closed();

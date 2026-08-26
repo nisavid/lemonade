@@ -586,7 +586,7 @@
       "additionalProperties": false,
       "properties": {
         "major": {
-          "const": 1
+          "const": 2
         },
         "minor": {
           "const": 0
@@ -1118,7 +1118,7 @@
       "x-max-utf8-bytes": 20
     }
   },
-  "$id": "residency.profiling_input_envelope/1.0",
+  "$id": "residency.profiling_input_envelope/2.0",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "allOf": [
@@ -1130,19 +1130,6 @@
     }
   ],
   "properties": {
-    "attributed_claims": {
-      "$ref": "#/$defs/claim_closure"
-    },
-    "attribution_complete": {
-      "const": true
-    },
-    "baseline_observation_sha256": {
-      "maxLength": 64,
-      "minLength": 64,
-      "pattern": "^[0-9a-f]{64}$",
-      "type": "string",
-      "x-max-utf8-bytes": 64
-    },
     "checksum_sha256": {
       "maxLength": 64,
       "minLength": 64,
@@ -1150,11 +1137,39 @@
       "type": "string",
       "x-max-utf8-bytes": 64
     },
+    "completion": {
+      "additionalProperties": false,
+      "properties": {
+        "action_lease_closure_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        },
+        "manifest_claims": {
+          "$ref": "#/$defs/claim_closure"
+        },
+        "ownership_recovery_evidence_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-max-utf8-bytes": 64
+        }
+      },
+      "required": [
+        "action_lease_closure_sha256",
+        "manifest_claims",
+        "ownership_recovery_evidence_sha256"
+      ],
+      "type": "object"
+    },
+    "confidence": {
+      "const": "calibrated_instance"
+    },
     "deployment_id": {
       "$ref": "#/$defs/deployment_identity"
-    },
-    "external_demand_absent": {
-      "const": true
     },
     "fresh_until": {
       "$ref": "#/$defs/expiry"
@@ -1162,13 +1177,136 @@
     "generations": {
       "$ref": "#/$defs/source_generations"
     },
-    "lifecycle_release_verified": {
-      "const": true
-    },
     "max_clock_skew_milliseconds": {
       "maximum": 18446744073709551615,
       "minimum": 1,
       "type": "integer"
+    },
+    "method_evidence": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "baseline_observation_sha256": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string",
+              "x-max-utf8-bytes": 64
+            },
+            "covered_effect": {
+              "const": "complete_lifecycle"
+            },
+            "external_change_absent": {
+              "const": true
+            },
+            "lifecycle_envelope_complete": {
+              "const": true
+            },
+            "method": {
+              "const": "mutation_complete_interval"
+            },
+            "owner_projection_coverage": {
+              "const": "complete"
+            },
+            "release_observation_sha256": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string",
+              "x-max-utf8-bytes": 64
+            },
+            "workload_observation_sha256": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string",
+              "x-max-utf8-bytes": 64
+            }
+          },
+          "required": [
+            "baseline_observation_sha256",
+            "covered_effect",
+            "external_change_absent",
+            "lifecycle_envelope_complete",
+            "method",
+            "owner_projection_coverage",
+            "release_observation_sha256",
+            "workload_observation_sha256"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "calibration_evidence_sha256": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string",
+              "x-max-utf8-bytes": 64
+            },
+            "covered_effect": {
+              "const": "retained_gtt"
+            },
+            "method": {
+              "const": "differential_retained_gtt"
+            },
+            "owner_projection_coverage": {
+              "enum": [
+                "complete",
+                "incomplete",
+                "unknown"
+              ],
+              "maxLength": 10,
+              "minLength": 1,
+              "type": "string"
+            },
+            "retained_gtt_claim": {
+              "additionalProperties": false,
+              "properties": {
+                "amount": {
+                  "maximum": 18446744073709551615,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "constraint_id": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[\\u0021-\\u007e]+$",
+                  "type": "string",
+                  "x-max-utf8-bytes": 128
+                },
+                "unit": {
+                  "const": "bytes"
+                }
+              },
+              "required": [
+                "amount",
+                "constraint_id",
+                "unit"
+              ],
+              "type": "object"
+            },
+            "transient_envelope_sha256": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string",
+              "x-max-utf8-bytes": 64
+            }
+          },
+          "required": [
+            "calibration_evidence_sha256",
+            "covered_effect",
+            "method",
+            "owner_projection_coverage",
+            "retained_gtt_claim",
+            "transient_envelope_sha256"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "observation_contract_sha256": {
       "maxLength": 64,
@@ -1194,13 +1332,6 @@
       "type": "string",
       "x-max-utf8-bytes": 128
     },
-    "release_observation_sha256": {
-      "maxLength": 64,
-      "minLength": 64,
-      "pattern": "^[0-9a-f]{64}$",
-      "type": "string",
-      "x-max-utf8-bytes": 64
-    },
     "schema": {
       "$ref": "#/$defs/schema_version"
     },
@@ -1211,13 +1342,6 @@
       "maximum": 18446744073709551615,
       "minimum": 1,
       "type": "integer"
-    },
-    "workload_observation_sha256": {
-      "maxLength": 64,
-      "minLength": 64,
-      "pattern": "^[0-9a-f]{64}$",
-      "type": "string",
-      "x-max-utf8-bytes": 64
     }
   },
   "required": [
@@ -1227,18 +1351,14 @@
     "profiling_transaction_id",
     "selector",
     "generations",
-    "attributed_claims",
-    "baseline_observation_sha256",
-    "workload_observation_sha256",
-    "release_observation_sha256",
+    "method_evidence",
+    "completion",
+    "confidence",
     "observation_contract_sha256",
     "predictor_contract_sha256",
     "observed_at",
     "fresh_until",
     "max_clock_skew_milliseconds",
-    "attribution_complete",
-    "external_demand_absent",
-    "lifecycle_release_verified",
     "checksum_sha256"
   ],
   "title": "Profiling Input Envelope",
