@@ -15,6 +15,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -41,6 +42,12 @@ static_assert(std::is_same_v<
 static_assert(noexcept(std::declval<ProfilingWorkloadDriver &>().release(
     std::declval<Router &>(),
     std::declval<const ProfilingTransactionContext &>())));
+static_assert(noexcept(
+    ProfilingWorkloadStepResult::cancelled(std::string_view{})));
+static_assert(noexcept(
+    ProfilingWorkloadStepResult::failed(std::string_view{})));
+static_assert(noexcept(
+    ProfilingWorkloadStepResult::ambiguous(std::string_view{})));
 
 struct TestState {
     std::atomic<bool> ok{true};
