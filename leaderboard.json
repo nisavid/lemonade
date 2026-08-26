@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-08-26T02:28:29.162449+00:00",
+  "run_id": "32546321811",
+  "run_url": "https://github.com/nisavid/lemonade/actions/runs/32546321811",
+  "repo": "nisavid/lemonade",
+  "repo_url": "https://github.com/nisavid/lemonade",
+  "actions_url": "https://github.com/nisavid/lemonade/actions/workflows/benchmark-regression.yml",
+  "commit": "388c16ff74265664e080be3e85de423710dc9718",
+  "lemonade_version": null,
+  "by_model_scenario": {},
+  "history": {}
+}
