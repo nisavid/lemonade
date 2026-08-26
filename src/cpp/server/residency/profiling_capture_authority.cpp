@@ -17,6 +17,52 @@
 #include <vector>
 
 namespace lemon::residency {
+
+ProfilingWorkloadStepResult::ProfilingWorkloadStepResult(
+    ProfilingWorkloadStepStatus status,
+    std::string diagnostic) noexcept
+    : status_(status), diagnostic_(std::move(diagnostic)) {}
+
+ProfilingWorkloadStepResult ProfilingWorkloadStepResult::success() noexcept {
+    return ProfilingWorkloadStepResult{
+        ProfilingWorkloadStepStatus::Succeeded, {}};
+}
+
+ProfilingWorkloadStepResult ProfilingWorkloadStepResult::cancelled(
+    std::string diagnostic) {
+    return ProfilingWorkloadStepResult{
+        ProfilingWorkloadStepStatus::Cancelled,
+        profiling_internal::bounded_diagnostic(std::move(diagnostic))};
+}
+
+ProfilingWorkloadStepResult ProfilingWorkloadStepResult::failed(
+    std::string diagnostic) {
+    return ProfilingWorkloadStepResult{
+        ProfilingWorkloadStepStatus::Failed,
+        profiling_internal::bounded_diagnostic(std::move(diagnostic))};
+}
+
+ProfilingWorkloadStepResult ProfilingWorkloadStepResult::ambiguous(
+    std::string diagnostic) {
+    return ProfilingWorkloadStepResult{
+        ProfilingWorkloadStepStatus::Ambiguous,
+        profiling_internal::bounded_diagnostic(std::move(diagnostic))};
+}
+
+ProfilingWorkloadStepStatus
+ProfilingWorkloadStepResult::status() const noexcept {
+    return status_;
+}
+
+const std::string &
+ProfilingWorkloadStepResult::diagnostic() const noexcept {
+    return diagnostic_;
+}
+
+bool ProfilingWorkloadStepResult::succeeded() const noexcept {
+    return status_ == ProfilingWorkloadStepStatus::Succeeded;
+}
+
 namespace {
 
 using SteadyClock = std::chrono::steady_clock;
@@ -330,16 +376,19 @@ public:
 
     void enter() noexcept { entered_ = true; }
 
-    void release() noexcept {
-        if (!entered_ || released_) return;
+    const ProfilingWorkloadStepResult *release() noexcept {
+        if (!entered_) return nullptr;
+        if (released_) return result_ ? &*result_ : nullptr;
         released_ = true;
-        workload_.release(router_, context_);
+        result_.emplace(workload_.release(router_, context_));
+        return &*result_;
     }
 
 private:
     Router &router_;
     const ProfilingTransactionContext &context_;
     ProfilingWorkloadDriver &workload_;
+    std::optional<ProfilingWorkloadStepResult> result_;
     bool entered_ = false;
     bool released_ = false;
 };
@@ -393,15 +442,17 @@ public:
         }
 
         WorkloadReleaseGuard release_guard(router_, context_, workload_);
-        bool workload_completed = true;
+        auto workload_result = ProfilingWorkloadStepResult::ambiguous(
+            "profiling workload result was not reported");
         release_guard.enter();
         try {
-            workload_.run(router_, context_, [this] {
+            workload_result = workload_.run(router_, context_, [this] {
                 return observer_failed_.load(std::memory_order_acquire) ||
                        cancelled(should_abort_);
             });
         } catch (...) {
-            workload_completed = false;
+            workload_result = ProfilingWorkloadStepResult::ambiguous(
+                "profiling workload result was not reported");
         }
         const bool capture_cancelled = cancelled(should_abort_);
 
@@ -429,7 +480,7 @@ public:
             return finish_failed_capture();
         }
 
-        release_guard.release();
+        const auto *release_result = release_guard.release();
         {
             std::lock_guard<std::mutex> lock(mutex_);
             state_.release_done = true;
@@ -442,9 +493,21 @@ public:
         }
         join_observer();
 
-        if (!workload_completed || capture_cancelled ||
-            cancelled(should_abort_)) {
+        if (capture_cancelled || cancelled(should_abort_)) {
             return capture_failure("profiling workload did not complete");
+        }
+        if (!workload_result.succeeded()) {
+            return capture_failure(
+                workload_result.diagnostic().empty()
+                    ? "profiling workload did not complete"
+                    : workload_result.diagnostic());
+        }
+        if (release_result == nullptr || !release_result->succeeded()) {
+            return capture_failure(
+                release_result == nullptr ||
+                        release_result->diagnostic().empty()
+                    ? "profiling workload release was not verified"
+                    : release_result->diagnostic());
         }
         return seal_capture();
     }

@@ -3,6 +3,7 @@
 #include "lemon/residency/profiling_provider.h"
 
 #include <chrono>
+#include <string>
 
 namespace lemon {
 
@@ -17,6 +18,40 @@ struct ProfilingCaptureSchedule {
     ProfilingCollectionClock clock;
 };
 
+enum class ProfilingWorkloadStepStatus {
+    Succeeded,
+    Cancelled,
+    Failed,
+    Ambiguous,
+};
+
+class ProfilingWorkloadStepResult {
+public:
+    ProfilingWorkloadStepResult(const ProfilingWorkloadStepResult &) = default;
+    ProfilingWorkloadStepResult(ProfilingWorkloadStepResult &&) noexcept = default;
+    ProfilingWorkloadStepResult &
+    operator=(const ProfilingWorkloadStepResult &) = default;
+    ProfilingWorkloadStepResult &
+    operator=(ProfilingWorkloadStepResult &&) noexcept = default;
+
+    static ProfilingWorkloadStepResult success() noexcept;
+    static ProfilingWorkloadStepResult cancelled(std::string diagnostic);
+    static ProfilingWorkloadStepResult failed(std::string diagnostic);
+    static ProfilingWorkloadStepResult ambiguous(std::string diagnostic);
+
+    ProfilingWorkloadStepStatus status() const noexcept;
+    const std::string &diagnostic() const noexcept;
+    bool succeeded() const noexcept;
+
+private:
+    ProfilingWorkloadStepResult(ProfilingWorkloadStepStatus status,
+                                std::string diagnostic) noexcept;
+
+    ProfilingWorkloadStepStatus status_ =
+        ProfilingWorkloadStepStatus::Ambiguous;
+    std::string diagnostic_;
+};
+
 class ProfilingWorkloadDriver {
 public:
     virtual ~ProfilingWorkloadDriver() = default;
@@ -24,11 +59,11 @@ public:
     // Both calls are synchronous, run on the Router lease owner, retain no
     // references, and leave no unjoined work. Release is self-contained, does
     // not wait for observation progress, and safely completes a partial run.
-    virtual void run(
+    virtual ProfilingWorkloadStepResult run(
         Router &router,
         const ProfilingTransactionContext &context,
         const ProfilingCancellationCheck &should_abort) = 0;
-    virtual void release(
+    virtual ProfilingWorkloadStepResult release(
         Router &router,
         const ProfilingTransactionContext &context) noexcept = 0;
 };

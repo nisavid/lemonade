@@ -27,6 +27,17 @@ using namespace lemon::residency;
 using namespace std::chrono_literals;
 
 static_assert(std::has_virtual_destructor_v<ProfilingWorkloadDriver>);
+static_assert(std::is_same_v<
+              decltype(std::declval<ProfilingWorkloadDriver &>().run(
+                  std::declval<Router &>(),
+                  std::declval<const ProfilingTransactionContext &>(),
+                  std::declval<const ProfilingCancellationCheck &>())),
+              ProfilingWorkloadStepResult>);
+static_assert(std::is_same_v<
+              decltype(std::declval<ProfilingWorkloadDriver &>().release(
+                  std::declval<Router &>(),
+                  std::declval<const ProfilingTransactionContext &>())),
+              ProfilingWorkloadStepResult>);
 static_assert(noexcept(std::declval<ProfilingWorkloadDriver &>().release(
     std::declval<Router &>(),
     std::declval<const ProfilingTransactionContext &>())));
@@ -772,15 +783,19 @@ private:
 
 class CountingDriver final : public ProfilingWorkloadDriver {
 public:
-    void run(Router &,
-             const ProfilingTransactionContext &,
-             const ProfilingCancellationCheck &) override {
+    ProfilingWorkloadStepResult run(
+        Router &,
+        const ProfilingTransactionContext &,
+        const ProfilingCancellationCheck &) override {
         ++run_calls;
+        return ProfilingWorkloadStepResult::success();
     }
 
-    void release(Router &,
-                 const ProfilingTransactionContext &) noexcept override {
+    ProfilingWorkloadStepResult release(
+        Router &,
+        const ProfilingTransactionContext &) noexcept override {
         ++release_calls;
+        return ProfilingWorkloadStepResult::success();
     }
 
     std::size_t run_calls = 0;
@@ -828,9 +843,10 @@ public:
     explicit CoordinatedDriver(DynamicIntervalSource &source)
         : source_(source) {}
 
-    void run(Router &router,
-             const ProfilingTransactionContext &context,
-             const ProfilingCancellationCheck &should_abort) override {
+    ProfilingWorkloadStepResult run(
+        Router &router,
+        const ProfilingTransactionContext &context,
+        const ProfilingCancellationCheck &should_abort) override {
         ++run_calls;
         run_thread = std::this_thread::get_id();
         run_thread_token = current_thread_token();
@@ -838,10 +854,16 @@ public:
         transaction_id = context.profiling_transaction_id;
         source_.publish_workload();
         aborted_during_run = should_abort && should_abort();
+        if (aborted_during_run) {
+            return ProfilingWorkloadStepResult::cancelled(
+                "profiling workload was cancelled");
+        }
+        return ProfilingWorkloadStepResult::success();
     }
 
-    void release(Router &router,
-                 const ProfilingTransactionContext &context) noexcept override {
+    ProfilingWorkloadStepResult release(
+        Router &router,
+        const ProfilingTransactionContext &context) noexcept override {
         ++release_calls;
         release_thread = std::this_thread::get_id();
         release_thread_token = current_thread_token();
@@ -851,7 +873,10 @@ public:
             source_.publish_release();
         } catch (...) {
             release_failed = true;
+            return ProfilingWorkloadStepResult::failed(
+                "profiling workload release failed");
         }
+        return ProfilingWorkloadStepResult::success();
     }
 
     DynamicIntervalSource &source_;
@@ -885,9 +910,10 @@ public:
           publish_release_(publish_release),
           caller_cancelled_(caller_cancelled) {}
 
-    void run(Router &,
-             const ProfilingTransactionContext &,
-             const ProfilingCancellationCheck &) override {
+    ProfilingWorkloadStepResult run(
+        Router &,
+        const ProfilingTransactionContext &,
+        const ProfilingCancellationCheck &) override {
         ++run_calls;
         source_.publish_workload();
         if (outcome_ == DriverRunOutcome::Cancel && caller_cancelled_) {
@@ -896,17 +922,29 @@ public:
         if (outcome_ == DriverRunOutcome::Throw) {
             throw std::runtime_error("adversarial workload failure");
         }
+        if (outcome_ == DriverRunOutcome::Cancel) {
+            return ProfilingWorkloadStepResult::cancelled(
+                "adversarial workload cancelled");
+        }
+        return ProfilingWorkloadStepResult::success();
     }
 
-    void release(Router &,
-                 const ProfilingTransactionContext &) noexcept override {
+    ProfilingWorkloadStepResult release(
+        Router &,
+        const ProfilingTransactionContext &) noexcept override {
         ++release_calls;
-        if (!publish_release_) return;
+        if (!publish_release_) {
+            return ProfilingWorkloadStepResult::ambiguous(
+                "workload release was not verified");
+        }
         try {
             source_.publish_release();
         } catch (...) {
             release_failed = true;
+            return ProfilingWorkloadStepResult::failed(
+                "workload release failed");
         }
+        return ProfilingWorkloadStepResult::success();
     }
 
     DynamicIntervalSource &source_;
@@ -916,6 +954,67 @@ public:
     std::size_t run_calls = 0;
     std::size_t release_calls = 0;
     bool release_failed = false;
+};
+
+ProfilingWorkloadStepResult reported_step_result(
+    ProfilingWorkloadStepStatus status,
+    std::string diagnostic) {
+    switch (status) {
+    case ProfilingWorkloadStepStatus::Succeeded:
+        return ProfilingWorkloadStepResult::success();
+    case ProfilingWorkloadStepStatus::Cancelled:
+        return ProfilingWorkloadStepResult::cancelled(
+            std::move(diagnostic));
+    case ProfilingWorkloadStepStatus::Failed:
+        return ProfilingWorkloadStepResult::failed(std::move(diagnostic));
+    case ProfilingWorkloadStepStatus::Ambiguous:
+        return ProfilingWorkloadStepResult::ambiguous(
+            std::move(diagnostic));
+    default:
+        return ProfilingWorkloadStepResult::ambiguous(
+            "workload step returned an unknown result");
+    }
+}
+
+class ReportingDriver final : public ProfilingWorkloadDriver {
+public:
+    ReportingDriver(DynamicIntervalSource &source,
+                    ProfilingWorkloadStepStatus run_status,
+                    ProfilingWorkloadStepStatus release_status)
+        : source_(source), run_status_(run_status),
+          release_status_(release_status) {}
+
+    ProfilingWorkloadStepResult run(
+        Router &,
+        const ProfilingTransactionContext &,
+        const ProfilingCancellationCheck &) override {
+        ++run_calls;
+        source_.publish_workload();
+        return reported_step_result(run_status_, "model load failed");
+    }
+
+    ProfilingWorkloadStepResult release(
+        Router &,
+        const ProfilingTransactionContext &) noexcept override {
+        ++release_calls;
+        try {
+            source_.publish_release();
+        } catch (...) {
+            return ProfilingWorkloadStepResult::failed(
+                "workload release transition failed");
+        }
+        return reported_step_result(
+            release_status_,
+            release_status_ == ProfilingWorkloadStepStatus::Ambiguous
+                ? "workload release outcome is ambiguous"
+                : "workload release failed");
+    }
+
+    DynamicIntervalSource &source_;
+    ProfilingWorkloadStepStatus run_status_;
+    ProfilingWorkloadStepStatus release_status_;
+    std::size_t run_calls = 0;
+    std::size_t release_calls = 0;
 };
 
 void require_empty_capture(TestState &state,
@@ -1429,6 +1528,79 @@ void test_workload_failure_and_cancellation_close_the_interval(
         "caller cancellation releases once, finishes once, joins the observer, and returns no live token");
 }
 
+void test_reported_workload_results_gate_phase_evidence(
+    TestState &state,
+    Router &router) {
+    const auto derivation_contract = contract();
+    const auto transaction_context = context(derivation_contract);
+    const auto bounded_failure = ProfilingWorkloadStepResult::failed(
+        std::string(max_local_overlay_diagnostic_bytes + 64, 'x'));
+    state.require(
+        bounded_failure.status() == ProfilingWorkloadStepStatus::Failed &&
+            !bounded_failure.succeeded() &&
+            bounded_failure.diagnostic().size() <=
+                max_local_overlay_diagnostic_bytes,
+        "workload step results retain an explicit state and bounded diagnostic");
+
+    auto load_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource load_source(derivation_contract, load_clock);
+    ReportingDriver load_driver(
+        load_source, ProfilingWorkloadStepStatus::Failed,
+        ProfilingWorkloadStepStatus::Succeeded);
+    ProfilingCaptureAuthority load_authority(
+        derivation_contract, load_source, schedule(load_clock));
+    const auto load_capture = load_authority.capture(
+        router, transaction_context, load_driver, [] { return false; });
+    require_empty_capture(
+        state, load_capture,
+        "a reported load failure publishes no phase-evidence candidate");
+    state.require(
+        load_driver.run_calls == 1 && load_driver.release_calls == 1 &&
+            load_source.finish_calls() == 1 && !load_source.active() &&
+            load_source.observer_thread_exited(),
+        "a reported load failure still releases, drains, and joins exactly once");
+
+    auto ambiguous_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource ambiguous_source(
+        derivation_contract, ambiguous_clock);
+    ReportingDriver ambiguous_driver(
+        ambiguous_source, ProfilingWorkloadStepStatus::Succeeded,
+        ProfilingWorkloadStepStatus::Ambiguous);
+    ProfilingCaptureAuthority ambiguous_authority(
+        derivation_contract, ambiguous_source, schedule(ambiguous_clock));
+    const auto ambiguous_capture = ambiguous_authority.capture(
+        router, transaction_context, ambiguous_driver,
+        [] { return false; });
+    require_empty_capture(
+        state, ambiguous_capture,
+        "an ambiguous release publishes no phase-evidence candidate");
+    state.require(
+        ambiguous_driver.run_calls == 1 &&
+            ambiguous_driver.release_calls == 1 &&
+            ambiguous_source.finish_calls() == 1 &&
+            !ambiguous_source.active() &&
+            ambiguous_source.observer_thread_exited(),
+        "an ambiguous release still drains and joins exactly once");
+
+    auto failed_clock = std::make_shared<SharedCaptureClock>();
+    DynamicIntervalSource failed_source(derivation_contract, failed_clock);
+    ReportingDriver failed_driver(
+        failed_source, ProfilingWorkloadStepStatus::Succeeded,
+        ProfilingWorkloadStepStatus::Failed);
+    ProfilingCaptureAuthority failed_authority(
+        derivation_contract, failed_source, schedule(failed_clock));
+    const auto failed_capture = failed_authority.capture(
+        router, transaction_context, failed_driver, [] { return false; });
+    require_empty_capture(
+        state, failed_capture,
+        "a failed release publishes no phase-evidence candidate");
+    state.require(
+        failed_driver.run_calls == 1 && failed_driver.release_calls == 1 &&
+            failed_source.finish_calls() == 1 && !failed_source.active() &&
+            failed_source.observer_thread_exited(),
+        "a failed release still drains and joins exactly once");
+}
+
 void test_predispatch_abort_never_enters_workload_ownership(
     TestState &state,
     Router &router) {
@@ -1677,6 +1849,7 @@ int main() {
             state, router);
         test_workload_failure_and_cancellation_close_the_interval(
             state, router);
+        test_reported_workload_results_gate_phase_evidence(state, router);
         test_predispatch_abort_never_enters_workload_ownership(
             state, router);
         test_release_settling_abort_closes_owned_workload(state, router);
