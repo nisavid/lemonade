@@ -20,8 +20,22 @@ namespace lemon::residency {
 
 ProfilingWorkloadStepResult::ProfilingWorkloadStepResult(
     ProfilingWorkloadStepStatus status,
-    std::string diagnostic) noexcept
-    : status_(status), diagnostic_(std::move(diagnostic)) {}
+    std::string_view diagnostic) noexcept
+    : status_(status) {
+    auto boundary = diagnostic.size();
+    if (boundary > diagnostic_.size()) {
+        boundary = diagnostic_.size();
+        while (boundary > 0 &&
+               (static_cast<unsigned char>(diagnostic[boundary]) & 0xc0u) ==
+                   0x80u) {
+            --boundary;
+        }
+    }
+    for (std::size_t index = 0; index < boundary; ++index) {
+        diagnostic_[index] = diagnostic[index];
+    }
+    diagnostic_size_ = boundary;
+}
 
 ProfilingWorkloadStepResult ProfilingWorkloadStepResult::success() noexcept {
     return ProfilingWorkloadStepResult{
@@ -29,24 +43,21 @@ ProfilingWorkloadStepResult ProfilingWorkloadStepResult::success() noexcept {
 }
 
 ProfilingWorkloadStepResult ProfilingWorkloadStepResult::cancelled(
-    std::string diagnostic) {
+    std::string_view diagnostic) noexcept {
     return ProfilingWorkloadStepResult{
-        ProfilingWorkloadStepStatus::Cancelled,
-        profiling_internal::bounded_diagnostic(std::move(diagnostic))};
+        ProfilingWorkloadStepStatus::Cancelled, diagnostic};
 }
 
 ProfilingWorkloadStepResult ProfilingWorkloadStepResult::failed(
-    std::string diagnostic) {
+    std::string_view diagnostic) noexcept {
     return ProfilingWorkloadStepResult{
-        ProfilingWorkloadStepStatus::Failed,
-        profiling_internal::bounded_diagnostic(std::move(diagnostic))};
+        ProfilingWorkloadStepStatus::Failed, diagnostic};
 }
 
 ProfilingWorkloadStepResult ProfilingWorkloadStepResult::ambiguous(
-    std::string diagnostic) {
+    std::string_view diagnostic) noexcept {
     return ProfilingWorkloadStepResult{
-        ProfilingWorkloadStepStatus::Ambiguous,
-        profiling_internal::bounded_diagnostic(std::move(diagnostic))};
+        ProfilingWorkloadStepStatus::Ambiguous, diagnostic};
 }
 
 ProfilingWorkloadStepStatus
@@ -54,9 +65,9 @@ ProfilingWorkloadStepResult::status() const noexcept {
     return status_;
 }
 
-const std::string &
+std::string_view
 ProfilingWorkloadStepResult::diagnostic() const noexcept {
-    return diagnostic_;
+    return {diagnostic_.data(), diagnostic_size_};
 }
 
 bool ProfilingWorkloadStepResult::succeeded() const noexcept {
@@ -77,13 +88,11 @@ using profiling_internal::sha256_hex;
 constexpr std::string_view phase_provenance_domain =
     "lemonade/profiling-phase-interval/v1";
 
-ProfilingTransactionCapture capture_failure(std::string diagnostic) {
-    if (diagnostic.empty()) {
-        diagnostic = "profiling interval capture failed";
-    }
+ProfilingTransactionCapture capture_failure(std::string_view diagnostic) {
+    if (diagnostic.empty()) diagnostic = "profiling interval capture failed";
     return ProfilingTransactionCapture{
         {}, {}, {},
-        profiling_internal::bounded_diagnostic(std::move(diagnostic))};
+        profiling_internal::bounded_diagnostic(std::string(diagnostic))};
 }
 
 void initialize_clock(ProfilingCollectionClock &clock) {

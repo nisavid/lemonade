@@ -2,8 +2,10 @@
 
 #include "lemon/residency/profiling_provider.h"
 
+#include <array>
 #include <chrono>
-#include <string>
+#include <cstddef>
+#include <string_view>
 
 namespace lemon {
 
@@ -35,21 +37,25 @@ public:
     operator=(ProfilingWorkloadStepResult &&) noexcept = default;
 
     static ProfilingWorkloadStepResult success() noexcept;
-    static ProfilingWorkloadStepResult cancelled(std::string diagnostic);
-    static ProfilingWorkloadStepResult failed(std::string diagnostic);
-    static ProfilingWorkloadStepResult ambiguous(std::string diagnostic);
+    static ProfilingWorkloadStepResult
+    cancelled(std::string_view diagnostic) noexcept;
+    static ProfilingWorkloadStepResult
+    failed(std::string_view diagnostic) noexcept;
+    static ProfilingWorkloadStepResult
+    ambiguous(std::string_view diagnostic) noexcept;
 
     ProfilingWorkloadStepStatus status() const noexcept;
-    const std::string &diagnostic() const noexcept;
+    std::string_view diagnostic() const noexcept;
     bool succeeded() const noexcept;
 
 private:
     ProfilingWorkloadStepResult(ProfilingWorkloadStepStatus status,
-                                std::string diagnostic) noexcept;
+                                std::string_view diagnostic) noexcept;
 
     ProfilingWorkloadStepStatus status_ =
         ProfilingWorkloadStepStatus::Ambiguous;
-    std::string diagnostic_;
+    std::array<char, max_local_overlay_diagnostic_bytes> diagnostic_{};
+    std::size_t diagnostic_size_ = 0;
 };
 
 class ProfilingWorkloadDriver {
