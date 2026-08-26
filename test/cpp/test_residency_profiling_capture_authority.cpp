@@ -426,6 +426,8 @@ struct DynamicIntervalScenario {
     std::shared_ptr<std::atomic<bool>> stall_reads_until_abort;
     std::optional<DynamicFrameReading> release_stability_event;
     std::optional<DynamicFrameReading> final_drain_event;
+    ProfilingIntervalSourceError workload_read_error =
+        ProfilingIntervalSourceError::None;
     bool throw_on_finish = false;
 };
 
@@ -522,6 +524,17 @@ public:
 
         auto &stage_read_calls = read_calls_by_stage_[stage_index(stage_)];
         ++stage_read_calls;
+        if (stage_ == SourceStage::Workload &&
+            scenario_.workload_read_error !=
+                ProfilingIntervalSourceError::None) {
+            return failure_batch(
+                scenario_.workload_read_error,
+                after_event_watermark,
+                scenario_.workload_read_error ==
+                        ProfilingIntervalSourceError::Cancelled
+                    ? "dynamic workload observation cancelled"
+                    : "dynamic workload observation failed");
+        }
         if (stage_ == SourceStage::Baseline && stage_read_calls == 1 &&
             !scenario_.baseline_stability_events.empty()) {
             for (const auto &reading :
@@ -1191,6 +1204,40 @@ public:
     std::string_view run_diagnostic_;
     ProfilingWorkloadStepStatus release_status_;
     std::string_view release_diagnostic_;
+    std::size_t run_calls = 0;
+    std::size_t release_calls = 0;
+};
+
+class ObserverFailureCancellationDriver final
+    : public ProfilingWorkloadDriver {
+public:
+    ObserverFailureCancellationDriver(
+        DynamicIntervalSource &source,
+        std::atomic<bool> &caller_cancelled)
+        : source_(source), caller_cancelled_(caller_cancelled) {}
+
+    ProfilingWorkloadStepResult run(
+        Router &,
+        const ProfilingTransactionContext &,
+        const ProfilingCancellationCheck &should_abort) override {
+        ++run_calls;
+        source_.publish_workload();
+        while (!should_abort || !should_abort()) {
+            std::this_thread::yield();
+        }
+        caller_cancelled_.store(true, std::memory_order_release);
+        return ProfilingWorkloadStepResult::success();
+    }
+
+    ProfilingWorkloadStepResult release(
+        Router &,
+        const ProfilingTransactionContext &) noexcept override {
+        ++release_calls;
+        return ProfilingWorkloadStepResult::success();
+    }
+
+    DynamicIntervalSource &source_;
+    std::atomic<bool> &caller_cancelled_;
     std::size_t run_calls = 0;
     std::size_t release_calls = 0;
 };
@@ -1909,6 +1956,55 @@ void test_boundary_cancellation_preserves_release_ambiguity(
         "workload-boundary cancellation preserves release ambiguity and cleans up exactly once");
 }
 
+void test_observer_status_precedes_caller_cancellation(
+    TestState &state,
+    Router &router) {
+    const auto derivation_contract = contract();
+    const auto transaction_context = context(derivation_contract);
+    struct ObserverStatusCase {
+        ProfilingIntervalSourceError error;
+        std::string_view expected_diagnostic;
+        const char *message;
+    };
+    const std::array<ObserverStatusCase, 2> observer_status_cases{{
+        {ProfilingIntervalSourceError::Failed,
+         "dynamic workload observation failed",
+         "an actionable observer failure remains specific when cancellation follows"},
+        {ProfilingIntervalSourceError::Cancelled,
+         "profiling interval capture cancelled",
+         "an observer cancellation retains the canonical cancellation diagnostic"},
+    }};
+
+    for (const auto &observer_status_case : observer_status_cases) {
+        std::atomic<bool> caller_cancelled{false};
+        DynamicIntervalScenario scenario;
+        scenario.workload_read_error = observer_status_case.error;
+        auto shared_clock = std::make_shared<SharedCaptureClock>();
+        DynamicIntervalSource source(
+            derivation_contract, shared_clock, std::move(scenario));
+        ObserverFailureCancellationDriver driver(source, caller_cancelled);
+        ProfilingCaptureAuthority authority(
+            derivation_contract, source, schedule(shared_clock));
+
+        const auto captured = authority.capture(
+            router, transaction_context, driver, [&] {
+                return caller_cancelled.load(std::memory_order_acquire);
+            });
+
+        require_empty_capture(
+            state, captured,
+            "an observer rejection followed by cancellation publishes no phase-evidence candidate");
+        state.require(
+            caller_cancelled.load(std::memory_order_acquire) &&
+                captured.diagnostic ==
+                    observer_status_case.expected_diagnostic &&
+                driver.run_calls == 1 && driver.release_calls == 1 &&
+                source.finish_calls() == 1 && !source.active() &&
+                source.observer_thread_exited(),
+            observer_status_case.message);
+    }
+}
+
 void test_predispatch_abort_never_enters_workload_ownership(
     TestState &state,
     Router &router) {
@@ -2162,6 +2258,7 @@ int main() {
             state, router);
         test_boundary_cancellation_preserves_release_ambiguity(
             state, router);
+        test_observer_status_precedes_caller_cancellation(state, router);
         test_predispatch_abort_never_enters_workload_ownership(
             state, router);
         test_release_settling_abort_closes_owned_workload(state, router);
