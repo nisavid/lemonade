@@ -1052,6 +1052,29 @@ def require_local_overlay_schemas(
     )
     root = contract_validator(schemas["overlay_activation_root"], registry=resources)
 
+    for path, mutate in (
+        (
+            "schema.major",
+            lambda document: document["schema"].__setitem__("major", 2.0),
+        ),
+        (
+            "sequence",
+            lambda document: document.__setitem__("sequence", 2.0),
+        ),
+        (
+            "method_evidence.retained_gtt_claim.amount",
+            lambda document: document["method_evidence"][
+                "retained_gtt_claim"
+            ].__setitem__("amount", 4096.0),
+        ),
+    ):
+        integral_float = copy.deepcopy(examples["profiling_input_envelope"])
+        mutate(integral_float)
+        require(
+            not profiling.is_valid(integral_float),
+            f"profiling-input schema accepted integral float at {path}",
+        )
+
     profiling_input_fields = {
         "schema",
         "deployment_id",
@@ -1061,7 +1084,6 @@ def require_local_overlay_schemas(
         "generations",
         "method_evidence",
         "completion",
-        "confidence",
         "observation_contract_sha256",
         "predictor_contract_sha256",
         "observed_at",
@@ -1279,11 +1301,11 @@ def require_local_overlay_schemas(
         "profiling schema accepted a legacy completeness boolean",
     )
 
-    noncalibrated = copy.deepcopy(examples["profiling_input_envelope"])
-    noncalibrated["confidence"] = "validated_predictor"
+    premature_confidence = copy.deepcopy(examples["profiling_input_envelope"])
+    premature_confidence["confidence"] = "calibrated_instance"
     require(
-        not profiling.is_valid(noncalibrated),
-        "profiling schema accepted non-calibrated confidence",
+        not profiling.is_valid(premature_confidence),
+        "profiling schema accepted premature confidence",
     )
 
     unknown_manifest_claim = copy.deepcopy(examples["profiling_input_envelope"])

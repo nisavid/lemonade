@@ -17,7 +17,12 @@ from residency_inventory.path import _PATH_INDEX, _PATH_SEGMENT, _path_tokens
 
 REQUIRED_KEYWORDS_FIELD = "x-residency-required-keywords"
 SUPPORTED_REQUIRED_KEYWORDS = frozenset(
-    {"x-max-utf8-bytes", "x-nfc", "x-residency-assert"}
+    {
+        "x-max-utf8-bytes",
+        "x-nfc",
+        "x-residency-assert",
+        "x-residency-json-integer",
+    }
 )
 _MISSING = object()
 
@@ -56,6 +61,16 @@ def _validate_utf8_bytes(
         return
     if len(encoded) > maximum:
         yield from _validation_error(f"string exceeds {maximum} UTF-8 bytes")
+
+
+def _validate_json_integer(
+    validator: Any, expected: Any, instance: Any, schema: Any
+) -> Iterator[ValidationError]:
+    del validator, schema
+    if expected is not True:
+        return
+    if isinstance(instance, bool) or not isinstance(instance, int):
+        yield from _validation_error("value must use the JSON integer representation")
 
 
 def _resolve_path(instance: Any, path: str) -> Any:
@@ -132,6 +147,7 @@ ResidencyDraft202012Validator = validators.extend(
         "x-max-utf8-bytes": _validate_utf8_bytes,
         "x-nfc": _validate_nfc,
         "x-residency-assert": _validate_residency_assert,
+        "x-residency-json-integer": _validate_json_integer,
     },
 )
 
@@ -204,6 +220,8 @@ def _used_keywords(schema: Mapping[str, Any]) -> set[str]:
                 isinstance(value, bool) or not isinstance(value, int) or value < 0
             ):
                 _schema_error("x-max-utf8-bytes must be a nonnegative integer")
+            if keyword == "x-residency-json-integer" and value is not True:
+                _schema_error("x-residency-json-integer must be true")
             if keyword == "x-residency-assert":
                 _validate_assertion(value)
             used.add(keyword)

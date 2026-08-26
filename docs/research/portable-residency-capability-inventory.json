@@ -4929,11 +4929,6 @@
             "type": "local_overlay_profiling_completion",
             "required": true
           },
-          "confidence": {
-            "type": "literal",
-            "required": true,
-            "value": "calibrated_instance"
-          },
           "observation_contract_sha256": {
             "type": "sha256",
             "required": true

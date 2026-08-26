@@ -4905,11 +4905,6 @@
             "required": true,
             "type": "local_overlay_profiling_completion"
           },
-          "confidence": {
-            "required": true,
-            "type": "literal",
-            "value": "calibrated_instance"
-          },
           "deployment_id": {
             "required": true,
             "type": "local_overlay_deployment_identity"
@@ -7409,6 +7404,6 @@
     }
   ],
   "schema": "residency.profiles/1.0",
-  "selection_registry_sha256": "f3ccfe7c931b00898349233e313169100e33ff22b06f2d94a60db1b9835f22ca",
+  "selection_registry_sha256": "d1309cc70a9d291739c0a5bf46d45f40fe813aacff88c112af3f0b9944cd0ac5",
   "source_support_baseline": "a505bbc702cc1fcd44ef73c44defabc98c36d505"
 }

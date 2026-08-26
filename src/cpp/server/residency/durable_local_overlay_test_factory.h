@@ -17,6 +17,8 @@ public:
     static LocalOverlayStore
     make(std::unique_ptr<DurableFileAdapter> adapter,
          LocalOverlayStoreLimits limits);
+    static LocalOverlayActivation
+    resolve_qualification(LocalOverlayActivation activation);
 };
 
 LocalOverlayStore

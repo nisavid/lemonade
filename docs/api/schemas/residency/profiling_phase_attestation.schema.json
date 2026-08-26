@@ -23,7 +23,8 @@
                       "amount": {
                         "maximum": 18446744073709551615,
                         "minimum": 1,
-                        "type": "integer"
+                        "type": "integer",
+                        "x-residency-json-integer": true
                       },
                       "constraint_id": {
                         "maxLength": 128,
@@ -118,7 +119,8 @@
                       "amount": {
                         "maximum": 18446744073709551615,
                         "minimum": 1,
-                        "type": "integer"
+                        "type": "integer",
+                        "x-residency-json-integer": true
                       },
                       "constraint_id": {
                         "maxLength": 128,
@@ -213,7 +215,8 @@
                       "amount": {
                         "maximum": 18446744073709551615,
                         "minimum": 1,
-                        "type": "integer"
+                        "type": "integer",
+                        "x-residency-json-integer": true
                       },
                       "constraint_id": {
                         "maxLength": 128,
@@ -307,7 +310,8 @@
                     "properties": {
                       "amount": {
                         "const": 1,
-                        "type": "integer"
+                        "type": "integer",
+                        "x-residency-json-integer": true
                       },
                       "constraint_id": {
                         "maxLength": 128,
@@ -586,10 +590,14 @@
       "additionalProperties": false,
       "properties": {
         "major": {
-          "const": 1
+          "const": 1,
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "minor": {
-          "const": 0
+          "const": 0,
+          "type": "integer",
+          "x-residency-json-integer": true
         }
       },
       "required": [
@@ -1065,37 +1073,44 @@
         "backend": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "configuration": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "device": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "driver": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "model": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "topology": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "workload": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         }
       },
       "required": [
@@ -1259,7 +1274,8 @@
     "max_source_skew_milliseconds": {
       "maximum": 18446744073709551615,
       "minimum": 1,
-      "type": "integer"
+      "type": "integer",
+      "x-residency-json-integer": true
     },
     "observation_contract_sha256": {
       "maxLength": 64,
@@ -1271,7 +1287,8 @@
     "observation_generation": {
       "maximum": 18446744073709551615,
       "minimum": 1,
-      "type": "integer"
+      "type": "integer",
+      "x-residency-json-integer": true
     },
     "observed_at": {
       "$ref": "#/$defs/timestamp"
@@ -1343,7 +1360,8 @@
     "source_skew_milliseconds": {
       "maximum": 18446744073709551615,
       "minimum": 0,
-      "type": "integer"
+      "type": "integer",
+      "x-residency-json-integer": true
     },
     "unattributed_claims": {
       "allOf": [
@@ -1403,6 +1421,7 @@
   "type": "object",
   "x-residency-required-keywords": [
     "x-max-utf8-bytes",
-    "x-residency-assert"
+    "x-residency-assert",
+    "x-residency-json-integer"
   ]
 }

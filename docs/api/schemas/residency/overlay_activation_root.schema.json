@@ -23,7 +23,8 @@
                       "amount": {
                         "maximum": 18446744073709551615,
                         "minimum": 1,
-                        "type": "integer"
+                        "type": "integer",
+                        "x-residency-json-integer": true
                       },
                       "constraint_id": {
                         "maxLength": 128,
@@ -118,7 +119,8 @@
                       "amount": {
                         "maximum": 18446744073709551615,
                         "minimum": 1,
-                        "type": "integer"
+                        "type": "integer",
+                        "x-residency-json-integer": true
                       },
                       "constraint_id": {
                         "maxLength": 128,
@@ -213,7 +215,8 @@
                       "amount": {
                         "maximum": 18446744073709551615,
                         "minimum": 1,
-                        "type": "integer"
+                        "type": "integer",
+                        "x-residency-json-integer": true
                       },
                       "constraint_id": {
                         "maxLength": 128,
@@ -307,7 +310,8 @@
                     "properties": {
                       "amount": {
                         "const": 1,
-                        "type": "integer"
+                        "type": "integer",
+                        "x-residency-json-integer": true
                       },
                       "constraint_id": {
                         "maxLength": 128,
@@ -586,10 +590,14 @@
       "additionalProperties": false,
       "properties": {
         "major": {
-          "const": 1
+          "const": 1,
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "minor": {
-          "const": 0
+          "const": 0,
+          "type": "integer",
+          "x-residency-json-integer": true
         }
       },
       "required": [
@@ -1065,37 +1073,44 @@
         "backend": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "configuration": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "device": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "driver": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "model": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "topology": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         },
         "workload": {
           "maximum": 18446744073709551615,
           "minimum": 1,
-          "type": "integer"
+          "type": "integer",
+          "x-residency-json-integer": true
         }
       },
       "required": [
@@ -1283,7 +1298,8 @@
     "generation": {
       "maximum": 18446744073709551615,
       "minimum": 1,
-      "type": "integer"
+      "type": "integer",
+      "x-residency-json-integer": true
     },
     "previous_root_sha256": {
       "$ref": "#/$defs/previous_root_reference"
@@ -1301,7 +1317,8 @@
     "selected_overlay_sequence": {
       "maximum": 18446744073709551615,
       "minimum": 1,
-      "type": "integer"
+      "type": "integer",
+      "x-residency-json-integer": true
     },
     "selected_overlay_sha256": {
       "maxLength": 64,
@@ -1320,7 +1337,8 @@
     "sequence_high_water": {
       "maximum": 18446744073709551615,
       "minimum": 1,
-      "type": "integer"
+      "type": "integer",
+      "x-residency-json-integer": true
     },
     "transition": {
       "$ref": "#/$defs/root_transition"
@@ -1347,6 +1365,7 @@
   "type": "object",
   "x-residency-required-keywords": [
     "x-max-utf8-bytes",
-    "x-residency-assert"
+    "x-residency-assert",
+    "x-residency-json-integer"
   ]
 }

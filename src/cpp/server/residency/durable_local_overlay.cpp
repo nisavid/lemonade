@@ -688,7 +688,7 @@ LocalOverlayActivation::LocalOverlayActivation(
       decision_trace_sha256_(std::move(decision_trace_sha256)),
       activated_at_(std::move(activated_at)) {}
 
-LocalOverlayActivation LocalOverlayActivation::qualification(
+LocalOverlayActivation LocalOverlayActivation::unresolved_qualification(
     ParsedProfilingInputEnvelope profiling_input,
     ParsedLocalOverlayObject overlay, std::string baseline_observation_bytes,
     std::string workload_observation_bytes,
@@ -936,6 +936,17 @@ LocalOverlayStore::activate(PublishedLocalOverlay &&expected,
     }
     if (!expected_state) {
         return store_result(LocalOverlayStoreStatus::CorruptOrRollback);
+    }
+#ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
+    const bool qualification_is_unresolved =
+        activation.kind_ == LocalOverlayActivationKind::Qualification &&
+        !activation.qualification_resolved_for_test_;
+#else
+    const bool qualification_is_unresolved =
+        activation.kind_ == LocalOverlayActivationKind::Qualification;
+#endif
+    if (qualification_is_unresolved) {
+        return store_result(LocalOverlayStoreStatus::UnsupportedStorage);
     }
     if (!impl_->limits_are_usable()) {
         return store_result(LocalOverlayStoreStatus::LimitExceeded);
@@ -1317,6 +1328,12 @@ LocalOverlayStore LocalOverlayStoreTestFactory::make(
     std::unique_ptr<DurableFileAdapter> adapter,
     LocalOverlayStoreLimits limits) {
     return LocalOverlayStore(std::move(adapter), limits);
+}
+
+LocalOverlayActivation LocalOverlayStoreTestFactory::resolve_qualification(
+    LocalOverlayActivation activation) {
+    activation.qualification_resolved_for_test_ = true;
+    return activation;
 }
 
 LocalOverlayStore make_local_overlay_store_for_test(

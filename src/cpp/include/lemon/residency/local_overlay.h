@@ -160,6 +160,7 @@ using ProfilingMethodEvidenceDraft =
 
 struct ProfilingCompletionDraft {
     std::vector<ClaimFamilyClosure> manifest_claims;
+    // These content references require Server-owned resolution before activation.
     std::string ownership_recovery_evidence_sha256;
     std::string action_lease_closure_sha256;
 };
@@ -459,6 +460,7 @@ struct ParsedOverlayActivationRootResult {
     bool accepted() const noexcept;
 };
 
+// Profiling inputs remain inert until every referenced closure is resolved.
 ParsedProfilingInputEnvelopeResult
 seal_profiling_input(ProfilingInputEnvelopeDraft draft);
 ParsedProfilingInputEnvelopeResult
