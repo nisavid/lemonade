@@ -1208,13 +1208,23 @@ public:
     std::size_t release_calls = 0;
 };
 
-class ObserverFailureCancellationDriver final
-    : public ProfilingWorkloadDriver {
+class ObserverFailureReportingDriver final : public ProfilingWorkloadDriver {
 public:
-    ObserverFailureCancellationDriver(
+    ObserverFailureReportingDriver(
         DynamicIntervalSource &source,
-        std::atomic<bool> &caller_cancelled)
-        : source_(source), caller_cancelled_(caller_cancelled) {}
+        std::atomic<bool> &caller_cancelled,
+        ProfilingWorkloadStepStatus run_status,
+        std::string_view run_diagnostic,
+        ProfilingWorkloadStepStatus release_status,
+        std::string_view release_diagnostic,
+        bool observe_abort,
+        bool cancel_caller)
+        : source_(source), caller_cancelled_(caller_cancelled),
+          run_status_(run_status), run_diagnostic_(run_diagnostic),
+          release_status_(release_status),
+          release_diagnostic_(release_diagnostic),
+          observe_abort_(observe_abort),
+          cancel_caller_(cancel_caller) {}
 
     ProfilingWorkloadStepResult run(
         Router &,
@@ -1222,22 +1232,35 @@ public:
         const ProfilingCancellationCheck &should_abort) override {
         ++run_calls;
         source_.publish_workload();
-        while (!should_abort || !should_abort()) {
-            std::this_thread::yield();
+        if (observe_abort_) {
+            while (!should_abort || !should_abort()) {
+                std::this_thread::yield();
+            }
+        } else {
+            while (source_.active()) std::this_thread::yield();
         }
-        caller_cancelled_.store(true, std::memory_order_release);
-        return ProfilingWorkloadStepResult::success();
+        if (cancel_caller_) {
+            caller_cancelled_.store(true, std::memory_order_release);
+        }
+        return reported_step_result(run_status_, run_diagnostic_);
     }
 
     ProfilingWorkloadStepResult release(
         Router &,
         const ProfilingTransactionContext &) noexcept override {
         ++release_calls;
-        return ProfilingWorkloadStepResult::success();
+        return reported_step_result(
+            release_status_, release_diagnostic_);
     }
 
     DynamicIntervalSource &source_;
     std::atomic<bool> &caller_cancelled_;
+    ProfilingWorkloadStepStatus run_status_;
+    std::string_view run_diagnostic_;
+    ProfilingWorkloadStepStatus release_status_;
+    std::string_view release_diagnostic_;
+    bool observe_abort_;
+    bool cancel_caller_;
     std::size_t run_calls = 0;
     std::size_t release_calls = 0;
 };
@@ -1956,23 +1979,95 @@ void test_boundary_cancellation_preserves_release_ambiguity(
         "workload-boundary cancellation preserves release ambiguity and cleans up exactly once");
 }
 
-void test_observer_status_precedes_caller_cancellation(
+void test_observer_and_workload_diagnostic_precedence(
     TestState &state,
     Router &router) {
     const auto derivation_contract = contract();
     const auto transaction_context = context(derivation_contract);
     struct ObserverStatusCase {
         ProfilingIntervalSourceError error;
+        ProfilingWorkloadStepStatus run_status;
+        std::string_view run_diagnostic;
+        ProfilingWorkloadStepStatus release_status;
+        std::string_view release_diagnostic;
+        bool observe_abort;
+        bool cancel_caller;
         std::string_view expected_diagnostic;
         const char *message;
     };
-    const std::array<ObserverStatusCase, 2> observer_status_cases{{
+    const std::array<ObserverStatusCase, 8> observer_status_cases{{
         {ProfilingIntervalSourceError::Failed,
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         true,
+         true,
          "dynamic workload observation failed",
          "an actionable observer failure remains specific when cancellation follows"},
         {ProfilingIntervalSourceError::Cancelled,
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         true,
+         true,
          "profiling interval capture cancelled",
          "an observer cancellation retains the canonical cancellation diagnostic"},
+        {ProfilingIntervalSourceError::Failed,
+         ProfilingWorkloadStepStatus::Cancelled,
+         "workload stopped after observer abort",
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         true,
+         false,
+         "dynamic workload observation failed",
+         "a causal observer failure precedes a cooperative workload cancellation"},
+        {ProfilingIntervalSourceError::Failed,
+         ProfilingWorkloadStepStatus::Failed,
+         "workload failed after observer abort",
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         true,
+         false,
+         "dynamic workload observation failed",
+         "a causal observer failure precedes a cooperative workload failure"},
+        {ProfilingIntervalSourceError::Failed,
+         ProfilingWorkloadStepStatus::Failed,
+         "workload failed after observer abort",
+         ProfilingWorkloadStepStatus::Ambiguous,
+         "workload release remained ambiguous",
+         true,
+         false,
+         "workload release remained ambiguous",
+         "release ambiguity precedes a causal observer failure"},
+        {ProfilingIntervalSourceError::Cancelled,
+         ProfilingWorkloadStepStatus::Cancelled,
+         "workload observed cancellation",
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         true,
+         false,
+         "workload observed cancellation",
+         "a non-actionable observer cancellation retains workload precedence"},
+        {ProfilingIntervalSourceError::Failed,
+         ProfilingWorkloadStepStatus::Failed,
+         "independent workload failure",
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         false,
+         false,
+         "independent workload failure",
+         "an unobserved concurrent observer failure retains workload precedence"},
+        {ProfilingIntervalSourceError::Failed,
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         ProfilingWorkloadStepStatus::Succeeded,
+         {},
+         false,
+         true,
+         "profiling interval capture cancelled",
+         "an unobserved concurrent observer failure retains caller cancellation precedence"},
     }};
 
     for (const auto &observer_status_case : observer_status_cases) {
@@ -1982,7 +2077,13 @@ void test_observer_status_precedes_caller_cancellation(
         auto shared_clock = std::make_shared<SharedCaptureClock>();
         DynamicIntervalSource source(
             derivation_contract, shared_clock, std::move(scenario));
-        ObserverFailureCancellationDriver driver(source, caller_cancelled);
+        ObserverFailureReportingDriver driver(
+            source, caller_cancelled, observer_status_case.run_status,
+            observer_status_case.run_diagnostic,
+            observer_status_case.release_status,
+            observer_status_case.release_diagnostic,
+            observer_status_case.observe_abort,
+            observer_status_case.cancel_caller);
         ProfilingCaptureAuthority authority(
             derivation_contract, source, schedule(shared_clock));
 
@@ -1995,7 +2096,8 @@ void test_observer_status_precedes_caller_cancellation(
             state, captured,
             "an observer rejection followed by cancellation publishes no phase-evidence candidate");
         state.require(
-            caller_cancelled.load(std::memory_order_acquire) &&
+            caller_cancelled.load(std::memory_order_acquire) ==
+                    observer_status_case.cancel_caller &&
                 captured.diagnostic ==
                     observer_status_case.expected_diagnostic &&
                 driver.run_calls == 1 && driver.release_calls == 1 &&
@@ -2258,7 +2360,7 @@ int main() {
             state, router);
         test_boundary_cancellation_preserves_release_ambiguity(
             state, router);
-        test_observer_status_precedes_caller_cancellation(state, router);
+        test_observer_and_workload_diagnostic_precedence(state, router);
         test_predispatch_abort_never_enters_workload_ownership(
             state, router);
         test_release_settling_abort_closes_owned_workload(state, router);
