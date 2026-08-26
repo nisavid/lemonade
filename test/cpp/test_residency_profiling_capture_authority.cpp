@@ -1540,72 +1540,72 @@ void test_reported_workload_results_gate_phase_evidence(
     Router &router) {
     const auto derivation_contract = contract();
     const auto transaction_context = context(derivation_contract);
-    const auto bounded_failure = ProfilingWorkloadStepResult::failed(
-        std::string(max_local_overlay_diagnostic_bytes + 64, 'x'));
+    auto long_diagnostic =
+        std::string(max_local_overlay_diagnostic_bytes - 1, 'x');
+    long_diagnostic += "\xe2\x82\xac";
+    const auto bounded_failure =
+        ProfilingWorkloadStepResult::failed(long_diagnostic);
     state.require(
         bounded_failure.status() == ProfilingWorkloadStepStatus::Failed &&
             !bounded_failure.succeeded() &&
             bounded_failure.diagnostic().size() <=
-                max_local_overlay_diagnostic_bytes,
+                max_local_overlay_diagnostic_bytes &&
+            bounded_failure.diagnostic() ==
+                std::string_view(long_diagnostic).substr(
+                    0, max_local_overlay_diagnostic_bytes - 1),
         "workload step results retain an explicit state and bounded diagnostic");
 
-    auto load_clock = std::make_shared<SharedCaptureClock>();
-    DynamicIntervalSource load_source(derivation_contract, load_clock);
-    ReportingDriver load_driver(
-        load_source, ProfilingWorkloadStepStatus::Failed,
-        ProfilingWorkloadStepStatus::Succeeded);
-    ProfilingCaptureAuthority load_authority(
-        derivation_contract, load_source, schedule(load_clock));
-    const auto load_capture = load_authority.capture(
-        router, transaction_context, load_driver, [] { return false; });
-    require_empty_capture(
-        state, load_capture,
-        "a reported load failure publishes no phase-evidence candidate");
-    state.require(
-        load_driver.run_calls == 1 && load_driver.release_calls == 1 &&
-            load_source.finish_calls() == 1 && !load_source.active() &&
-            load_source.observer_thread_exited(),
-        "a reported load failure still releases, drains, and joins exactly once");
+    struct ReportedResultCase {
+        ProfilingWorkloadStepStatus run_status;
+        ProfilingWorkloadStepStatus release_status;
+        const char *candidate_message;
+        const char *cleanup_message;
+    };
+    const std::array<ReportedResultCase, 6> reported_result_cases{{
+        {ProfilingWorkloadStepStatus::Failed,
+         ProfilingWorkloadStepStatus::Succeeded,
+         "a reported load failure publishes no phase-evidence candidate",
+         "a reported load failure still cleans up exactly once"},
+        {ProfilingWorkloadStepStatus::Cancelled,
+         ProfilingWorkloadStepStatus::Succeeded,
+         "a reported load cancellation publishes no phase-evidence candidate",
+         "a reported load cancellation still cleans up exactly once"},
+        {ProfilingWorkloadStepStatus::Ambiguous,
+         ProfilingWorkloadStepStatus::Succeeded,
+         "an ambiguous load publishes no phase-evidence candidate",
+         "an ambiguous load still cleans up exactly once"},
+        {ProfilingWorkloadStepStatus::Succeeded,
+         ProfilingWorkloadStepStatus::Ambiguous,
+         "an ambiguous release publishes no phase-evidence candidate",
+         "an ambiguous release still cleans up exactly once"},
+        {ProfilingWorkloadStepStatus::Succeeded,
+         ProfilingWorkloadStepStatus::Failed,
+         "a failed release publishes no phase-evidence candidate",
+         "a failed release still cleans up exactly once"},
+        {ProfilingWorkloadStepStatus::Succeeded,
+         ProfilingWorkloadStepStatus::Cancelled,
+         "a cancelled release publishes no phase-evidence candidate",
+         "a cancelled release still cleans up exactly once"},
+    }};
 
-    auto ambiguous_clock = std::make_shared<SharedCaptureClock>();
-    DynamicIntervalSource ambiguous_source(
-        derivation_contract, ambiguous_clock);
-    ReportingDriver ambiguous_driver(
-        ambiguous_source, ProfilingWorkloadStepStatus::Succeeded,
-        ProfilingWorkloadStepStatus::Ambiguous);
-    ProfilingCaptureAuthority ambiguous_authority(
-        derivation_contract, ambiguous_source, schedule(ambiguous_clock));
-    const auto ambiguous_capture = ambiguous_authority.capture(
-        router, transaction_context, ambiguous_driver,
-        [] { return false; });
-    require_empty_capture(
-        state, ambiguous_capture,
-        "an ambiguous release publishes no phase-evidence candidate");
-    state.require(
-        ambiguous_driver.run_calls == 1 &&
-            ambiguous_driver.release_calls == 1 &&
-            ambiguous_source.finish_calls() == 1 &&
-            !ambiguous_source.active() &&
-            ambiguous_source.observer_thread_exited(),
-        "an ambiguous release still drains and joins exactly once");
-
-    auto failed_clock = std::make_shared<SharedCaptureClock>();
-    DynamicIntervalSource failed_source(derivation_contract, failed_clock);
-    ReportingDriver failed_driver(
-        failed_source, ProfilingWorkloadStepStatus::Succeeded,
-        ProfilingWorkloadStepStatus::Failed);
-    ProfilingCaptureAuthority failed_authority(
-        derivation_contract, failed_source, schedule(failed_clock));
-    const auto failed_capture = failed_authority.capture(
-        router, transaction_context, failed_driver, [] { return false; });
-    require_empty_capture(
-        state, failed_capture,
-        "a failed release publishes no phase-evidence candidate");
-    state.require(
-        failed_driver.run_calls == 1 && failed_driver.release_calls == 1 &&
-            failed_source.finish_calls() == 1 && !failed_source.active() &&
-            failed_source.observer_thread_exited(),
-        "a failed release still drains and joins exactly once");
+    for (const auto &reported_result_case : reported_result_cases) {
+        auto shared_clock = std::make_shared<SharedCaptureClock>();
+        DynamicIntervalSource source(derivation_contract, shared_clock);
+        ReportingDriver driver(
+            source, reported_result_case.run_status,
+            reported_result_case.release_status);
+        ProfilingCaptureAuthority authority(
+            derivation_contract, source, schedule(shared_clock));
+        const auto captured = authority.capture(
+            router, transaction_context, driver, [] { return false; });
+        require_empty_capture(
+            state, captured, reported_result_case.candidate_message);
+        state.require(
+            driver.run_calls == 1 && driver.release_calls == 1 &&
+                source.finish_calls() == 1 && !source.active() &&
+                source.observer_thread_exited(),
+            reported_result_case.cleanup_message);
+    }
 }
 
 void test_predispatch_abort_never_enters_workload_ownership(
