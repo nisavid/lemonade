@@ -95,6 +95,28 @@ ProfilingTransactionCapture capture_failure(std::string_view diagnostic) {
         profiling_internal::bounded_diagnostic(std::string(diagnostic))};
 }
 
+std::string_view select_capture_failure_diagnostic(
+    const ProfilingWorkloadStepResult &workload_result,
+    const ProfilingWorkloadStepResult *release_result,
+    std::string_view fallback_diagnostic) noexcept {
+    if (release_result == nullptr) {
+        return "profiling workload release was not verified";
+    }
+    if (!release_result->succeeded()) {
+        return release_result->diagnostic().empty()
+                   ? std::string_view{
+                         "profiling workload release was not verified"}
+                   : release_result->diagnostic();
+    }
+    if (!workload_result.succeeded()) {
+        return workload_result.diagnostic().empty()
+                   ? std::string_view{
+                         "profiling workload did not complete"}
+                   : workload_result.diagnostic();
+    }
+    return fallback_diagnostic;
+}
+
 void initialize_clock(ProfilingCollectionClock &clock) {
     if (!clock.monotonic_now) {
         clock.monotonic_now = [] { return SteadyClock::now(); };
@@ -461,9 +483,24 @@ public:
             });
         } catch (...) {
             workload_result = ProfilingWorkloadStepResult::ambiguous(
-                "profiling workload result was not reported");
+                "profiling workload threw before reporting a result");
         }
+        const auto finish_after_release =
+            [&](std::string_view fallback_diagnostic) {
+                const auto *release_result = release_guard.release();
+                return finish_failed_capture(
+                    select_capture_failure_diagnostic(
+                        workload_result, release_result,
+                        fallback_diagnostic));
+            };
         const bool capture_cancelled = cancelled(should_abort_);
+        if (capture_cancelled) {
+            return finish_after_release(
+                "profiling interval capture cancelled");
+        }
+        if (!workload_result.succeeded()) {
+            return finish_after_release({});
+        }
 
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -473,8 +510,7 @@ public:
         if (!wait_until([](const SharedState &state) {
                 return state.workload_boundary_ready || state.failed;
             })) {
-            release_guard.release();
-            return finish_failed_capture();
+            return finish_after_release({});
         }
 
         {
@@ -485,11 +521,15 @@ public:
         if (!wait_until([](const SharedState &state) {
                 return state.release_observer_ready || state.failed;
             })) {
-            release_guard.release();
-            return finish_failed_capture();
+            return finish_after_release({});
         }
 
         const auto *release_result = release_guard.release();
+        if (release_result == nullptr || !release_result->succeeded()) {
+            return finish_failed_capture(
+                select_capture_failure_diagnostic(
+                    workload_result, release_result, {}));
+        }
         {
             std::lock_guard<std::mutex> lock(mutex_);
             state_.release_done = true;
@@ -502,21 +542,8 @@ public:
         }
         join_observer();
 
-        if (capture_cancelled || cancelled(should_abort_)) {
-            return capture_failure("profiling workload did not complete");
-        }
-        if (!workload_result.succeeded()) {
-            return capture_failure(
-                workload_result.diagnostic().empty()
-                    ? "profiling workload did not complete"
-                    : workload_result.diagnostic());
-        }
-        if (release_result == nullptr || !release_result->succeeded()) {
-            return capture_failure(
-                release_result == nullptr ||
-                        release_result->diagnostic().empty()
-                    ? "profiling workload release was not verified"
-                    : release_result->diagnostic());
+        if (cancelled(should_abort_)) {
+            return capture_failure("profiling interval capture cancelled");
         }
         return seal_capture();
     }
@@ -797,14 +824,16 @@ private:
                 : result.diagnostic);
     }
 
-    ProfilingTransactionCapture finish_failed_capture() {
+    ProfilingTransactionCapture finish_failed_capture(
+        std::string_view diagnostic = {}) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             stop_requested_ = true;
         }
         condition_.notify_all();
         join_observer();
-        return capture_failure(diagnostic_);
+        return capture_failure(
+            diagnostic.empty() ? std::string_view{diagnostic_} : diagnostic);
     }
 
     void join_observer() {
