@@ -25,6 +25,24 @@ class ResidencyCapabilityInventoryContractRegistryTest(
         self.assertEqual(len(registry["presentation_registry"]), 27)
         self.assertEqual(len(registry["detail_schema_registry"]), 15)
         self.assertEqual(len(registry["schema_registry"]), 16)
+        local_overlay_schemas = registry["schema_registry"]
+        self.assertEqual(
+            local_overlay_schemas["profiling_input_envelope"]["version"],
+            {"major": 2, "minor": 0},
+        )
+        self.assertEqual(
+            local_overlay_schemas["profiling_input_envelope"]["schema_type"],
+            "residency.profiling_input_envelope/2.0",
+        )
+        for schema_key in (
+            "profiling_phase_attestation",
+            "deployment_local_overlay_object",
+            "overlay_activation_root",
+        ):
+            self.assertEqual(
+                local_overlay_schemas[schema_key]["version"],
+                {"major": 1, "minor": 0},
+            )
         catalog_fields = registry["schema_registry"]["residency_profiles"]["fields"]
         self.assertEqual(
             catalog_fields["source_support_baseline"],

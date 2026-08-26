@@ -1024,6 +1024,23 @@ def require_local_overlay_schemas(
             f"{name} contains optional top-level wire fields",
         )
 
+    require(
+        schemas["profiling_input_envelope"]["$id"]
+        == "residency.profiling_input_envelope/2.0"
+        and examples["profiling_input_envelope"]["schema"] == {"major": 2, "minor": 0},
+        "profiling-input schema version drifted",
+    )
+    for name in (
+        "profiling_phase_attestation",
+        "deployment_local_overlay_object",
+        "overlay_activation_root",
+    ):
+        require(
+            schemas[name]["$id"].endswith("/1.0")
+            and examples[name]["schema"] == {"major": 1, "minor": 0},
+            f"{name} schema version drifted",
+        )
+
     profiling = contract_validator(
         schemas["profiling_input_envelope"], registry=resources
     )
@@ -1042,18 +1059,14 @@ def require_local_overlay_schemas(
         "profiling_transaction_id",
         "selector",
         "generations",
-        "attributed_claims",
-        "baseline_observation_sha256",
-        "workload_observation_sha256",
-        "release_observation_sha256",
+        "method_evidence",
+        "completion",
+        "confidence",
         "observation_contract_sha256",
         "predictor_contract_sha256",
         "observed_at",
         "fresh_until",
         "max_clock_skew_milliseconds",
-        "attribution_complete",
-        "external_demand_absent",
-        "lifecycle_release_verified",
         "checksum_sha256",
     }
     require(
@@ -1189,12 +1202,99 @@ def require_local_overlay_schemas(
             "ordered assertion accepted incomparable values",
         )
 
-    incomplete = copy.deepcopy(examples["profiling_input_envelope"])
-    incomplete["attribution_complete"] = False
+    method_evidence = schemas["profiling_input_envelope"]["properties"][
+        "method_evidence"
+    ]
     require(
-        not profiling.is_valid(incomplete),
-        "profiling schema accepted incomplete attribution",
+        len(method_evidence.get("oneOf", [])) == 2,
+        "profiling schema does not close the two evidence methods",
     )
+
+    mutation_complete = copy.deepcopy(examples["profiling_input_envelope"])
+    mutation_complete["method_evidence"] = {
+        "method": "mutation_complete_interval",
+        "covered_effect": "complete_lifecycle",
+        "baseline_observation_sha256": "1" * 64,
+        "workload_observation_sha256": "2" * 64,
+        "release_observation_sha256": "3" * 64,
+        "owner_projection_coverage": "complete",
+        "external_change_absent": True,
+        "lifecycle_envelope_complete": True,
+    }
+    require(
+        profiling.is_valid(mutation_complete),
+        "profiling schema rejected mutation-complete interval evidence",
+    )
+
+    incomplete_mutation_owner = copy.deepcopy(mutation_complete)
+    incomplete_mutation_owner["method_evidence"][
+        "owner_projection_coverage"
+    ] = "incomplete"
+    require(
+        not profiling.is_valid(incomplete_mutation_owner),
+        "mutation-complete evidence accepted incomplete owner projection",
+    )
+
+    incomplete_differential = copy.deepcopy(examples["profiling_input_envelope"])
+    del incomplete_differential["method_evidence"]["transient_envelope_sha256"]
+    require(
+        not profiling.is_valid(incomplete_differential),
+        "differential evidence omitted its transient envelope",
+    )
+
+    for owner_coverage in ("complete", "incomplete", "unknown"):
+        differential_owner = copy.deepcopy(examples["profiling_input_envelope"])
+        differential_owner["method_evidence"][
+            "owner_projection_coverage"
+        ] = owner_coverage
+        require(
+            profiling.is_valid(differential_owner),
+            f"differential evidence rejected {owner_coverage} owner projection",
+        )
+    unknown_owner_coverage = copy.deepcopy(examples["profiling_input_envelope"])
+    unknown_owner_coverage["method_evidence"]["owner_projection_coverage"] = "future"
+    require(
+        not profiling.is_valid(unknown_owner_coverage),
+        "differential evidence accepted an open owner projection state",
+    )
+
+    open_method = copy.deepcopy(examples["profiling_input_envelope"])
+    open_method["method_evidence"]["future"] = True
+    require(
+        not profiling.is_valid(open_method),
+        "profiling schema accepted an open method-evidence object",
+    )
+
+    open_completion = copy.deepcopy(examples["profiling_input_envelope"])
+    open_completion["completion"]["future"] = True
+    require(
+        not profiling.is_valid(open_completion),
+        "profiling schema accepted an open completion object",
+    )
+
+    legacy_boolean = copy.deepcopy(examples["profiling_input_envelope"])
+    legacy_boolean["attribution_complete"] = True
+    require(
+        not profiling.is_valid(legacy_boolean),
+        "profiling schema accepted a legacy completeness boolean",
+    )
+
+    noncalibrated = copy.deepcopy(examples["profiling_input_envelope"])
+    noncalibrated["confidence"] = "validated_predictor"
+    require(
+        not profiling.is_valid(noncalibrated),
+        "profiling schema accepted non-calibrated confidence",
+    )
+
+    unknown_manifest_claim = copy.deepcopy(examples["profiling_input_envelope"])
+    unknown_manifest_claim["completion"]["manifest_claims"][0][
+        "completeness"
+    ] = "unknown"
+    require(
+        not profiling.is_valid(unknown_manifest_claim),
+        "profiling schema accepted an incomplete manifest claim closure",
+    )
+
     zero_clock_skew = copy.deepcopy(examples["profiling_input_envelope"])
     zero_clock_skew["max_clock_skew_milliseconds"] = 0
     require(
@@ -1213,13 +1313,6 @@ def require_local_overlay_schemas(
         not profiling.is_valid(mismatched_template),
         "profiling schema accepted a mismatched operation template and kind",
     )
-    unknown_claim = copy.deepcopy(examples["profiling_input_envelope"])
-    unknown_claim["attributed_claims"][0]["completeness"] = "unknown"
-    require(
-        not profiling.is_valid(unknown_claim),
-        "profiling schema accepted an incomplete claim closure",
-    )
-
     unhealthy_phase = copy.deepcopy(examples["profiling_phase_attestation"])
     unhealthy_phase["health"] = "stale"
     require(

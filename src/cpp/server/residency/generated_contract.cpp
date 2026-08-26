@@ -94,7 +94,7 @@ constexpr std::array<std::string_view, 16> schema_types{{
     "residency.deployment_local_overlay_object/1.0",
     "residency.operation_revision/1.0",
     "residency.overlay_activation_root/1.0",
-    "residency.profiling_input_envelope/1.0",
+    "residency.profiling_input_envelope/2.0",
     "residency.profiling_phase_attestation/1.0",
     "residency.reason/1.0",
     "residency.request_error/1.0",

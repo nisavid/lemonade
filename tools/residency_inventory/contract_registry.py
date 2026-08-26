@@ -21,7 +21,7 @@ from .contract import (
 from .path import _path_tokens
 
 EXPECTED_REGISTRY_DIGEST = (
-    "76dfa0d84a4367e242b536bc5edbaa12cb117280320674d7d5ac92f8ded1d481"
+    "344cea1742fb10f23b4a8c173315f76be8f735c95e5b145ef451cb58ed6289b3"
 )
 EXPECTED_REGISTRY_KEYS = [
     "schema",
@@ -344,8 +344,10 @@ SCHEMA_FIELD_TYPES = {
     "local_overlay_object_status",
     "local_overlay_previous_root_reference",
     "local_overlay_positive_uint64",
+    "local_overlay_profiling_completion",
     "local_overlay_profiling_health",
     "local_overlay_profiling_lifecycle_state",
+    "local_overlay_profiling_method_evidence",
     "local_overlay_profiling_owner_coverage",
     "local_overlay_profiling_phase",
     "local_overlay_required_true",
@@ -1327,15 +1329,24 @@ def _validate_schema_registry(registry: dict[str, Any]) -> None:
             schema.get("version"),
             f"contract_registry.schema_registry.{schema_key}.version",
         )
-        if version != {"major": 1, "minor": 0}:
-            fail(f"schema {schema_key} must remain at version 1.0")
+        expected_version = (
+            {"major": 2, "minor": 0}
+            if schema_key == "profiling_input_envelope"
+            else {"major": 1, "minor": 0}
+        )
+        if version != expected_version:
+            fail(
+                f"schema {schema_key} must remain at version "
+                f"{expected_version['major']}.{expected_version['minor']}"
+            )
         expected_output = f"docs/api/schemas/residency/{schema_key}.schema.json"
         if schema.get("output") != expected_output:
             fail(f"schema {schema_key} output path drifted")
         expected_type = (
             "residency.profiles/1.0"
             if schema_key == "residency_profiles"
-            else f"residency.{schema_key}/1.0"
+            else f"residency.{schema_key}/"
+            f"{expected_version['major']}.{expected_version['minor']}"
         )
         if schema.get("schema_type") != expected_type:
             fail(f"schema {schema_key} type drifted")

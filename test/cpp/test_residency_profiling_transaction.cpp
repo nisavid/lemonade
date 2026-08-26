@@ -175,26 +175,31 @@ ProfilingTransactionContext context(std::string transaction_id = "profile/1") {
     result.generations = OverlaySourceGenerations{1, 2, 3, 4, 5, 6, 7};
     result.observation_contract_sha256 = digest('f');
     result.predictor_contract_sha256 = digest('0');
+    result.ownership_recovery_evidence_sha256 = digest('7');
+    result.action_lease_closure_sha256 = digest('8');
 
     ProfilingInputEnvelopeDraft value;
-    value.schema = supported_local_overlay_schema;
+    value.schema = supported_profiling_input_schema;
     value.deployment_id = result.deployment_id;
     value.sequence = result.sequence;
     value.profiling_transaction_id = result.profiling_transaction_id;
     value.selector = result.selector;
     value.generations = result.generations;
-    value.attributed_claims = claims();
-    value.baseline_observation_sha256 = digest('c');
-    value.workload_observation_sha256 = digest('d');
-    value.release_observation_sha256 = digest('e');
+    MutationCompleteIntervalEvidenceDraft method_evidence;
+    method_evidence.baseline_observation_sha256 = digest('c');
+    method_evidence.workload_observation_sha256 = digest('d');
+    method_evidence.release_observation_sha256 = digest('e');
+    value.method_evidence = std::move(method_evidence);
+    value.completion.manifest_claims = claims();
+    value.completion.ownership_recovery_evidence_sha256 =
+        result.ownership_recovery_evidence_sha256;
+    value.completion.action_lease_closure_sha256 =
+        result.action_lease_closure_sha256;
     value.observation_contract_sha256 = result.observation_contract_sha256;
     value.predictor_contract_sha256 = result.predictor_contract_sha256;
     value.observed_at = "2026-08-23T10:00:00Z";
     value.fresh_until = "2026-08-23T10:05:00Z";
     value.max_clock_skew_milliseconds = 1000;
-    value.attribution_complete = true;
-    value.external_demand_absent = true;
-    value.lifecycle_release_verified = true;
     auto sealed = seal_profiling_input(std::move(value));
     if (!sealed.accepted()) {
         throw std::runtime_error("profiling context selector could not seal");
@@ -372,21 +377,32 @@ void test_accepts_and_releases_gate(TestState &state, Router &router) {
         state.require(result.evidence->input().max_clock_skew_milliseconds() == 1000,
                       "profiling input retains the common skew contract");
         state.require(claim_sets_equal(
-                          result.evidence->input().attributed_claims(),
+                          result.evidence->input().manifest_claims(),
                           result.evidence->workload().attributed_claims()),
-                      "profiling input derives attributed workload claims");
+                      "profiling input derives the completed workload manifest");
+        state.require(
+            result.evidence->input().ownership_recovery_evidence_sha256() ==
+                    transaction_context.ownership_recovery_evidence_sha256 &&
+                result.evidence->input().action_lease_closure_sha256() ==
+                    transaction_context.action_lease_closure_sha256,
+            "profiling input binds ownership, recovery, and action-lease closure");
         state.require(
             result.evidence->baseline().canonical_bytes() == captured.baseline_attestation &&
                 result.evidence->workload().canonical_bytes() == captured.workload_attestation &&
                 result.evidence->release().canonical_bytes() == captured.release_attestation,
             "accepted evidence retains exact canonical phase bytes");
-        state.require(result.evidence->input().baseline_observation_sha256() ==
+        const auto *interval =
+            result.evidence->input().mutation_complete_interval();
+        state.require(interval != nullptr &&
+                          result.evidence->input().differential_retained_gtt() ==
+                              nullptr &&
+                          interval->baseline_observation_sha256 ==
                               raw_sha256(captured.baseline_attestation) &&
-                          result.evidence->input().workload_observation_sha256() ==
+                          interval->workload_observation_sha256 ==
                               raw_sha256(captured.workload_attestation) &&
-                          result.evidence->input().release_observation_sha256() ==
+                          interval->release_observation_sha256 ==
                               raw_sha256(captured.release_attestation),
-                      "profiling input binds raw phase-attestation digests");
+                      "profiling input binds the mutation-complete interval evidence");
     }
     try {
         auto preparation = queued.get();
@@ -492,6 +508,16 @@ void test_rejects_unsafe_evidence(TestState &state, Router &router) {
     expect_rejected(
         "selector identity must match its attested digest",
         [](auto &ctx, auto &) { ctx.selector.canonical_model_id = "model/other"; },
+        ProfilingTransactionStatus::InvalidEvidence);
+    expect_rejected(
+        "ownership and recovery closure must be attested",
+        [](auto &ctx, auto &) {
+            ctx.ownership_recovery_evidence_sha256.clear();
+        },
+        ProfilingTransactionStatus::InvalidEvidence);
+    expect_rejected(
+        "action-lease closure must be attested",
+        [](auto &ctx, auto &) { ctx.action_lease_closure_sha256.clear(); },
         ProfilingTransactionStatus::InvalidEvidence);
     expect_rejected(
         "deployment identity must remain stable",

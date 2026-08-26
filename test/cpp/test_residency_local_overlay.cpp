@@ -14,6 +14,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -114,24 +115,28 @@ LocalOverlaySelectorIdentity selector() {
 
 ProfilingInputEnvelopeDraft profiling_draft() {
     ProfilingInputEnvelopeDraft draft;
-    draft.schema = supported_local_overlay_schema;
+    draft.schema = supported_profiling_input_schema;
     draft.deployment_id = digest('b');
     draft.sequence = 1;
     draft.profiling_transaction_id = "profiling/1";
     draft.selector = selector();
     draft.generations = OverlaySourceGenerations{1, 2, 3, 4, 5, 6, 7};
-    draft.attributed_claims = claims(4096);
-    draft.baseline_observation_sha256 = digest('c');
-    draft.workload_observation_sha256 = digest('d');
-    draft.release_observation_sha256 = digest('e');
+    DifferentialRetainedGttEvidenceDraft method_evidence;
+    method_evidence.retained_gtt_claim =
+        ClaimAmount{"gpu/gtt", ClaimUnit::Bytes, 4096};
+    method_evidence.calibration_evidence_sha256 = digest('c');
+    method_evidence.transient_envelope_sha256 = digest('d');
+    method_evidence.owner_projection_coverage =
+        ProfilingOwnerCoverage::Incomplete;
+    draft.method_evidence = std::move(method_evidence);
+    draft.completion.manifest_claims = claims(6144);
+    draft.completion.ownership_recovery_evidence_sha256 = digest('e');
+    draft.completion.action_lease_closure_sha256 = digest('f');
     draft.observation_contract_sha256 = digest('f');
     draft.predictor_contract_sha256 = digest('0');
     draft.observed_at = "2026-08-23T10:00:00Z";
     draft.fresh_until = "2026-08-23T10:05:00Z";
     draft.max_clock_skew_milliseconds = 1000;
-    draft.attribution_complete = true;
-    draft.external_demand_absent = true;
-    draft.lifecycle_release_verified = true;
     return draft;
 }
 
@@ -236,6 +241,15 @@ void require_rejected(const Result &result, OverlayContractStatus status,
             "rejected codec result returned a candidate");
     require(result.status == status,
             "codec rejection returned the wrong status");
+    require(result.diagnostic.size() <= max_local_overlay_diagnostic_bytes,
+            "codec diagnostic exceeded its bound");
+}
+
+template <typename Result>
+void require_rejected(const Result &result, std::string_view message) {
+    require(!result.accepted(), message);
+    require(!result.candidate.has_value(),
+            "rejected codec result returned a candidate");
     require(result.diagnostic.size() <= max_local_overlay_diagnostic_bytes,
             "codec diagnostic exceeded its bound");
 }
@@ -433,6 +447,21 @@ std::string without_positive_safety_margin(std::string bytes) {
 }
 
 void require_public_shape() {
+    static_assert(supported_profiling_input_schema.major == 2 &&
+                  supported_profiling_input_schema.minor == 0);
+    using ProfilingMethodEvidenceDraft =
+        decltype(ProfilingInputEnvelopeDraft{}.method_evidence);
+    static_assert(std::variant_size_v<ProfilingMethodEvidenceDraft> == 2);
+    static_assert(std::is_same_v<
+                  std::remove_reference_t<decltype(
+                      ProfilingInputEnvelopeDraft{}.completion)>,
+                  ProfilingCompletionDraft>);
+    static_assert(
+        std::is_assignable_v<ProfilingMethodEvidenceDraft &,
+                             MutationCompleteIntervalEvidenceDraft>);
+    static_assert(
+        std::is_assignable_v<ProfilingMethodEvidenceDraft &,
+                             DifferentialRetainedGttEvidenceDraft>);
     static_assert(
         !std::is_default_constructible_v<ParsedProfilingInputEnvelope>);
     static_assert(
@@ -554,8 +583,35 @@ void require_profiling_input_codec() {
             "sealed profiling input lost its closed identity");
 
     const auto canonical = std::string(sealed.candidate->canonical_bytes());
-    require(canonical.find("\"selector_sha256\"") == std::string::npos,
-            "profiling input serialized a derived selector digest");
+    const auto document = json::parse(canonical);
+    const auto &method_evidence = document.at("method_evidence");
+    require(object_keys(method_evidence) ==
+                std::set<std::string>{"calibration_evidence_sha256",
+                                      "covered_effect", "method",
+                                      "owner_projection_coverage",
+                                      "retained_gtt_claim",
+                                      "transient_envelope_sha256"} &&
+                method_evidence.at("method") ==
+                    "differential_retained_gtt" &&
+                method_evidence.at("covered_effect") == "retained_gtt" &&
+                method_evidence.at("owner_projection_coverage") ==
+                    "incomplete",
+            "differential profiling input lost its method, covered effect, "
+            "or incomplete owner-projection state");
+    require(object_keys(document.at("completion")) ==
+                std::set<std::string>{"action_lease_closure_sha256",
+                                      "manifest_claims",
+                                      "ownership_recovery_evidence_sha256"},
+            "profiling completion serialized an open or incomplete shape");
+    require(document.at("confidence") == "calibrated_instance",
+            "complete profiling evidence did not derive calibrated-instance "
+            "confidence");
+    require(!document.contains("attribution_complete") &&
+                !document.contains("external_demand_absent") &&
+                !method_evidence.contains("owner_projection_claim") &&
+                canonical.find("\"selector_sha256\"") == std::string::npos,
+            "profiling input serialized a legacy proof flag, a fabricated "
+            "owner projection, or a derived selector digest");
     auto reparsed = parse_profiling_input(canonical);
     require(reparsed.accepted(), reparsed.diagnostic);
     require(reparsed.candidate->canonical_bytes() == canonical &&
@@ -574,6 +630,21 @@ void require_profiling_input_codec() {
     require_rejected(parse_profiling_input(with_unknown_root_field(canonical)),
                      OverlayContractStatus::UnknownField,
                      "profiling input accepted an unknown field");
+    require_rejected(
+        parse_profiling_input(tamper_once(
+            canonical,
+            "\"calibration_evidence_sha256\":\"" + digest('c') + "\"",
+            "\"baseline_observation_sha256\":\"" + digest('7') +
+                "\",\"calibration_evidence_sha256\":\"" + digest('c') +
+                "\"")),
+        OverlayContractStatus::UnknownField,
+        "differential profiling input accepted a mixed method arm");
+    require_rejected(
+        parse_profiling_input(tamper_once(
+            canonical, "\"method\":\"differential_retained_gtt\"",
+            "\"method\":\"future_method\"")),
+        OverlayContractStatus::UnknownValue,
+        "profiling input accepted an unknown evidence method");
     require_rejected(parse_profiling_input(tamper_once(
                          canonical, "\"deployment_id\":\"" + digest('b') + "\"",
                          "\"deployment_id\":\"" + digest('c') + "\"")),
@@ -585,31 +656,64 @@ void require_profiling_input_codec() {
                      OverlayContractStatus::Duplicate,
                      "profiling input accepted a duplicate key");
 
-    auto incomplete = profiling_draft();
-    incomplete.attribution_complete = false;
-    require_rejected(seal_profiling_input(std::move(incomplete)),
-                     OverlayContractStatus::IncompleteIdentity,
-                     "profiling input accepted incomplete attribution");
+    auto v1 = profiling_draft();
+    v1.schema = supported_local_overlay_schema;
+    require_rejected(seal_profiling_input(std::move(v1)),
+                     OverlayContractStatus::UnsupportedSchema,
+                     "profiling input accepted the legacy shared schema");
+
+    auto missing_transient = profiling_draft();
+    std::get<DifferentialRetainedGttEvidenceDraft>(
+        missing_transient.method_evidence)
+        .transient_envelope_sha256.clear();
+    require_rejected(seal_profiling_input(std::move(missing_transient)),
+                     "profiling input accepted missing transient evidence");
+
+    auto missing_ownership = profiling_draft();
+    missing_ownership.completion.ownership_recovery_evidence_sha256.clear();
+    require_rejected(seal_profiling_input(std::move(missing_ownership)),
+                     "profiling input accepted missing ownership and recovery "
+                     "evidence");
+
+    auto missing_action_lease = profiling_draft();
+    missing_action_lease.completion.action_lease_closure_sha256.clear();
+    require_rejected(seal_profiling_input(std::move(missing_action_lease)),
+                     "profiling input accepted missing action-lease closure");
 
     auto unknown_claims = profiling_draft();
-    unknown_claims.attributed_claims.front().completeness =
+    unknown_claims.completion.manifest_claims.front().completeness =
         ClaimCompleteness::Unknown;
-    unknown_claims.attributed_claims.front().entries.clear();
+    unknown_claims.completion.manifest_claims.front().entries.clear();
     require_rejected(seal_profiling_input(std::move(unknown_claims)),
-                     OverlayContractStatus::IncompleteClaimClosure,
                      "profiling input accepted an unknown claim family");
 
-    auto omitted_required_family = profiling_draft();
-    for (auto &family : omitted_required_family.attributed_claims) {
+    auto incomplete_host_floor = profiling_draft();
+    for (auto &family : incomplete_host_floor.completion.manifest_claims) {
         if (family.family == ClaimFamily::SafetyFloor) {
-            family.completeness = ClaimCompleteness::NotApplicable;
+            family.completeness = ClaimCompleteness::Unknown;
+            family.entries.clear();
         }
     }
-    require_rejected(
-        seal_profiling_input(std::move(omitted_required_family)),
-        OverlayContractStatus::IncompleteClaimClosure,
-        "profiling input accepted a required selector family as not applicable");
+    require_rejected(seal_profiling_input(std::move(incomplete_host_floor)),
+                     "profiling input accepted an incomplete host-memory "
+                     "safety floor");
 
+    auto incomplete_cardinality = profiling_draft();
+    for (auto &family : incomplete_cardinality.completion.manifest_claims) {
+        if (family.family == ClaimFamily::CardinalityPool) {
+            family.completeness = ClaimCompleteness::Unknown;
+            family.entries.clear();
+        }
+    }
+    require_rejected(seal_profiling_input(std::move(incomplete_cardinality)),
+                     "profiling input accepted an incomplete cardinality "
+                     "closure");
+
+    auto insufficient_manifest = profiling_draft();
+    insufficient_manifest.completion.manifest_claims = claims(2048);
+    require_rejected(seal_profiling_input(std::move(insufficient_manifest)),
+                     "profiling input accepted a manifest GTT bound below its "
+                     "retained-GTT evidence");
 }
 
 void require_overlay_object_codec() {

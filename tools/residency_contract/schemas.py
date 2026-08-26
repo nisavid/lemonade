@@ -206,6 +206,79 @@ def _local_overlay_claim_closure() -> dict[str, Any]:
     }
 
 
+def _local_overlay_retained_gtt_claim() -> dict[str, Any]:
+    return _object(
+        {
+            "amount": {"type": "integer", "minimum": 1, "maximum": UINT64_MAX},
+            "constraint_id": _opaque(),
+            "unit": {"const": "bytes"},
+        },
+        ("amount", "constraint_id", "unit"),
+    )
+
+
+def _local_overlay_profiling_method_evidence() -> dict[str, Any]:
+    mutation_complete_interval = _object(
+        {
+            "baseline_observation_sha256": _fixed_lower_hex(64),
+            "covered_effect": {"const": "complete_lifecycle"},
+            "external_change_absent": {"const": True},
+            "lifecycle_envelope_complete": {"const": True},
+            "method": {"const": "mutation_complete_interval"},
+            "owner_projection_coverage": {"const": "complete"},
+            "release_observation_sha256": _fixed_lower_hex(64),
+            "workload_observation_sha256": _fixed_lower_hex(64),
+        },
+        (
+            "baseline_observation_sha256",
+            "covered_effect",
+            "external_change_absent",
+            "lifecycle_envelope_complete",
+            "method",
+            "owner_projection_coverage",
+            "release_observation_sha256",
+            "workload_observation_sha256",
+        ),
+    )
+    differential_retained_gtt = _object(
+        {
+            "calibration_evidence_sha256": _fixed_lower_hex(64),
+            "covered_effect": {"const": "retained_gtt"},
+            "method": {"const": "differential_retained_gtt"},
+            "owner_projection_coverage": _string_schema(
+                values=("complete", "incomplete", "unknown"),
+                max_length=len("incomplete"),
+            ),
+            "retained_gtt_claim": _local_overlay_retained_gtt_claim(),
+            "transient_envelope_sha256": _fixed_lower_hex(64),
+        },
+        (
+            "calibration_evidence_sha256",
+            "covered_effect",
+            "method",
+            "owner_projection_coverage",
+            "retained_gtt_claim",
+            "transient_envelope_sha256",
+        ),
+    )
+    return {"oneOf": [mutation_complete_interval, differential_retained_gtt]}
+
+
+def _local_overlay_profiling_completion() -> dict[str, Any]:
+    return _object(
+        {
+            "action_lease_closure_sha256": _fixed_lower_hex(64),
+            "manifest_claims": {"$ref": "#/$defs/claim_closure"},
+            "ownership_recovery_evidence_sha256": _fixed_lower_hex(64),
+        },
+        (
+            "action_lease_closure_sha256",
+            "manifest_claims",
+            "ownership_recovery_evidence_sha256",
+        ),
+    )
+
+
 def _local_overlay_safety_margin_claim_closure() -> dict[str, Any]:
     return {
         "allOf": [
@@ -408,7 +481,10 @@ def _local_overlay_method_identity(registry: Mapping[str, Any]) -> dict[str, Any
     return result
 
 
-def _local_overlay_definitions(registry: Mapping[str, Any]) -> dict[str, Any]:
+def _local_overlay_definitions(
+    registry: Mapping[str, Any], raw_version: Any
+) -> dict[str, Any]:
+    version = _mapping(raw_version, "local-overlay schema version")
     return {
         "authority_status": {"const": "active"},
         "claim_closure": _local_overlay_claim_closure(),
@@ -423,7 +499,10 @@ def _local_overlay_definitions(registry: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "safety_margin_claim_closure": _local_overlay_safety_margin_claim_closure(),
         "schema_version": _object(
-            {"major": {"const": 1}, "minor": {"const": 0}},
+            {
+                "major": {"const": version.get("major")},
+                "minor": {"const": version.get("minor")},
+            },
             ("major", "minor"),
         ),
         "selector_identity": _local_overlay_selector_identity(registry),
@@ -457,6 +536,10 @@ def _local_overlay_field_schema(
     if spec["type"] == "local_overlay_profiling_lifecycle_state":
         values = ("baseline_quiescent", "workload_complete", "release_verified")
         return _string_schema(values=values, max_length=max(map(len, values)))
+    if spec["type"] == "local_overlay_profiling_method_evidence":
+        return _local_overlay_profiling_method_evidence()
+    if spec["type"] == "local_overlay_profiling_completion":
+        return _local_overlay_profiling_completion()
     if spec["type"] == "local_overlay_zero_claim_closure":
         return {
             "allOf": [
@@ -1277,7 +1360,9 @@ def _schema_document(
             {"reason": _reason_reference(registry, key)} if uses_reason else {}
         )
         if key in LOCAL_OVERLAY_SCHEMA_KEYS:
-            document_definitions.update(_local_overlay_definitions(registry))
+            document_definitions.update(
+                _local_overlay_definitions(registry, row.get("version"))
+            )
         if key == "request_error":
             root.setdefault("allOf", []).extend(
                 _request_error_http_conditionals(registry, reason_rows)
@@ -1464,8 +1549,24 @@ def _local_overlay_field_example(
         "local_overlay_profiling_lifecycle_state": "baseline_quiescent",
         "local_overlay_profiling_owner_coverage": "complete",
         "local_overlay_profiling_phase": "baseline",
+        "local_overlay_profiling_method_evidence": {
+            "calibration_evidence_sha256": "b" * 64,
+            "covered_effect": "retained_gtt",
+            "method": "differential_retained_gtt",
+            "owner_projection_coverage": "incomplete",
+            "retained_gtt_claim": {
+                "amount": 4096,
+                "constraint_id": "gpu/gtt",
+                "unit": "bytes",
+            },
+            "transient_envelope_sha256": "c" * 64,
+        },
+        "local_overlay_profiling_completion": {
+            "action_lease_closure_sha256": "e" * 64,
+            "manifest_claims": _local_overlay_claim_example(),
+            "ownership_recovery_evidence_sha256": "d" * 64,
+        },
         "local_overlay_safety_margin_claim_closure": _local_overlay_claim_example(),
-        "local_overlay_schema_version": {"major": 1, "minor": 0},
         "local_overlay_selector_identity": _local_overlay_selector_example(),
         "local_overlay_source_generations": {
             "backend": 2,
@@ -1607,12 +1708,18 @@ def _example(
     if key == "residency_profiles":
         return copy.deepcopy(catalog)
     fields = _mapping(row.get("fields"), f"schema_registry.{key}.fields")
-    result = {
-        name: _field_example(name, spec, registry, reason_rows)
-        for name, spec in fields.items()
-        if _mapping(spec, f"schema_registry.{key}.fields.{name}").get("required")
-        is True
-    }
+    result = {}
+    for name, spec in fields.items():
+        field = _mapping(spec, f"schema_registry.{key}.fields.{name}")
+        if field.get("required") is not True:
+            continue
+        result[name] = (
+            copy.deepcopy(row["version"])
+            if key in LOCAL_OVERLAY_SCHEMA_KEYS
+            and name == "schema"
+            and field.get("type") == "local_overlay_schema_version"
+            else _field_example(name, field, registry, reason_rows)
+        )
     if key == "coordinator_step_result":
         result["candidate_id"] = "candidate-1"
         result["artifact_scope_key"] = "artifact-scope-1"
