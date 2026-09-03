@@ -93,6 +93,8 @@ using lemon::residency::ProfilingTransactionContext;
 using lemon::residency::internal::LinuxAmdGttPointObservationSource;
 using lemon::residency::internal::LinuxAmdGttPointObservationSourceBinding;
 using lemon::residency::internal::LinuxAmdGttPointObservationSourceTestHook;
+using lemon::residency::internal::LinuxAmdGttPointReadResult;
+using lemon::residency::internal::LinuxAmdGttPointReadStatus;
 using lemon::residency::internal::linux_amd_gtt_point_sensor_id;
 using lemon::residency::profiling_owner_scope_binding;
 using lemon::residency::profiling_owner_scope_set_sha256;
@@ -127,6 +129,13 @@ static_assert(std::is_constructible_v<
               LinuxAmdGttPointObservationSource,
               LinuxAmdGttPointObservationSourceBinding,
               PreparedProcessContainment &>);
+static_assert(std::is_same_v<
+              decltype(std::declval<LinuxAmdGttPointObservationSource &>()
+                           .read_point(
+                               std::declval<const ProfilingRawReadRequest &>(),
+                               std::declval<
+                                   const ProfilingCancellationCheck &>())),
+              LinuxAmdGttPointReadResult>);
 static_assert(linux_amd_gtt_point_sensor_id ==
               std::string_view{
                   "linux.amdgpu.mem_info_gtt_used.bytes.v1"});
@@ -472,7 +481,8 @@ public:
         }
     }
 
-    ProfilingRawReadResult read(ReadOptions options) {
+    template <typename Reader>
+    auto read_with(ReadOptions options, Reader reader) {
         if (!options.monotonic_now) {
             const auto base = std::chrono::steady_clock::now();
             options.monotonic_now = [base] { return base; };
@@ -495,7 +505,16 @@ public:
         const auto &read_request = options.request_override
                                        ? *options.request_override
                                        : request;
-        return source.read(read_request, options.cancellation_check);
+        return reader(source, read_request, options.cancellation_check);
+    }
+
+    ProfilingRawReadResult read(ReadOptions options) {
+        return read_with(
+            std::move(options),
+            [](auto &source, const auto &read_request,
+               const auto &cancellation_check) {
+                return source.read(read_request, cancellation_check);
+            });
     }
 
     ProfilingRawReadResult read() { return read(ReadOptions{}); }
@@ -505,6 +524,18 @@ public:
         options.request_override = std::move(read_request);
         return read(std::move(options));
     }
+
+    auto read_point(ReadOptions options) {
+        return read_with(
+            std::move(options),
+            [](auto &source, const auto &read_request,
+               const auto &cancellation_check) {
+                return source.read_point(read_request,
+                                         cancellation_check);
+            });
+    }
+
+    auto read_point() { return read_point(ReadOptions{}); }
 
     TempTree tree;
     std::filesystem::path proc_root;
@@ -561,6 +592,35 @@ void require_unavailable(TestState &state,
                 lemon::residency::max_local_overlay_diagnostic_bytes &&
             path_free,
         message);
+}
+
+void require_observed_point(TestState &state,
+                            const LinuxAmdGttPointReadResult &result,
+                            std::optional<std::uint64_t> owner,
+                            const char *message,
+                            std::uint64_t global = 16384) {
+    const bool matches =
+        result.status == LinuxAmdGttPointReadStatus::Observed &&
+        result.observed() && result.observation.has_value() &&
+        result.observation->global_sample.sensor_id ==
+            linux_amd_gtt_point_sensor_id &&
+        !result.observation->global_sample.owner_scope_id &&
+        result.observation->global_sample.value == global &&
+        result.observation->global_sample.source_generation == 72 &&
+        result.observation->owner_scope_set_sha256 ==
+            expected_owner_set_digest &&
+        result.diagnostic.empty() &&
+        (owner ? result.observation->owner_sample.has_value()
+               : !result.observation->owner_sample.has_value());
+    state.require(matches, message);
+    if (!matches || !owner) return;
+    const auto &sample = *result.observation->owner_sample;
+    state.require(
+        sample.sensor_id == linux_amd_gtt_point_sensor_id &&
+            sample.owner_scope_id ==
+                std::optional<std::string>{"owner/model-alpha"} &&
+            sample.value == *owner && sample.source_generation == 72,
+        "an observed owner projection carries the bound owner identity");
 }
 
 void test_binding_identity(TestState &state) {
@@ -710,6 +770,419 @@ void test_request_and_basic_reads(TestState &state) {
     }
 }
 
+void test_point_read_preserves_independent_global_truth(TestState &state) {
+    {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        require_observed_point(
+            state, scenario.read_point(), 4096,
+            "a complete point exposes distinct global and owner samples");
+    }
+    {
+        Scenario scenario;
+        require_observed_point(
+            state, scenario.read_point(), 0,
+            "two complete empty passes expose an explicit owner zero");
+    }
+    {
+        Scenario scenario;
+        std::error_code error;
+        std::filesystem::remove_all(
+            scenario.proc_root / std::to_string(fixture_pid) / "fdinfo",
+            error);
+        if (error) setup_failure("could not remove fake fdinfo directory");
+        require_observed_point(
+            state, scenario.read_point(), std::nullopt,
+            "a missing fdinfo projection preserves the authoritative global point");
+
+        scenario.reset_snapshots();
+        require_unavailable(
+            state, scenario.read(), scenario.tree.root(),
+            "the generic read still rejects a partial point observation");
+    }
+    {
+        Scenario scenario;
+        std::error_code error;
+        std::filesystem::remove_all(
+            scenario.proc_root / std::to_string(fixture_pid) / "fdinfo",
+            error);
+        if (error) setup_failure("could not remove fake fdinfo directory");
+        write_file(scenario.device_directory / "mem_info_gtt_used", "0\n");
+        require_observed_point(
+            state, scenario.read_point(), std::nullopt,
+            "a physical zero remains distinct from an unknown owner projection",
+            0);
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(3, "drm-client-id:\t7\n");
+        require_observed_point(
+            state, scenario.read_point(), std::nullopt,
+            "an incomplete fdinfo projection preserves the authoritative global point");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        const auto result = scenario.read_point(read_options_at_boundary(
+            ReadBoundary::AfterGlobalPoint, [&scenario] {
+                scenario.write_fd(3, "drm-client-id:\t7\n");
+            }));
+        require_observed_point(
+            state, result, std::nullopt,
+            "one incomplete fdinfo pass omits the owner without erasing the global point");
+    }
+}
+
+void test_point_read_rejects_contradictory_owner_evidence(TestState &state) {
+    {
+        Scenario scenario;
+        scenario.write_fd(
+            3, fdinfo("drm-resident-gtt:\t4 KiB\n",
+                      "drm-shared-gtt:\t1 KiB\n"));
+        const auto result = scenario.read_point();
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Contradictory &&
+                !result.observed() && !result.observation,
+            "nonzero shared GTT rejects the entire point as contradictory");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("", "drm-shared-gtt:\t1 KiB\n"));
+        const auto result = scenario.read_point();
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Contradictory &&
+                !result.observed() && !result.observation,
+            "known nonzero shared GTT rejects even when resident evidence is missing");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(
+            3, fdinfo("drm-resident-gtt:\t4 KiB\n"
+                      "drm-memory-gtt:\t8 KiB\n",
+                      ""));
+        const auto result = scenario.read_point();
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Contradictory &&
+                !result.observed() && !result.observation,
+            "conflicting resident aliases reject even when shared evidence is missing");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        scenario.write_fd(
+            4, fdinfo("drm-resident-gtt:\t8 KiB\n"
+                      "drm-resident-gtt:\t8 KiB\n"));
+        const auto result = scenario.read_point();
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Contradictory &&
+                !result.observed() && !result.observation,
+            "a safely parsed resident conflict rejects even when one record is incomplete");
+    }
+    {
+        Scenario scenario;
+        write_file(scenario.device_directory / "mem_info_gtt_used",
+                   "4096\n");
+        scenario.write_fd(
+            3, fdinfo("drm-resident-gtt:\t8 KiB\n"
+                      "drm-resident-gtt:\t8 KiB\n"));
+        const auto result = scenario.read_point();
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Contradictory &&
+                !result.observed() && !result.observation,
+            "a safely parsed target value above global rejects even when its record is incomplete");
+    }
+    {
+        Scenario scenario;
+        auto contents = std::string("drm-client-id\n");
+        contents += fdinfo("drm-resident-gtt:\t4 KiB\n",
+                           "drm-shared-gtt:\t1 KiB\n");
+        scenario.write_fd(3, contents);
+        const auto result = scenario.read_point();
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Contradictory &&
+                !result.observed() && !result.observation,
+            "an early malformed field cannot hide later nonzero shared GTT");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        scenario.write_fd(
+            4, fdinfo("drm-resident-gtt:\t4 KiB\n",
+                      "drm-shared-gtt:\t0 KiB\n", "8"));
+        const auto result = scenario.read_point();
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Contradictory &&
+                !result.observed() && !result.observation,
+            "conflicting owner identities reject the entire point");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        scenario.write_fd(
+            4, fdinfo("drm-resident-gtt:\t4 KiB\n", "", "8"));
+        const auto result = scenario.read_point();
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Contradictory &&
+                !result.observed() && !result.observation,
+            "a client identity conflict rejects even when one record is incomplete");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        const auto result = scenario.read_point(read_options_at_boundary(
+            ReadBoundary::AfterGlobalPoint, [&scenario] {
+                scenario.write_fd(
+                    3, fdinfo("drm-resident-gtt:\t4 KiB\n",
+                              "drm-shared-gtt:\t0 KiB\n", "8"));
+            }));
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Contradictory &&
+                !result.observed() && !result.observation,
+            "a cross-pass client identity change rejects the entire point");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(
+            3, fdinfo("drm-resident-gtt:\t4 KiB\n", "", "7"));
+        const auto result = scenario.read_point(read_options_at_boundary(
+            ReadBoundary::AfterGlobalPoint, [&scenario] {
+                scenario.write_fd(
+                    3, fdinfo("drm-resident-gtt:\t4 KiB\n",
+                              "drm-shared-gtt:\t0 KiB\n", "8"));
+            }));
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Contradictory &&
+                !result.observed() && !result.observation,
+            "a cross-pass client conflict rejects even when one pass is incomplete");
+    }
+    {
+        Scenario scenario;
+        constexpr std::string_view other_pdev = "0000:c7:00.0";
+        auto contents = fdinfo("drm-resident-gtt:\t4 KiB\n",
+                               "drm-shared-gtt:\t0 KiB\n", "7",
+                               other_pdev);
+        contents += "drm-pdev:\t0000:c6:00.0\n";
+        scenario.write_fd(3, contents);
+        const auto result = scenario.read_point();
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Contradictory &&
+                !result.observed() && !result.observation,
+            "conflicting duplicate device identities reject the entire point regardless of order");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        auto changed = birth();
+        ++changed.start_time_ticks;
+        scenario.control->snapshots.clear();
+        scenario.control->snapshots.push_back(successful_snapshot(
+            scenario.identity, 71, {birth()}));
+        scenario.control->snapshots.push_back(successful_snapshot(
+            scenario.identity, 72, {changed}));
+        const auto result = scenario.read_point();
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::IdentityDrift &&
+                !result.observed() && !result.observation,
+            "a containment actor transition rejects the entire point");
+    }
+}
+
+void test_point_read_discards_global_after_abort(TestState &state) {
+    {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        const auto cancelled = std::make_shared<std::atomic<bool>>(false);
+        Scenario::ReadOptions options;
+        options.cancellation_check = [cancelled] {
+            return cancelled->load(std::memory_order_acquire);
+        };
+        options.on_read_boundary =
+            [cancelled](ReadBoundary boundary) {
+                if (boundary == ReadBoundary::AfterGlobalPoint) {
+                    cancelled->store(true, std::memory_order_release);
+                }
+            };
+        const auto result = scenario.read_point(std::move(options));
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Cancelled &&
+                !result.observed() && !result.observation,
+            "cancellation after the global read discards the point");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        auto binding = scenario.binding();
+        binding.max_read_duration = 5s;
+        const auto expired = std::make_shared<std::atomic<bool>>(false);
+        const auto base = std::chrono::steady_clock::now();
+        Scenario::ReadOptions options;
+        options.source_binding = std::move(binding);
+        options.monotonic_now = [base, expired] {
+            return expired->load(std::memory_order_acquire) ? base + 5s
+                                                            : base;
+        };
+        options.on_read_boundary =
+            [expired](ReadBoundary boundary) {
+                if (boundary == ReadBoundary::AfterGlobalPoint) {
+                    expired->store(true, std::memory_order_release);
+                }
+            };
+        const auto result = scenario.read_point(std::move(options));
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Unavailable &&
+                !result.observed() && !result.observation,
+            "deadline expiry after the global read discards the point");
+    }
+}
+
+void test_point_read_distinguishes_device_failure_from_drift(
+    TestState &state) {
+    {
+        Scenario scenario;
+        std::error_code error;
+        std::filesystem::remove(scenario.device_directory / "vendor", error);
+        if (error) setup_failure("could not remove fake vendor attribute");
+        const auto result = scenario.read_point();
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Unavailable &&
+                !result.observed() && !result.observation,
+            "an unreadable opening device identity is unavailable");
+    }
+    {
+        Scenario scenario;
+        const auto result = scenario.read_point(read_options_at_boundary(
+            ReadBoundary::AfterGlobalPoint, [&scenario] {
+                std::error_code error;
+                std::filesystem::remove(
+                    scenario.device_directory / "vendor", error);
+                if (error) {
+                    setup_failure("could not remove fake vendor attribute");
+                }
+            }));
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Unavailable &&
+                !result.observed() && !result.observation,
+            "a closing device I/O failure discards the global point as unavailable");
+    }
+    if (::geteuid() != 0) {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        const auto original_permissions =
+            std::filesystem::status(scenario.device_directory).permissions();
+        std::error_code error;
+        const auto result = scenario.read_point(read_options_at_boundary(
+            ReadBoundary::AfterGlobalPoint,
+            [&scenario, &error] {
+                std::filesystem::permissions(
+                    scenario.device_directory,
+                    std::filesystem::perms::none,
+                    std::filesystem::perm_options::replace, error);
+                if (error) {
+                    setup_failure(
+                        "could not make the fake device path inaccessible");
+                }
+            }));
+        std::filesystem::permissions(
+            scenario.device_directory, original_permissions,
+            std::filesystem::perm_options::replace, error);
+        if (error) {
+            setup_failure("could not restore fake device permissions");
+        }
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Unavailable &&
+                !result.observed() && !result.observation,
+            "a transient device-directory reopen failure is unavailable rather than identity drift");
+    }
+    if (::geteuid() != 0) {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        const auto member_directory =
+            scenario.proc_root / std::to_string(fixture_pid);
+        const auto original_permissions =
+            std::filesystem::status(member_directory).permissions();
+        std::error_code error;
+        const auto result = scenario.read_point(read_options_at_boundary(
+            ReadBoundary::AfterGlobalPoint,
+            [&member_directory, &error] {
+                std::filesystem::permissions(
+                    member_directory, std::filesystem::perms::none,
+                    std::filesystem::perm_options::replace, error);
+                if (error) {
+                    setup_failure(
+                        "could not make the fake process path inaccessible");
+                }
+            }));
+        std::filesystem::permissions(
+            member_directory, original_permissions,
+            std::filesystem::perm_options::replace, error);
+        if (error) {
+            setup_failure("could not restore fake process permissions");
+        }
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Unavailable &&
+                !result.observed() && !result.observation,
+            "a transient process-directory reopen failure is unavailable rather than identity drift");
+    }
+    if (::geteuid() != 0) {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        const auto stat_path = scenario.proc_root /
+                               std::to_string(fixture_pid) / "stat";
+        const auto original_permissions =
+            std::filesystem::status(stat_path).permissions();
+        std::error_code error;
+        const auto result = scenario.read_point(read_options_at_boundary(
+            ReadBoundary::AfterGlobalPoint, [&stat_path, &error] {
+                std::filesystem::permissions(
+                    stat_path, std::filesystem::perms::none,
+                    std::filesystem::perm_options::replace, error);
+                if (error) {
+                    setup_failure(
+                        "could not make the fake process identity unavailable");
+                }
+            }));
+        std::filesystem::permissions(
+            stat_path, original_permissions,
+            std::filesystem::perm_options::replace, error);
+        if (error) {
+            setup_failure("could not restore fake process stat permissions");
+        }
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::Unavailable &&
+                !result.observed() && !result.observation,
+            "a transient process-identity read failure is unavailable rather than identity drift");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(3, fdinfo("drm-resident-gtt:\t4 KiB\n"));
+        const auto result = scenario.read_point(read_options_at_boundary(
+            ReadBoundary::AfterGlobalPoint, [&scenario] {
+                std::error_code error;
+                std::filesystem::remove_all(
+                    scenario.proc_root / std::to_string(fixture_pid), error);
+                if (error) {
+                    setup_failure("could not remove the fake process path");
+                }
+            }));
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::IdentityDrift &&
+                !result.observed() && !result.observation,
+            "an absent process path is identity drift rather than transient unavailability");
+    }
+    {
+        Scenario scenario;
+        const auto result = scenario.read_point(read_options_at_boundary(
+            ReadBoundary::AfterGlobalPoint, [&scenario] {
+                write_file(scenario.device_directory / "vendor",
+                           "0x10de\n");
+            }));
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::IdentityDrift &&
+                !result.observed() && !result.observation,
+            "a changed device identity rejects the entire point as drift");
+    }
+}
+
 void test_fdinfo_units_aliases_and_cardinality(TestState &state) {
     struct SuccessCase {
         std::string contents;
@@ -823,6 +1296,27 @@ void test_fdinfo_device_selection(TestState &state) {
                       "drm-shared-gtt:\t0 KiB\n", "7", other_pdev));
         require_success(state, scenario.read(), 0,
                         "a complete canonical other-device record is ignored");
+    }
+    {
+        Scenario scenario;
+        scenario.write_fd(
+            3, fdinfo("drm-resident-gtt:\t4 KiB\n"
+                      "drm-resident-gtt:\t8 KiB\n",
+                      "drm-shared-gtt:\t0 KiB\n", "7", other_pdev));
+        require_observed_point(
+            state, scenario.read_point(), 0,
+            "conflicting owner fields on a proven other-device record are ignored");
+    }
+    {
+        Scenario scenario;
+        auto contents =
+            fdinfo("drm-resident-gtt:\t8 KiB\n",
+                   "drm-shared-gtt:\t0 KiB\n", "7", other_pdev);
+        contents += "drm-pdev\n";
+        scenario.write_fd(3, contents);
+        require_observed_point(
+            state, scenario.read_point(), std::nullopt,
+            "a malformed device-identity field prevents proving that a record is other-device-only");
     }
     {
         Scenario scenario;
@@ -996,6 +1490,7 @@ void test_multiple_containment_members(TestState &state) {
 void test_fdinfo_descriptor_limits(TestState &state) {
     constexpr std::size_t descriptors_per_pass = 4096;
     constexpr int second_pid = 4313;
+    constexpr int third_pid = 4314;
 
     {
         Scenario scenario;
@@ -1034,6 +1529,54 @@ void test_fdinfo_descriptor_limits(TestState &state) {
         require_unavailable(
             state, scenario.read(std::move(options)), scenario.tree.root(),
             "the per-pass descriptor cap is aggregate across members");
+    }
+    {
+        Scenario scenario;
+        scenario.write_ignored_fds(descriptors_per_pass / 2);
+        scenario.add_member(second_pid, 998);
+        scenario.write_ignored_fds(descriptors_per_pass / 2 + 1,
+                                   second_pid);
+        scenario.add_member(third_pid, 999);
+        scenario.write_fd(
+            3, fdinfo("drm-resident-gtt:\t4 KiB\n",
+                      "drm-shared-gtt:\t1 KiB\n"),
+            third_pid);
+        scenario.reset_snapshots(
+            scenario.identity,
+            {birth(), birth(second_pid, 998), birth(third_pid, 999)});
+        FileReadCounter third_fd_reads(
+            scenario.proc_root / std::to_string(third_pid) / "fdinfo",
+            "3");
+        FileReadCounter third_stat_reads(
+            scenario.proc_root / std::to_string(third_pid), "stat");
+        auto binding = scenario.binding();
+        binding.max_read_duration = 30s;
+        Scenario::ReadOptions options;
+        options.source_binding = std::move(binding);
+        require_observed_point(
+            state, scenario.read_point(std::move(options)), std::nullopt,
+            "descriptor-budget exhaustion stops reading later owner evidence while preserving the global point");
+        state.require(
+            third_fd_reads.consume() == 0,
+            "descriptor-budget exhaustion does not read later fdinfo records");
+        state.require(
+            third_stat_reads.consume() == 4,
+            "descriptor-budget exhaustion still checks each later member birth identity in both passes");
+    }
+    {
+        Scenario scenario;
+        scenario.write_ignored_fds(descriptors_per_pass + 1);
+        scenario.reset_snapshots(
+            scenario.identity, {birth(), birth(second_pid, 998)});
+        auto binding = scenario.binding();
+        binding.max_read_duration = 30s;
+        Scenario::ReadOptions options;
+        options.source_binding = std::move(binding);
+        const auto result = scenario.read_point(std::move(options));
+        state.require(
+            result.status == LinuxAmdGttPointReadStatus::IdentityDrift &&
+                !result.observed() && !result.observation,
+            "descriptor-budget exhaustion still checks later member birth identities");
     }
 }
 
@@ -1861,6 +2404,10 @@ int main() {
         test_binding_identity(state);
         test_binding_is_acquired_from_a_normalized_snapshot(state);
         test_request_and_basic_reads(state);
+        test_point_read_preserves_independent_global_truth(state);
+        test_point_read_rejects_contradictory_owner_evidence(state);
+        test_point_read_discards_global_after_abort(state);
+        test_point_read_distinguishes_device_failure_from_drift(state);
         test_fdinfo_units_aliases_and_cardinality(state);
         test_fdinfo_device_selection(state);
         test_fdinfo_completeness_failures(state);

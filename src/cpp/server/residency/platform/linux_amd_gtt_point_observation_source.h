@@ -18,6 +18,32 @@ namespace lemon::residency::internal {
 inline constexpr std::string_view linux_amd_gtt_point_sensor_id =
     "linux.amdgpu.mem_info_gtt_used.bytes.v1";
 
+enum class LinuxAmdGttPointReadStatus {
+    Observed,
+    Unavailable,
+    Cancelled,
+    Contradictory,
+    IdentityDrift,
+};
+
+struct LinuxAmdGttPointObservation {
+    ProfilingRawSample global_sample;
+    std::optional<ProfilingRawSample> owner_sample;
+    std::string owner_scope_set_sha256;
+};
+
+struct LinuxAmdGttPointReadResult {
+    LinuxAmdGttPointReadStatus status =
+        LinuxAmdGttPointReadStatus::Unavailable;
+    std::optional<LinuxAmdGttPointObservation> observation;
+    std::string diagnostic;
+
+    bool observed() const noexcept {
+        return status == LinuxAmdGttPointReadStatus::Observed &&
+               observation.has_value();
+    }
+};
+
 struct LinuxAmdGttPointObservationSourceBinding {
     std::filesystem::path sysfs_device_directory;
     std::string drm_pdev;
@@ -48,6 +74,10 @@ public:
     ProfilingRawReadResult
     read(const ProfilingRawReadRequest &request,
          const ProfilingCancellationCheck &should_abort) override;
+
+    LinuxAmdGttPointReadResult
+    read_point(const ProfilingRawReadRequest &request,
+               const ProfilingCancellationCheck &should_abort);
 
 private:
     class Impl;
