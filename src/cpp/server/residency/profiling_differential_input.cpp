@@ -22,8 +22,9 @@ bool identifier_is_valid(std::string_view value) noexcept {
            });
 }
 
-bool bindings_equal(const ProfilingNoiseBindings &left,
-                    const ProfilingNoiseBindings &right) noexcept {
+bool bindings_equal_except_background(
+    const ProfilingNoiseBindings &left,
+    const ProfilingNoiseBindings &right) noexcept {
     return left.deployment_id == right.deployment_id &&
            left.deployment_epoch_sha256 ==
                right.deployment_epoch_sha256 &&
@@ -41,19 +42,14 @@ bool bindings_equal(const ProfilingNoiseBindings &left,
            left.campaign_contract_sha256 ==
                right.campaign_contract_sha256 &&
            left.procedure_revision_sha256 ==
-               right.procedure_revision_sha256 &&
-           left.background_inventory_sha256 ==
-               right.background_inventory_sha256;
+               right.procedure_revision_sha256;
 }
 
-bool bindings_equal_except_background(
-    const ProfilingNoiseBindings &left,
-    const ProfilingNoiseBindings &right) noexcept {
-    auto left_without_background = left;
-    auto right_without_background = right;
-    left_without_background.background_inventory_sha256.clear();
-    right_without_background.background_inventory_sha256.clear();
-    return bindings_equal(left_without_background, right_without_background);
+bool bindings_equal(const ProfilingNoiseBindings &left,
+                    const ProfilingNoiseBindings &right) noexcept {
+    return bindings_equal_except_background(left, right) &&
+           left.background_inventory_sha256 ==
+               right.background_inventory_sha256;
 }
 
 bool generations_are_valid(
@@ -486,6 +482,17 @@ revalidate_profiling_differential_input(
                     "contained target");
             }
         }
+
+        if (input.last_accepted_revalidation_at_.has_value() &&
+            observation.checked_at <=
+                *input.last_accepted_revalidation_at_) {
+            return reject(
+                ProfilingDifferentialRevalidationStatus::
+                    NonIncreasingObservation,
+                "revalidation observation is not newer than the "
+                "last accepted observation");
+        }
+        input.last_accepted_revalidation_at_ = observation.checked_at;
 
         ProfilingDifferentialRevalidationResult result;
         result.status =

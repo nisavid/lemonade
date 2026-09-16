@@ -88,6 +88,7 @@ enum class ProfilingDifferentialRevalidationStatus {
     BackgroundDrift,
     ExcessVariation,
     TargetMismatch,
+    NonIncreasingObservation,
 };
 
 struct ProfilingDifferentialInputFreezeResult;
@@ -124,6 +125,8 @@ private:
     ProfilingDifferentialInputDraft draft_;
     std::string frozen_input_sha256_;
     bool revision_rejected_ = false;
+    std::optional<std::chrono::steady_clock::time_point>
+        last_accepted_revalidation_at_;
 
     friend ProfilingDifferentialInputFreezeResult
     freeze_profiling_differential_input(

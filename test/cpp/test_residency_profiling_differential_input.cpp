@@ -356,6 +356,8 @@ void require_consumer_failure_contract() {
     auto mismatched_identity = input_draft(trace.bindings, noise);
     mismatched_identity.identity.transaction.selector
         .device_identity_sha256 = digest('a');
+    mismatched_identity.identity.transaction.selector_sha256 =
+        canonical_selector_sha256(mismatched_identity.identity.transaction);
     require_freeze_rejected(
         noise, std::move(mismatched_identity),
         ProfilingDifferentialInputFreezeStatus::InvalidIdentity,
@@ -437,6 +439,32 @@ void require_consumer_failure_contract() {
         ProfilingDifferentialRevalidationStatus::NoiseResultMismatch,
         "a changed immutable noise-result checksum did not invalidate the "
         "input");
+
+    auto repeated_input = freeze_valid_input(noise, trace.bindings);
+    auto repeated_observation =
+        observation_for(repeated_input, trace.exact_end + 7h);
+    auto first_revalidation = revalidate_profiling_differential_input(
+        repeated_input, repeated_observation);
+    require(first_revalidation.accepted(),
+            "the first fresh revalidation observation was rejected");
+    require_revalidation_rejected(
+        repeated_input, repeated_observation,
+        ProfilingDifferentialRevalidationStatus::NonIncreasingObservation,
+        "a repeated revalidation observation was accepted");
+
+    auto decreasing_input = freeze_valid_input(noise, trace.bindings);
+    auto newer_observation =
+        observation_for(decreasing_input, trace.exact_end + 8h);
+    auto newer_revalidation = revalidate_profiling_differential_input(
+        decreasing_input, newer_observation);
+    require(newer_revalidation.accepted(),
+            "the first ordered revalidation observation was rejected");
+    auto older_observation =
+        observation_for(decreasing_input, trace.exact_end + 7h);
+    require_revalidation_rejected(
+        decreasing_input, std::move(older_observation),
+        ProfilingDifferentialRevalidationStatus::NonIncreasingObservation,
+        "an older revalidation observation was accepted");
 }
 
 } // namespace

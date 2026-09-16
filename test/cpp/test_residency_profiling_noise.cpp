@@ -300,6 +300,25 @@ bool invalid_trace_contract_is_enforced() {
         return false;
     }
 
+    auto boundary_finish = stable_trace();
+    boundary_finish.readings.back().read_finished_at =
+        boundary_finish.exact_end;
+    if (!produce_no_target_gtt_noise(boundary_finish).accepted()) {
+        std::cerr << "FAIL: a read finishing exactly at the trace boundary "
+                     "was rejected\n";
+        return false;
+    }
+
+    auto escaped_finish = stable_trace();
+    escaped_finish.readings.back().read_finished_at =
+        escaped_finish.exact_end + 1ns;
+    if (!rejects(escaped_finish,
+                 ProfilingNoiseProductionStatus::InvalidTrace)) {
+        std::cerr << "FAIL: a read finishing after the trace boundary was "
+                     "accepted\n";
+        return false;
+    }
+
     auto bound_overflow = stable_trace();
     bound_overflow.read_skew_uncertainty_bytes = 1;
     for (auto &reading : bound_overflow.readings) {

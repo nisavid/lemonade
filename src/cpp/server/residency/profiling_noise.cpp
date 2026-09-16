@@ -527,7 +527,8 @@ produce_no_target_gtt_noise(const ProfilingNoTargetGttTrace &trace) {
             if (!schedule_delay || !read_duration ||
                 reading.scheduled_at < trace.started_at ||
                 reading.scheduled_at >= trace.exact_end ||
-                reading.read_started_at >= trace.exact_end) {
+                reading.read_started_at >= trace.exact_end ||
+                reading.read_finished_at > trace.exact_end) {
                 return reject(ProfilingNoiseProductionStatus::InvalidTrace,
                               "noise trace reading times are invalid");
             }
