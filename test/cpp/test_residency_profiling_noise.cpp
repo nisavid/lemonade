@@ -19,6 +19,7 @@ using lemon::residency::ProfilingNoiseParseStatus;
 using lemon::residency::ProfilingNoiseProductionStatus;
 using lemon::residency::parse_profiling_noise_result;
 using lemon::residency::produce_no_target_gtt_noise;
+using lemon::residency::profiling_noise_maximum_trace_points;
 using lemon::residency::profiling_noise_nominal_cadence;
 using lemon::residency::profiling_noise_trace_duration;
 
@@ -98,6 +99,90 @@ ProfilingNoTargetGttTrace dense_trace(
         reading.observed_bindings = trace.bindings;
         trace.readings.push_back(std::move(reading));
     }
+    return trace;
+}
+
+ProfilingNoTargetGttReading constant_reading(
+    const ProfilingNoTargetGttTrace &trace,
+    std::chrono::steady_clock::time_point scheduled_at) {
+    ProfilingNoTargetGttReading reading;
+    reading.scheduled_at = scheduled_at;
+    reading.read_started_at = scheduled_at;
+    reading.read_finished_at = scheduled_at + 1ns;
+    reading.gtt_used_bytes = 4096;
+    reading.observed_bindings = trace.bindings;
+    return reading;
+}
+
+ProfilingNoTargetGttTrace front_loaded_cluster_trace() {
+    auto trace = stable_trace();
+    trace.readings.clear();
+    trace.read_skew_uncertainty_bytes = 0;
+
+    constexpr std::size_t cluster_points = 27000;
+    constexpr std::size_t tail_points = 9000;
+    const auto first_span_nanoseconds =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(1s).count();
+    const auto tail_span_nanoseconds =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            profiling_noise_trace_duration - 1s)
+            .count();
+
+    trace.readings.reserve(profiling_noise_maximum_trace_points);
+    for (std::size_t index = 0; index < cluster_points; ++index) {
+        const auto offset = std::chrono::nanoseconds{
+            first_span_nanoseconds * static_cast<std::int64_t>(index) /
+            static_cast<std::int64_t>(cluster_points)};
+        trace.readings.push_back(
+            constant_reading(trace, trace.started_at + offset));
+    }
+    for (std::size_t index = 0; index < tail_points; ++index) {
+        const auto offset = std::chrono::nanoseconds{
+            tail_span_nanoseconds * static_cast<std::int64_t>(index) /
+            static_cast<std::int64_t>(tail_points)};
+        trace.readings.push_back(
+            constant_reading(trace, trace.started_at + 1s + offset));
+    }
+    return trace;
+}
+
+ProfilingNoTargetGttTrace midpoint_cluster_trace() {
+    auto trace = stable_trace();
+    trace.read_skew_uncertainty_bytes = 0;
+    for (auto &reading : trace.readings) {
+        reading.gtt_used_bytes = 4096;
+    }
+
+    constexpr std::size_t inserted_points = 18000;
+    const auto midpoint = trace.readings.size() / 2;
+    std::vector<ProfilingNoTargetGttReading> readings;
+    readings.reserve(profiling_noise_maximum_trace_points);
+    for (std::size_t index = 0; index < trace.readings.size(); ++index) {
+        readings.push_back(trace.readings[index]);
+        if (index != midpoint) continue;
+
+        const auto cluster_start =
+            trace.readings[index].read_finished_at;
+        for (std::size_t inserted = 0; inserted < inserted_points;
+             ++inserted) {
+            readings.push_back(constant_reading(
+                trace,
+                cluster_start +
+                    std::chrono::nanoseconds{static_cast<std::int64_t>(
+                        inserted + 1)}));
+        }
+    }
+    trace.readings = std::move(readings);
+    return trace;
+}
+
+ProfilingNoTargetGttTrace cap_plus_one_trace() {
+    auto trace = dense_trace(25ms);
+    auto inserted = trace.readings.front();
+    inserted.scheduled_at += 12ms;
+    inserted.read_started_at = inserted.scheduled_at;
+    inserted.read_finished_at = inserted.read_started_at + 1ms;
+    trace.readings.insert(trace.readings.begin() + 1, std::move(inserted));
     return trace;
 }
 
@@ -237,10 +322,38 @@ bool invalid_trace_contract_is_enforced() {
         return false;
     }
 
+    auto cap_plus_one = cap_plus_one_trace();
+    if (cap_plus_one.readings.size() !=
+            profiling_noise_maximum_trace_points + 1 ||
+        !rejects(cap_plus_one,
+                 ProfilingNoiseProductionStatus::InvalidTrace)) {
+        std::cerr << "FAIL: the first reading above the documented trace "
+                     "limit was accepted\n";
+        return false;
+    }
+
     if (!rejects(dense_trace(24ms),
                  ProfilingNoiseProductionStatus::InvalidTrace)) {
         std::cerr << "FAIL: an over-dense trace exceeded the resource "
                      "bound\n";
+        return false;
+    }
+
+    const auto midpoint_cluster =
+        produce_no_target_gtt_noise(midpoint_cluster_trace());
+    if (!midpoint_cluster.accepted() ||
+        midpoint_cluster.result->n_gtt_bytes() != 0) {
+        std::cerr << "FAIL: an exact-cap midpoint cluster was rejected or "
+                     "changed the noise bound\n";
+        return false;
+    }
+
+    const auto front_loaded_cluster =
+        produce_no_target_gtt_noise(front_loaded_cluster_trace());
+    if (!front_loaded_cluster.accepted() ||
+        front_loaded_cluster.result->n_gtt_bytes() != 0) {
+        std::cerr << "FAIL: an exact-cap front-loaded cluster was rejected "
+                     "or changed the noise bound\n";
         return false;
     }
 

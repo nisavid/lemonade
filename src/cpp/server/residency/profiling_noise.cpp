@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <deque>
 #include <initializer_list>
 #include <limits>
 #include <map>
@@ -581,26 +582,37 @@ produce_no_target_gtt_noise(const ProfilingNoTargetGttTrace &trace) {
         std::uint64_t least_window_maximum =
             std::numeric_limits<std::uint64_t>::max();
         std::size_t first_point = 0;
+        std::size_t past_last_point = 0;
+        std::deque<std::size_t> minimum_points;
+        std::deque<std::size_t> maximum_points;
         for (std::size_t first = 0; first < trace.readings.size(); ++first) {
             const auto remaining = elapsed_between(
                 trace.readings[first].scheduled_at, trace.exact_end);
             if (!remaining || *remaining < window_duration) continue;
 
             found_eligible_window = true;
+            const auto window_start = trace.readings[first].scheduled_at;
             while (first_point < trace.readings.size() &&
                    trace.readings[first_point].read_started_at <
-                       trace.readings[first].scheduled_at) {
+                       window_start) {
+                if (!minimum_points.empty() &&
+                    minimum_points.front() == first_point) {
+                    minimum_points.pop_front();
+                }
+                if (!maximum_points.empty() &&
+                    maximum_points.front() == first_point) {
+                    maximum_points.pop_front();
+                }
                 ++first_point;
             }
+            if (past_last_point < first_point) {
+                past_last_point = first_point;
+            }
 
-            std::size_t point_count = 0;
-            std::uint64_t minimum = 0;
-            std::uint64_t maximum = 0;
-            for (std::size_t index = first_point;
-                 index < trace.readings.size(); ++index) {
+            while (past_last_point < trace.readings.size()) {
                 const auto offset = elapsed_between(
-                    trace.readings[first].scheduled_at,
-                    trace.readings[index].read_started_at);
+                    window_start,
+                    trace.readings[past_last_point].read_started_at);
                 if (!offset) {
                     return reject(
                         ProfilingNoiseProductionStatus::InvalidTrace,
@@ -608,21 +620,33 @@ produce_no_target_gtt_noise(const ProfilingNoTargetGttTrace &trace) {
                 }
                 if (*offset >= window_duration) break;
 
-                const auto value = *trace.readings[index].gtt_used_bytes;
-                if (point_count == 0) {
-                    minimum = value;
-                    maximum = value;
-                } else {
-                    minimum = std::min(minimum, value);
-                    maximum = std::max(maximum, value);
+                const auto value =
+                    *trace.readings[past_last_point].gtt_used_bytes;
+                while (!minimum_points.empty() &&
+                       *trace.readings[minimum_points.back()]
+                            .gtt_used_bytes >= value) {
+                    minimum_points.pop_back();
                 }
-                ++point_count;
+                minimum_points.push_back(past_last_point);
+                while (!maximum_points.empty() &&
+                       *trace.readings[maximum_points.back()]
+                            .gtt_used_bytes <= value) {
+                    maximum_points.pop_back();
+                }
+                maximum_points.push_back(past_last_point);
+                ++past_last_point;
             }
+
+            const auto point_count = past_last_point - first_point;
             if (point_count < profiling_noise_minimum_window_points) {
                 return reject(
                     ProfilingNoiseProductionStatus::InvalidTrace,
                     "noise trace has an invalid eligible window");
             }
+            const auto minimum =
+                *trace.readings[minimum_points.front()].gtt_used_bytes;
+            const auto maximum =
+                *trace.readings[maximum_points.front()].gtt_used_bytes;
             largest_range = std::max(largest_range, maximum - minimum);
             greatest_window_minimum =
                 std::max(greatest_window_minimum, minimum);

@@ -22,7 +22,7 @@ The supported trace types and result interfaces are declared in `src/cpp/include
 2. Schedule nominal 50 ms acquisitions, with no more than 36,000 readings in the trace. Every scheduled timestamp and read initiation must remain ordered inside the trace, the first schedule must equal `started_at`, and neither consecutive schedule nor consecutive read initiation may be more than 100 ms apart. The trace must reach its exact end without a gap above 100 ms.
 3. For every acquisition, record `scheduled_at`, `read_started_at`, `read_finished_at`, a successful global GTT byte value, and the bindings rechecked for that acquisition. A failed read, reversed timestamp, binding change, identity change, or excessive gap rejects the whole trace.
 4. Use each acquisition's `scheduled_at` as its five-second window origin. It is eligible when `scheduled_at + 5 s <= exact_end`. Include every reading whose `read_started_at` is before that exact window end, and exclude a reading begun exactly at the end. Late scheduled acquisitions without five seconds remaining are not window starts. Do not omit an eligible start or choose a quieter subwindow.
-5. Require at least 50 valid points in every eligible window. For each window, compute its checked minimum, maximum, and range `maximum - minimum`. Any invalid eligible window rejects the trace.
+5. Evaluate the eligible windows in one forward pass. Advance monotonic lower and upper read-start endpoints, and maintain monotonic minimum and maximum deques so each reading enters and leaves each deque at most once. Require at least 50 valid points in every eligible window. For each window, compute its checked minimum, maximum, and range `maximum - minimum`. Any invalid eligible window rejects the trace.
 6. Across all eligible windows, let `L` be the greatest window minimum and `H` the least window maximum. Compute `checked_add(H, U)` and require `L <= checked_add(H, U)`. A false comparison or overflow rejects the whole trace.
 7. Let `R` be the greatest window range. Compute `N_gtt = checked_add(R, U)`. Add `U` exactly once. Overflow rejects the trace.
 8. Call `produce_no_target_gtt_noise(trace)`. On success, retain the returned `ParsedProfilingNoiseResult` and its canonical bytes as this component's output. Raw-trace and other evidence retention or persistence remain caller-owned; this step neither authorizes discarding them nor creates another store. The producer binds the validated trace content into `trace_provenance_sha256`, the exact identities into `bindings_sha256`, and the immutable result fields into `checksum_sha256`.
@@ -80,7 +80,7 @@ An accepted revalidation authorizes only the caller's next repetition under the 
 
 For this bounded component, observable completion evidence is:
 
-- an accepted producer result whose canonical parser round-trips the same checksum, bindings, trace provenance, `N_gtt`, and `U`;
+- an accepted producer result whose canonical parser round-trips the same checksum, bindings, trace provenance, `N_gtt`, and `U`, with both documented exact-cap clustered traces accepted by the linear window traversal;
 - an accepted freeze whose provenance equals the producer result and whose digest covers the frozen accounting, identities, revision, and repetition counts;
 - an accepted fresh revalidation before each caller-owned repetition; and
 - passing `ResidencyProfilingNoise`, `ResidencyProfilingNoiseTrend`, `ResidencyProfilingNoiseProvenance`, and `ResidencyProfilingDifferentialInput` CTests linked through `lemonade-server-core`.
