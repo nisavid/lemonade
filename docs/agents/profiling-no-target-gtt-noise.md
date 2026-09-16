@@ -12,7 +12,9 @@ The Server caller owns the exclusive deployment profiling gate, queued competing
 - provided a deterministic 15-minute observation trace from the authoritative global `mem_info_gtt_used` counter; and
 - established that the requested calibration revision is fresh in the existing Server journal.
 
-The caller must bind `procedure_revision_sha256` to the reviewed revision of this procedure. The component accepts values and digests as input; it does not attest the observer, enforce the gate, inspect live hardware, or persist journal decisions.
+Set `procedure_revision_sha256` to the lowercase hexadecimal SHA-256 of the exact raw file-content bytes stored for `docs/agents/profiling-no-target-gtt-noise.md` at the applicable reviewed commit. Hash those bytes without Git object framing or content transformation; do not hash rendered Markdown, a commit identifier, URL, or review receipt.
+
+For each profiling invocation, the Server caller selects the applicable reviewed commit: one immutable commit whose clean affected review covers this procedure and the corresponding profiling implementation at that same revision. Do not substitute a moving branch tip or evidence reviewed at another revision. The component accepts values and digests as input; it does not attest the observer, enforce the gate, inspect live hardware, or persist journal decisions.
 
 The supported trace types and result interfaces are declared in `src/cpp/include/lemon/residency/profiling_noise.h`. The frozen consumer types are declared in `src/cpp/include/lemon/residency/profiling_differential_input.h`.
 
