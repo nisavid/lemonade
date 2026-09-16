@@ -7,7 +7,7 @@ Use this procedure to create or consume one boot-scoped, immutable no-target `N_
 The Server caller owns the exclusive deployment profiling gate, queued competing Lemonade work, target absence during production, process containment, authentic observation source, and durable journal state. Begin only when the caller has:
 
 - excluded the declared target and other unaccounted GTT clients from the no-target trace;
-- bound the deployment and boot epochs, exact device and topology, kernel and driver, global counter source and revision, campaign contract, this reviewed procedure revision, and non-target background inventory;
+- bound the lowercase 64-hex deployment identity and boot epoch, exact device and topology, kernel and driver, global counter source and revision, campaign contract, this reviewed procedure revision, and non-target background inventory;
 - selected a measured read/skew uncertainty `U` in bytes;
 - provided a deterministic 15-minute observation trace from the authoritative global `mem_info_gtt_used` counter; and
 - established that the requested calibration revision is fresh in the existing Server journal.
@@ -19,7 +19,7 @@ The supported trace types and result interfaces are declared in `src/cpp/include
 ## Produce the immutable noise result
 
 1. Build one `ProfilingNoTargetGttTrace` with an exact 15-minute `[started_at, exact_end)` boundary and the complete `ProfilingNoiseBindings`.
-2. Schedule nominal 50 ms acquisitions. Every scheduled timestamp and read initiation must remain ordered inside the trace, the first schedule must equal `started_at`, and neither consecutive schedule nor consecutive read initiation may be more than 100 ms apart. The trace must reach its exact end without a gap above 100 ms.
+2. Schedule nominal 50 ms acquisitions, with no more than 36,000 readings in the trace. Every scheduled timestamp and read initiation must remain ordered inside the trace, the first schedule must equal `started_at`, and neither consecutive schedule nor consecutive read initiation may be more than 100 ms apart. The trace must reach its exact end without a gap above 100 ms.
 3. For every acquisition, record `scheduled_at`, `read_started_at`, `read_finished_at`, a successful global GTT byte value, and the bindings rechecked for that acquisition. A failed read, reversed timestamp, binding change, identity change, or excessive gap rejects the whole trace.
 4. Use each acquisition's `scheduled_at` as its five-second window origin. It is eligible when `scheduled_at + 5 s <= exact_end`. Include every reading whose `read_started_at` is before that exact window end, and exclude a reading begun exactly at the end. Late scheduled acquisitions without five seconds remaining are not window starts. Do not omit an eligible start or choose a quieter subwindow.
 5. Require at least 50 valid points in every eligible window. For each window, compute its checked minimum, maximum, and range `maximum - minimum`. Any invalid eligible window rejects the trace.

@@ -74,6 +74,18 @@ struct LocalOverlaySelectorIdentity {
     std::string operation_contract_sha256;
 };
 
+struct CanonicalLocalOverlaySelectorResult {
+    OverlayContractStatus status = OverlayContractStatus::InvalidValue;
+    std::string diagnostic;
+    std::optional<LocalOverlaySelectorIdentity> selector;
+    std::string selector_sha256;
+
+    bool accepted() const noexcept;
+};
+
+CanonicalLocalOverlaySelectorResult
+canonicalize_local_overlay_selector(LocalOverlaySelectorIdentity selector);
+
 struct OverlaySourceGenerations {
     std::uint64_t model = 0;
     std::uint64_t backend = 0;

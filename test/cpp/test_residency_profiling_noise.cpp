@@ -28,7 +28,7 @@ std::string digest(char digit) {
 
 ProfilingNoiseBindings bindings() {
     ProfilingNoiseBindings result;
-    result.deployment_id = "hatchery";
+    result.deployment_id = digest('f');
     result.deployment_epoch_sha256 = digest('0');
     result.boot_id_sha256 = digest('1');
     result.device_identity_sha256 = digest('2');
@@ -76,6 +76,25 @@ ProfilingNoTargetGttTrace stable_trace() {
         reading.read_started_at = scheduled;
         reading.read_finished_at = scheduled + 1ms;
         reading.gtt_used_bytes = index % 2 == 0 ? 4096 : 4160;
+        reading.observed_bindings = trace.bindings;
+        trace.readings.push_back(std::move(reading));
+    }
+    return trace;
+}
+
+ProfilingNoTargetGttTrace dense_trace(
+    std::chrono::milliseconds cadence) {
+    auto trace = stable_trace();
+    trace.readings.clear();
+    trace.read_skew_uncertainty_bytes = 0;
+
+    for (auto scheduled = trace.started_at; scheduled < trace.exact_end;
+         scheduled += cadence) {
+        ProfilingNoTargetGttReading reading;
+        reading.scheduled_at = scheduled;
+        reading.read_started_at = scheduled;
+        reading.read_finished_at = scheduled + 1ms;
+        reading.gtt_used_bytes = 4096;
         reading.observed_bindings = trace.bindings;
         trace.readings.push_back(std::move(reading));
     }
@@ -137,6 +156,18 @@ bool parse_rejects(std::string_view bytes,
 }
 
 bool invalid_trace_contract_is_enforced() {
+    auto invalid_deployment = stable_trace();
+    invalid_deployment.bindings.deployment_id = "hatchery";
+    for (auto &reading : invalid_deployment.readings) {
+        reading.observed_bindings = invalid_deployment.bindings;
+    }
+    if (!rejects(invalid_deployment,
+                 ProfilingNoiseProductionStatus::InvalidTrace)) {
+        std::cerr << "FAIL: a printable non-digest deployment ID was "
+                     "accepted\n";
+        return false;
+    }
+
     auto failed_reading = stable_trace();
     failed_reading.readings.back().gtt_used_bytes.reset();
     if (!rejects(failed_reading,
@@ -198,12 +229,44 @@ bool invalid_trace_contract_is_enforced() {
         return false;
     }
 
+    const auto maximum_density =
+        produce_no_target_gtt_noise(dense_trace(25ms));
+    if (!maximum_density.accepted()) {
+        std::cerr << "FAIL: the documented maximum trace density was "
+                     "rejected\n";
+        return false;
+    }
+
+    if (!rejects(dense_trace(24ms),
+                 ProfilingNoiseProductionStatus::InvalidTrace)) {
+        std::cerr << "FAIL: an over-dense trace exceeded the resource "
+                     "bound\n";
+        return false;
+    }
+
     return true;
 }
 
 bool codec_rejection_contract_is_enforced(
     const ParsedProfilingNoiseResult &result) {
     const std::string canonical(result.canonical_bytes());
+
+    auto invalid_deployment = canonical;
+    const auto deployment_field =
+        std::string("\"deployment_id\":\"") + digest('f') + "\"";
+    const auto deployment = invalid_deployment.find(deployment_field);
+    if (deployment == std::string::npos) {
+        std::cerr << "FAIL: deployment-ID fixture found no binding\n";
+        return false;
+    }
+    invalid_deployment.replace(
+        deployment, deployment_field.size(),
+        "\"deployment_id\":\"hatchery\"");
+    if (!parse_rejects(invalid_deployment,
+                       ProfilingNoiseParseStatus::InvalidValue)) {
+        std::cerr << "FAIL: a parsed non-digest deployment ID was accepted\n";
+        return false;
+    }
 
     auto malformed = canonical;
     malformed.pop_back();

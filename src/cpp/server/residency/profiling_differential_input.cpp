@@ -64,27 +64,11 @@ bool generations_are_valid(
            generations.workload != 0;
 }
 
-bool selector_identity_is_valid(
-    const LocalOverlaySelectorIdentity &selector) noexcept {
-    return digest_is_valid(selector.catalog_sha256) &&
-           identifier_is_valid(selector.canonical_model_id) &&
-           digest_is_valid(selector.model_artifact_sha256) &&
-           digest_is_valid(selector.backend_build_sha256) &&
-           digest_is_valid(selector.device_identity_sha256) &&
-           digest_is_valid(selector.topology_sha256) &&
-           digest_is_valid(selector.dependency_set_sha256) &&
-           digest_is_valid(selector.driver_identity_sha256) &&
-           digest_is_valid(selector.configuration_sha256) &&
-           digest_is_valid(selector.workload_sha256) &&
-           digest_is_valid(selector.operation_contract_sha256);
-}
-
 bool transaction_identity_is_valid(
     const ProfilingTransactionContext &context) noexcept {
     return digest_is_valid(context.deployment_id) &&
            context.sequence != 0 &&
            identifier_is_valid(context.profiling_transaction_id) &&
-           selector_identity_is_valid(context.selector) &&
            digest_is_valid(context.selector_sha256) &&
            generations_are_valid(context.generations) &&
            digest_is_valid(context.observation_contract_sha256) &&
@@ -313,6 +297,20 @@ freeze_profiling_differential_input(
                     InvalidNoiseResult,
                 "canonical no-target noise result is invalid");
         }
+
+        auto canonical_selector =
+            canonicalize_local_overlay_selector(
+                draft.identity.transaction.selector);
+        if (!canonical_selector.accepted() ||
+            canonical_selector.selector_sha256 !=
+                draft.identity.transaction.selector_sha256) {
+            return freeze_failure(
+                ProfilingDifferentialInputFreezeStatus::InvalidIdentity,
+                "profiling selector identity or digest is invalid");
+        }
+        draft.identity.transaction.selector =
+            std::move(*canonical_selector.selector);
+
         if (!digest_is_valid(
                 draft.identity.noise_trace_provenance_sha256)) {
             return freeze_failure(

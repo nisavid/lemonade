@@ -58,7 +58,7 @@ bool identifier_is_valid(std::string_view value) noexcept {
 }
 
 bool bindings_are_valid(const ProfilingNoiseBindings &bindings) noexcept {
-    return identifier_is_valid(bindings.deployment_id) &&
+    return digest_is_valid(bindings.deployment_id) &&
            digest_is_valid(bindings.deployment_epoch_sha256) &&
            digest_is_valid(bindings.boot_id_sha256) &&
            digest_is_valid(bindings.device_identity_sha256) &&
@@ -87,7 +87,7 @@ void require_digest(std::string_view value, std::string_view label) {
 }
 
 void require_valid_bindings(const ProfilingNoiseBindings &bindings) {
-    require_identifier(bindings.deployment_id, "deployment ID");
+    require_digest(bindings.deployment_id, "deployment ID");
     require_digest(bindings.deployment_epoch_sha256,
                    "deployment epoch digest");
     require_digest(bindings.boot_id_sha256, "boot ID digest");
@@ -340,11 +340,14 @@ ProfilingNoiseProductionResult reject(ProfilingNoiseProductionStatus status,
 
 ParsedProfilingNoiseResult::ParsedProfilingNoiseResult(
     ProfilingNoiseBindings bindings, std::string bindings_sha256,
-    std::uint64_t n_gtt_bytes, std::string trace_provenance_sha256,
+    std::uint64_t n_gtt_bytes,
+    std::uint64_t read_skew_uncertainty_bytes,
+    std::string trace_provenance_sha256,
     std::string checksum_sha256, std::string canonical_bytes)
     : bindings_(std::move(bindings)),
       bindings_sha256_(std::move(bindings_sha256)),
       n_gtt_bytes_(n_gtt_bytes),
+      read_skew_uncertainty_bytes_(read_skew_uncertainty_bytes),
       trace_provenance_sha256_(std::move(trace_provenance_sha256)),
       checksum_sha256_(std::move(checksum_sha256)),
       canonical_bytes_(std::move(canonical_bytes)) {}
@@ -361,6 +364,11 @@ ParsedProfilingNoiseResult::bindings_sha256() const noexcept {
 
 std::uint64_t ParsedProfilingNoiseResult::n_gtt_bytes() const noexcept {
     return n_gtt_bytes_;
+}
+
+std::uint64_t
+ParsedProfilingNoiseResult::read_skew_uncertainty_bytes() const noexcept {
+    return read_skew_uncertainty_bytes_;
 }
 
 std::string_view
@@ -462,8 +470,8 @@ parse_profiling_noise_result(std::string_view bytes) {
             {},
             ParsedProfilingNoiseResult(
                 std::move(bindings), bindings_sha256, n_gtt_bytes,
-                trace_provenance_sha256, checksum,
-                std::move(canonical_bytes)),
+                read_skew_uncertainty_bytes, trace_provenance_sha256,
+                checksum, std::move(canonical_bytes)),
         };
     } catch (const NoiseParseFailure &failure) {
         return {failure.status(), bounded_diagnostic(failure.what()),
@@ -494,6 +502,11 @@ produce_no_target_gtt_noise(const ProfilingNoTargetGttTrace &trace) {
         if (trace.readings.empty()) {
             return reject(ProfilingNoiseProductionStatus::InvalidTrace,
                           "noise trace has no scheduled readings");
+        }
+        if (trace.readings.size() >
+            profiling_noise_maximum_trace_points) {
+            return reject(ProfilingNoiseProductionStatus::InvalidTrace,
+                          "noise trace exceeds the supported point limit");
         }
 
         const auto max_gap =
@@ -682,6 +695,7 @@ produce_no_target_gtt_noise(const ProfilingNoTargetGttTrace &trace) {
             {},
             ParsedProfilingNoiseResult(
                 trace.bindings, *bindings_sha256, n_gtt_bytes,
+                trace.read_skew_uncertainty_bytes,
                 *trace_provenance_sha256, *checksum,
                 std::move(canonical_bytes)),
         };

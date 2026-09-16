@@ -3,8 +3,10 @@
 #include <chrono>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 namespace {
@@ -18,6 +20,24 @@ void require(bool condition, const std::string &message) {
 
 std::string digest(char value) {
     return std::string(64, value);
+}
+
+template <typename Result, typename = void>
+struct HasReadSkewUncertainty : std::false_type {};
+
+template <typename Result>
+struct HasReadSkewUncertainty<
+    Result,
+    std::void_t<decltype(
+        std::declval<const Result &>().read_skew_uncertainty_bytes())>>
+    : std::true_type {};
+
+template <typename Result>
+std::optional<std::uint64_t> exposed_uncertainty(const Result &result) {
+    if constexpr (HasReadSkewUncertainty<Result>::value) {
+        return result.read_skew_uncertainty_bytes();
+    }
+    return std::nullopt;
 }
 
 ProfilingNoiseBindings noise_bindings() {
@@ -108,11 +128,22 @@ ProfilingTransactionContext transaction_context(
     return context;
 }
 
+std::string canonical_selector_sha256(
+    const ProfilingTransactionContext &context) {
+    auto canonical =
+        canonicalize_local_overlay_selector(context.selector);
+    require(canonical.accepted(),
+            "canonical selector fixture was rejected");
+    return canonical.selector_sha256;
+}
+
 ProfilingDifferentialInputDraft input_draft(
     const ProfilingNoiseBindings &bindings,
     const ParsedProfilingNoiseResult &noise) {
     ProfilingDifferentialInputDraft draft;
     draft.identity.transaction = transaction_context(bindings);
+    draft.identity.transaction.selector_sha256 =
+        canonical_selector_sha256(draft.identity.transaction);
     draft.identity.target_client_identity_sha256 = digest('6');
     draft.identity.target_containment_identity_sha256 = digest('7');
     draft.identity.counter_continuity_epoch_sha256 = digest('8');
@@ -187,8 +218,18 @@ void require_input_freezes_and_revalidates_before_repetitions() {
     require(produced.accepted(),
             "consumer fixture did not produce canonical no-target noise");
 
+    auto parsed =
+        parse_profiling_noise_result(produced.result->canonical_bytes());
+    require(parsed.accepted(),
+            "consumer fixture did not parse canonical no-target noise");
+    const auto &noise = *parsed.result;
+    const auto uncertainty = exposed_uncertainty(noise);
+    require(uncertainty.has_value() &&
+                *uncertainty == trace.read_skew_uncertainty_bytes,
+            "parsed noise result did not expose its measured uncertainty");
+
     auto mismatched_draft =
-        input_draft(trace.bindings, *produced.result);
+        input_draft(trace.bindings, noise);
     auto mismatched_provenance =
         mismatched_draft.identity.noise_trace_provenance_sha256;
     mismatched_provenance.front() =
@@ -196,7 +237,7 @@ void require_input_freezes_and_revalidates_before_repetitions() {
     mismatched_draft.identity.noise_trace_provenance_sha256 =
         std::move(mismatched_provenance);
     auto mismatched = freeze_profiling_differential_input(
-        *produced.result, std::move(mismatched_draft));
+        noise, std::move(mismatched_draft));
     require(!mismatched.accepted() &&
                 mismatched.status ==
                     ProfilingDifferentialInputFreezeStatus::
@@ -204,13 +245,13 @@ void require_input_freezes_and_revalidates_before_repetitions() {
             "a caller-supplied trace provenance digest replaced the "
             "producer result");
 
-    auto draft = input_draft(trace.bindings, *produced.result);
+    auto draft = input_draft(trace.bindings, noise);
     const auto expected_noise_checksum =
-        std::string(produced.result->checksum_sha256());
+        std::string(noise.checksum_sha256());
     const auto expected_trace_provenance =
-        std::string(produced.result->trace_provenance_sha256());
+        std::string(noise.trace_provenance_sha256());
     auto frozen =
-        freeze_profiling_differential_input(*produced.result, draft);
+        freeze_profiling_differential_input(noise, draft);
     require(frozen.accepted(),
             "a valid differential input freezes before target observation");
 
@@ -270,11 +311,11 @@ void require_input_freezes_and_revalidates_before_repetitions() {
             "a rejected revision was allowed to refit");
 
     auto rejected_draft =
-        input_draft(trace.bindings, *produced.result);
+        input_draft(trace.bindings, noise);
     rejected_draft.revision.state =
         ProfilingDifferentialRevisionState::PreviouslyRejected;
     auto rejected_refit = freeze_profiling_differential_input(
-        *produced.result, std::move(rejected_draft));
+        noise, std::move(rejected_draft));
     require(!rejected_refit.accepted() &&
                 rejected_refit.status ==
                     ProfilingDifferentialInputFreezeStatus::
@@ -319,6 +360,22 @@ void require_consumer_failure_contract() {
         noise, std::move(mismatched_identity),
         ProfilingDifferentialInputFreezeStatus::InvalidIdentity,
         "a target transaction bound to another device was accepted");
+
+    auto invalid_closed_value = input_draft(trace.bindings, noise);
+    invalid_closed_value.identity.transaction.selector.catalog_selector
+        .operation_kind = static_cast<OperationKind>(255);
+    require_freeze_rejected(
+        noise, std::move(invalid_closed_value),
+        ProfilingDifferentialInputFreezeStatus::InvalidIdentity,
+        "a selector with an invalid closed operation was accepted");
+
+    auto stale_selector_digest = input_draft(trace.bindings, noise);
+    stale_selector_digest.identity.transaction.selector
+        .canonical_model_id = "model-b";
+    require_freeze_rejected(
+        noise, std::move(stale_selector_digest),
+        ProfilingDifferentialInputFreezeStatus::InvalidIdentity,
+        "selector content did not match its canonical digest");
 
     auto reset_input = freeze_valid_input(noise, trace.bindings);
     auto reset = observation_for(reset_input, trace.exact_end + 1h);

@@ -16,6 +16,7 @@ inline constexpr std::chrono::milliseconds profiling_noise_max_read_start_gap{
 inline constexpr std::chrono::seconds profiling_noise_window{5};
 inline constexpr std::chrono::minutes profiling_noise_trace_duration{15};
 inline constexpr std::size_t profiling_noise_minimum_window_points = 50;
+inline constexpr std::size_t profiling_noise_maximum_trace_points = 36000;
 
 struct ProfilingNoiseBindings {
     std::string deployment_id;
@@ -85,6 +86,7 @@ public:
     const ProfilingNoiseBindings &bindings() const noexcept;
     std::string_view bindings_sha256() const noexcept;
     std::uint64_t n_gtt_bytes() const noexcept;
+    std::uint64_t read_skew_uncertainty_bytes() const noexcept;
     std::string_view trace_provenance_sha256() const noexcept;
     std::string_view checksum_sha256() const noexcept;
     std::string_view canonical_bytes() const noexcept;
@@ -93,6 +95,7 @@ private:
     ParsedProfilingNoiseResult(ProfilingNoiseBindings bindings,
                                std::string bindings_sha256,
                                std::uint64_t n_gtt_bytes,
+                               std::uint64_t read_skew_uncertainty_bytes,
                                std::string trace_provenance_sha256,
                                std::string checksum_sha256,
                                std::string canonical_bytes);
@@ -100,6 +103,7 @@ private:
     ProfilingNoiseBindings bindings_;
     std::string bindings_sha256_;
     std::uint64_t n_gtt_bytes_ = 0;
+    std::uint64_t read_skew_uncertainty_bytes_ = 0;
     std::string trace_provenance_sha256_;
     std::string checksum_sha256_;
     std::string canonical_bytes_;
