@@ -42,6 +42,9 @@ This file captures implementation landmarks that are useful before changing Lemo
 ## Accepted Model Residency Target
 
 - This accepted fork target is recorded in `docs/adr/0001-adopt-protected-memory-capacity-driven-model-residency.md`.
+- Agents producing or consuming boot-scoped no-target GTT noise evidence must
+  follow the [no-target GTT noise procedure](profiling-no-target-gtt-noise.md)
+  and preserve its Server-owned authentication and lifecycle preconditions.
 - The accepted portable adapter, footprint, pressure-reclamation, configuration, explanation, validation, and promotion policies and their decision rationale live in [Choose portable residency adapter contracts](https://github.com/nisavid/lemonade/issues/31), [Choose footprint estimation and confidence policy](https://github.com/nisavid/lemonade/issues/32), [Choose portable pressure reclamation controls](https://github.com/nisavid/lemonade/issues/33), [Define portable residency configuration and explanations](https://github.com/nisavid/lemonade/issues/34), and [Define residency validation and capability promotion](https://github.com/nisavid/lemonade/issues/35); the bullets below are their scout map.
 - Continued fork maintenance is decided. Reconcile onto current stable upstream, then implement this target using upstream terminology and APIs where they fit.
 - One server-owned planner defines admission, pressure, protection, ordering, and refusal semantics. Platform and backend adapters describe residency-memory-domain topology, trustworthy capacity and pressure signals, footprint confidence, and available reclamation actions; adapters do not redefine common policy.
