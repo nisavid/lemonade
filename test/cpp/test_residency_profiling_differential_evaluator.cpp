@@ -35,6 +35,10 @@ using IntervalFinishSignature = ProfilingRawIntervalBatch (
     ProfilingIntervalObservationSource::*)(
     ProfilingRawIntervalToken,
     ProfilingEventWatermark) noexcept;
+using DifferentialEvaluateSignature = ProfilingDifferentialEvaluationResult (
+    *)(FrozenProfilingDifferentialInput,
+       ProfilingDifferentialMethodBinding,
+       const std::vector<ProfilingDifferentialRepetition> &);
 
 static_assert(std::is_same_v<
               decltype(&ProfilingIntervalObservationSource::begin),
@@ -45,6 +49,9 @@ static_assert(std::is_same_v<
 static_assert(std::is_same_v<
               decltype(&ProfilingIntervalObservationSource::finish),
               IntervalFinishSignature>);
+static_assert(std::is_same_v<
+              decltype(&evaluate_retained_gtt_differential),
+              DifferentialEvaluateSignature>);
 
 void require(bool condition, const std::string &message) {
     if (!condition) throw std::runtime_error(message);
@@ -285,7 +292,7 @@ std::vector<ProfilingDifferentialGttPoint> plateau_points(
     std::uint64_t minimum,
     const FrozenProfilingDifferentialInput &input,
     std::size_t point_count = 100,
-    std::chrono::milliseconds cadence = 50ms) {
+    std::chrono::steady_clock::duration cadence = 50ms) {
     std::vector<ProfilingDifferentialGttPoint> points;
     for (std::uint64_t index = 0; index < point_count; ++index) {
         ProfilingDifferentialGttPoint point;
@@ -1023,6 +1030,521 @@ void require_noise_invalidating_drift_preserves_disposition() {
     }
 }
 
+void require_plateau_overflow_preserves_source_invalidation() {
+    auto noise = parsed_noise_result();
+    const auto first = std::chrono::steady_clock::time_point{77h};
+    constexpr std::array<std::string_view, 2> scenarios{
+        "retained source fact",
+        "overflow source fact",
+    };
+    std::string failures;
+
+    for (std::size_t scenario = 0; scenario < scenarios.size(); ++scenario) {
+        auto input = frozen_input(noise, 1, 1);
+        const auto noise_checksum =
+            std::string(input.noise().checksum_sha256());
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            first + scenario * 1h, 9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + scenario * 1h + 20s, 9200, input));
+
+        auto &plateau = scenario == 0 ? repetitions.front().baseline
+                                      : repetitions.front().loaded;
+        plateau.points = plateau_points(
+            plateau.marker->marked_at, scenario == 0 ? 8192 : 9200, input,
+            profiling_differential_maximum_plateau_points + 1, 1220us);
+        const auto mismatch_index =
+            scenario == 0 ? std::size_t{4}
+                          : profiling_differential_maximum_plateau_points;
+        plateau.points.at(mismatch_index)
+            .observed_bindings.boot_id_sha256 = digest('0');
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), std::move(repetitions));
+        const bool invalidated =
+            !result.accepted() &&
+            result.status ==
+                ProfilingDifferentialEvaluationStatus::SourceDrift &&
+            result.disposition ==
+                ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult &&
+            result.noise_result_checksum_sha256 == noise_checksum &&
+            !result.evidence.has_value();
+        if (!invalidated) {
+            if (!failures.empty()) failures += ", ";
+            failures += scenarios.at(scenario);
+        }
+    }
+
+    require(failures.empty(),
+            "plateau overflow masked authenticated drift at: " + failures);
+}
+
+void require_plateau_point_limit_boundaries() {
+    auto noise = parsed_noise_result();
+    const auto first = std::chrono::steady_clock::time_point{76h};
+
+    {
+        auto input = frozen_input(noise, 1, 1);
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0, first,
+            9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0, first + 20s,
+            9200, input));
+        auto &plateau = repetitions.back().loaded;
+        plateau.points = plateau_points(
+            plateau.marker->marked_at, 9200, input,
+            profiling_differential_maximum_plateau_points, 1220us);
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), repetitions);
+        require(result.accepted() && result.evidence.has_value(),
+                "an exact-cap valid plateau was rejected");
+    }
+
+    {
+        auto input = frozen_input(noise, 1, 1);
+        const auto noise_checksum =
+            std::string(input.noise().checksum_sha256());
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            first + 1h, 9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + 1h + 20s, 9200, input));
+        auto &plateau = repetitions.front().baseline;
+        plateau.points = plateau_points(
+            plateau.marker->marked_at, 8192, input,
+            profiling_differential_maximum_plateau_points, 1220us);
+        plateau.points.back().observed_bindings.boot_id_sha256 = digest('0');
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), repetitions);
+        require(!result.accepted() &&
+                    result.status ==
+                        ProfilingDifferentialEvaluationStatus::SourceDrift &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            InvalidateNoiseResult &&
+                    result.noise_result_checksum_sha256 == noise_checksum &&
+                    !result.evidence.has_value(),
+                "source drift at the exact plateau cap did not invalidate "
+                "noise");
+    }
+
+    {
+        auto input = frozen_input(noise, 1, 1);
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            first + 2h, 9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + 2h + 20s, 9200, input));
+        auto &plateau = repetitions.front().baseline;
+        plateau.points = plateau_points(
+            plateau.marker->marked_at, 8192, input,
+            profiling_differential_maximum_plateau_points + 1, 1220us);
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), repetitions);
+        require(!result.accepted() &&
+                    result.status ==
+                        ProfilingDifferentialEvaluationStatus::InvalidWindow &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            RejectRevision &&
+                    !result.noise_result_checksum_sha256.has_value() &&
+                    !result.evidence.has_value(),
+                "a clean 4097-point plateau did not reject only its "
+                "revision");
+    }
+}
+
+void require_bounded_vector_tail_is_never_evidence() {
+    auto noise = parsed_noise_result();
+    auto input = frozen_input(noise, 1, 1);
+    const auto first = std::chrono::steady_clock::time_point{79h};
+    std::vector<ProfilingDifferentialRepetition> repetitions;
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, first, 9200,
+        input));
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Validation, 0, first + 20s,
+        9200, input));
+    auto &plateau = repetitions.front().baseline;
+    plateau.points = plateau_points(
+        plateau.marker->marked_at, 8192, input,
+        profiling_differential_maximum_plateau_points + 128, 1220us);
+    plateau.points.at(
+        profiling_differential_maximum_plateau_points + 1)
+        .observed_bindings.boot_id_sha256 = digest('0');
+
+    auto result = evaluate_retained_gtt_differential(
+        std::move(input), method_binding(), repetitions);
+    require(!result.accepted() &&
+                result.status ==
+                    ProfilingDifferentialEvaluationStatus::InvalidWindow &&
+                result.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision &&
+                !result.noise_result_checksum_sha256.has_value() &&
+                !result.evidence.has_value(),
+            "an unaudited vector tail became evidence instead of remaining "
+            "a latched overflow rejection");
+}
+
+void require_phase_scoped_source_audits() {
+    auto noise = parsed_noise_result();
+    const auto first = std::chrono::steady_clock::time_point{82h};
+
+    {
+        auto input = frozen_input(noise, 1, 1);
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0, first,
+            9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0, first + 20s,
+            9200, input));
+        for (auto *plateau : {&repetitions.front().baseline,
+                              &repetitions.front().loaded}) {
+            auto trailing = plateau->points.back();
+            trailing.scheduled_at = plateau->marker->marked_at + 5s;
+            trailing.read_started_at = trailing.scheduled_at;
+            trailing.read_finished_at = trailing.read_started_at + 1ms;
+            trailing.observed_bindings.boot_id_sha256 = digest('0');
+            plateau->points.push_back(std::move(trailing));
+        }
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), repetitions);
+        require(result.accepted(),
+                "baseline or loaded drift outside the selected window "
+                "invalidated noise");
+    }
+
+    {
+        auto input = frozen_input(noise, 1, 1);
+        const auto noise_checksum =
+            std::string(input.noise().checksum_sha256());
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            first + 1h, 9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + 1h + 20s, 9200, input));
+        auto &plateau = repetitions.front().release;
+        auto trailing = plateau.points.back();
+        trailing.scheduled_at = plateau.marker->marked_at + 5s;
+        trailing.read_started_at = trailing.scheduled_at;
+        trailing.read_finished_at = trailing.read_started_at + 1ms;
+        trailing.observed_bindings.boot_id_sha256 = digest('0');
+        plateau.points.push_back(std::move(trailing));
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), repetitions);
+        require(!result.accepted() &&
+                    result.status ==
+                        ProfilingDifferentialEvaluationStatus::SourceDrift &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            InvalidateNoiseResult &&
+                    result.noise_result_checksum_sha256 == noise_checksum &&
+                    !result.evidence.has_value(),
+                "trailing release drift was excluded from its full scope");
+    }
+}
+
+void require_overflow_source_drift_beats_ordinary_faults() {
+    auto noise = parsed_noise_result();
+    const auto first = std::chrono::steady_clock::time_point{85h};
+    constexpr std::array<std::string_view, 4> scenarios{
+        "actor",
+        "identity",
+        "timing",
+        "projection",
+    };
+
+    for (std::size_t scenario = 0; scenario < scenarios.size(); ++scenario) {
+        auto input = frozen_input(noise, 1, 1);
+        const auto noise_checksum =
+            std::string(input.noise().checksum_sha256());
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            first + scenario * 1h, 9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + scenario * 1h + 20s, 9200, input));
+        auto &plateau = repetitions.front().baseline;
+        plateau.points = plateau_points(
+            plateau.marker->marked_at, 8192, input,
+            profiling_differential_maximum_plateau_points + 1, 1220us);
+        auto &compound = plateau.points.at(4);
+        compound.observed_bindings.boot_id_sha256 = digest('0');
+        if (scenario == 0) {
+            compound.target_client_identity_sha256 = digest('1');
+        } else if (scenario == 1) {
+            compound.frozen_input_sha256 = digest('1');
+        } else if (scenario == 2) {
+            compound.read_started_at = compound.scheduled_at + 101ms;
+            compound.read_finished_at = compound.read_started_at + 1ms;
+        } else {
+            compound.owner_projection_status =
+                ProfilingDifferentialOwnerProjectionStatus::Contradictory;
+        }
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), repetitions);
+        require(!result.accepted() &&
+                    result.status ==
+                        ProfilingDifferentialEvaluationStatus::SourceDrift &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            InvalidateNoiseResult &&
+                    result.noise_result_checksum_sha256 == noise_checksum &&
+                    !result.evidence.has_value(),
+                std::string("overflow plus ") +
+                    std::string(scenarios.at(scenario)) +
+                    " fault masked source invalidation");
+    }
+}
+
+void require_revalidation_authority_precedes_source_audit() {
+    auto noise = parsed_noise_result();
+    const auto first = std::chrono::steady_clock::time_point{90h};
+
+    {
+        auto input = frozen_input(noise, 1, 1);
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0, first,
+            9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0, first + 20s,
+            9200, input));
+        auto &record = repetitions.front();
+        record.revalidation.target_activity =
+            ProfilingDifferentialTargetActivity{
+                digest('0'),
+                input.identity().target_containment_identity_sha256};
+        record.baseline.points = plateau_points(
+            record.baseline.marker->marked_at, 8192, input,
+            profiling_differential_maximum_plateau_points + 1, 1220us);
+        record.baseline.points.at(4)
+            .observed_bindings.boot_id_sha256 = digest('0');
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), repetitions);
+        require(!result.accepted() &&
+                    result.status == ProfilingDifferentialEvaluationStatus::
+                                         RevalidationRejected &&
+                    result.revalidation_status ==
+                        ProfilingDifferentialRevalidationStatus::
+                            TargetMismatch &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            RejectRevision &&
+                    !result.noise_result_checksum_sha256.has_value() &&
+                    !result.evidence.has_value(),
+                "points were audited without an accepted repetition "
+                "revalidation");
+    }
+
+    {
+        auto input = frozen_input(noise, 1, 1);
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            first + 1h, 9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + 1h + 20s, 9200, input));
+        auto &plateau = repetitions.front().baseline;
+        plateau.points = plateau_points(
+            plateau.marker->marked_at, 8192, input,
+            profiling_differential_maximum_plateau_points + 1, 1220us);
+        auto &overflow = plateau.points.at(
+            profiling_differential_maximum_plateau_points);
+        overflow.observed_bindings.boot_id_sha256 = digest('0');
+        overflow.observed_bindings.counter_source_id.clear();
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), repetitions);
+        require(!result.accepted() &&
+                    result.status ==
+                        ProfilingDifferentialEvaluationStatus::InvalidWindow &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            RejectRevision &&
+                    !result.noise_result_checksum_sha256.has_value() &&
+                    !result.evidence.has_value(),
+                "malformed overflow binding bytes synthesized a noise "
+                "invalidation");
+    }
+
+    {
+        auto input = frozen_input(noise, 1, 1);
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            first + 2h, 9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + 2h + 20s, 9200, input));
+        auto &plateau = repetitions.front().baseline;
+        plateau.points = plateau_points(
+            plateau.marker->marked_at, 8192, input,
+            profiling_differential_maximum_plateau_points + 1, 1220us);
+        plateau.points.at(4).observed_bindings.boot_id_sha256 = digest('0');
+        auto binding = method_binding();
+        binding.method_revision_sha256 = digest('0');
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), std::move(binding), repetitions);
+        require(!result.accepted() &&
+                    result.status == ProfilingDifferentialEvaluationStatus::
+                                         InvalidMethodBinding &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            RejectRevision &&
+                    !result.noise_result_checksum_sha256.has_value() &&
+                    !result.evidence.has_value(),
+                "records outside an established method boundary invalidated "
+                "noise");
+    }
+}
+
+void require_invalidating_revalidations_beat_plateau_faults() {
+    auto noise = parsed_noise_result();
+    const auto first = std::chrono::steady_clock::time_point{94h};
+    constexpr std::array<ProfilingDifferentialRevalidationStatus, 6>
+        expected_statuses{
+            ProfilingDifferentialRevalidationStatus::CounterReset,
+            ProfilingDifferentialRevalidationStatus::CounterDiscontinuity,
+            ProfilingDifferentialRevalidationStatus::NoiseResultMismatch,
+            ProfilingDifferentialRevalidationStatus::BindingMismatch,
+            ProfilingDifferentialRevalidationStatus::BackgroundDrift,
+            ProfilingDifferentialRevalidationStatus::ExcessVariation,
+        };
+
+    for (std::size_t scenario = 0; scenario < expected_statuses.size();
+         ++scenario) {
+        auto input = frozen_input(noise, 1, 1);
+        const auto noise_checksum =
+            std::string(input.noise().checksum_sha256());
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            first + scenario * 1h, 9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + scenario * 1h + 20s, 9200, input));
+        auto &record = repetitions.front();
+        record.baseline.points = plateau_points(
+            record.baseline.marker->marked_at, 8192, input,
+            profiling_differential_maximum_plateau_points + 1, 1220us);
+        if (scenario == 0) {
+            record.revalidation.counter_reset_detected = true;
+        } else if (scenario == 1) {
+            record.revalidation.counter_discontinuity_detected = true;
+        } else if (scenario == 2) {
+            record.revalidation.observed_noise_result_checksum_sha256 =
+                digest('0');
+        } else if (scenario == 3) {
+            record.revalidation.observed_bindings.boot_id_sha256 =
+                digest('0');
+        } else if (scenario == 4) {
+            record.revalidation.observed_bindings
+                .background_inventory_sha256 = digest('0');
+        } else {
+            record.revalidation.observed_non_target_gtt_range_bytes =
+                input.noise().n_gtt_bytes() + 1;
+        }
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), repetitions);
+        require(!result.accepted() &&
+                    result.status == ProfilingDifferentialEvaluationStatus::
+                                         RevalidationRejected &&
+                    result.revalidation_status ==
+                        expected_statuses.at(scenario) &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            InvalidateNoiseResult &&
+                    result.noise_result_checksum_sha256 == noise_checksum &&
+                    !result.evidence.has_value(),
+                "an invalidating revalidation status was masked by an "
+                "oversized plateau");
+    }
+}
+
+void require_checksum_keyed_invalidation_crosses_revisions() {
+    auto noise = parsed_noise_result();
+    auto input = frozen_input(noise, 1, 1);
+    const auto first = std::chrono::steady_clock::time_point{101h};
+    std::vector<ProfilingDifferentialRepetition> repetitions;
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, first, 9200,
+        input));
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Validation, 0, first + 20s,
+        9200, input));
+    auto &plateau = repetitions.front().loaded;
+    plateau.points = plateau_points(
+        plateau.marker->marked_at, 9200, input,
+        profiling_differential_maximum_plateau_points + 1, 1220us);
+    plateau.points.back().observed_bindings.boot_id_sha256 = digest('0');
+
+    auto invalidated = evaluate_retained_gtt_differential(
+        std::move(input), method_binding(), repetitions);
+    require(invalidated.disposition ==
+                ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult &&
+                invalidated.noise_result_checksum_sha256.has_value(),
+            "source drift did not return a checksum-keyed invalidation");
+    const auto invalidated_checksum =
+        *invalidated.noise_result_checksum_sha256;
+
+    auto later_revision = differential_input_draft(noise, 1, 1);
+    later_revision.revision.calibration_revision_sha256 = digest('d');
+    later_revision.revision.attempt_receipt_sha256 = digest('e');
+    later_revision.noise_validity.noise_result_checksum_sha256 =
+        invalidated_checksum;
+    later_revision.noise_validity.state =
+        ProfilingNoiseValidityState::Invalidated;
+    auto rejected = freeze_profiling_differential_input(
+        noise, std::move(later_revision));
+    require(!rejected.accepted() &&
+                rejected.status == ProfilingDifferentialInputFreezeStatus::
+                                       NoiseResultInvalidated,
+            "a new calibration revision revived invalidated noise");
+
+    auto replacement_bindings = noise_bindings();
+    replacement_bindings.background_inventory_sha256 = digest('e');
+    auto replacement_noise =
+        parsed_noise_result(std::move(replacement_bindings));
+    require(replacement_noise.checksum_sha256() != invalidated_checksum,
+            "the replacement trace did not produce a new noise result");
+    auto replacement_draft =
+        differential_input_draft(replacement_noise, 1, 1);
+    replacement_draft.revision.calibration_revision_sha256 = digest('d');
+    replacement_draft.revision.attempt_receipt_sha256 = digest('e');
+    auto accepted = freeze_profiling_differential_input(
+        replacement_noise, std::move(replacement_draft));
+    require(accepted.accepted(),
+            "a newly produced noise result was not eligible for a fresh "
+            "revision");
+}
+
 void require_strongest_disposition_for_compound_observation_failures() {
     auto noise = parsed_noise_result();
     const auto first = std::chrono::steady_clock::time_point{78h};
@@ -1522,6 +2044,14 @@ int main() {
         require_checked_bound_validation_and_release_failures();
         require_frozen_identity_actor_and_source_bindings();
         require_noise_invalidating_drift_preserves_disposition();
+        require_plateau_point_limit_boundaries();
+        require_plateau_overflow_preserves_source_invalidation();
+        require_bounded_vector_tail_is_never_evidence();
+        require_phase_scoped_source_audits();
+        require_overflow_source_drift_beats_ordinary_faults();
+        require_revalidation_authority_precedes_source_audit();
+        require_invalidating_revalidations_beat_plateau_faults();
+        require_checksum_keyed_invalidation_crosses_revisions();
         require_strongest_disposition_for_compound_observation_failures();
         require_reviewed_noise_procedure_revision();
         require_exact_method_and_constraint_binding();

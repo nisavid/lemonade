@@ -58,6 +58,11 @@ evaluator, it must authenticate and assemble:
    status. Absence is `Absent`, never a synthesized zero. Complete projection
    supplies a value no greater than the global point. Contradictory or shared
    GTT evidence is not an accepted record.
+6. Bounded plateau collection retains no more than 4096 point records. When a
+   4097th record arrives, authenticate it under the same caller-owned source
+   boundary, expose it for the evaluator's constant-size source-fact audit,
+   latch overflow, and stop collection. Do not collect or represent a tail as
+   usable evidence.
 
 The component accepts values as supplied records. Only the `lemond` caller can
 prove that markers and observations came from the live transaction, that the
@@ -98,11 +103,15 @@ authentication remain `lemond` obligations.
 
 ## Evaluate the fixed repetitions
 
-Pass the frozen input by value to `evaluate_retained_gtt_differential`. A
-moved-from `FrozenProfilingDifferentialInput` remains valid but has
-unspecified state; do not inspect or reuse it as attempt authority. The
-durable journal, not C++ move behavior, prevents another freeze of a rejected
-revision.
+Pass the frozen input by value and the caller-owned repetition vector by
+constant reference to `evaluate_retained_gtt_differential`. The evaluator does
+not copy an untrusted vector. Its bounded ingestion borrows only the first
+4096 records from each plateau, audits the 4097th record as described below,
+latches overflow, and does not inspect a later vector tail. Overflow always
+rejects evidence, so ignored tail bytes never make the plateau safe. A
+moved-from `FrozenProfilingDifferentialInput` remains valid but has unspecified
+state; do not inspect or reuse it as attempt authority. The durable journal,
+not C++ move behavior, prevents another freeze of a rejected revision.
 
 Immediately before each repetition, the `lemond` caller authenticates a fresh
 revalidation observation and then issues the baseline-ready marker without an
@@ -120,29 +129,36 @@ repetition, an accepted fresh revalidation establishes the authority boundary
 for that repetition. Records for a later repetition are not observation
 evidence until its revalidation is accepted.
 
-After that acceptance and before any repetition-order, window, identity,
-actor, timing, projection, arithmetic, validation, or serialization failure
-can return, the evaluator audits all structurally usable source facts in the
-current repetition. An expected-kind ready marker with structurally valid
-digest fields defines an authenticated time scope even when a separate marker
-identity check will reject it. A point establishes a source fact only when it
-has an authoritative global value, coherent scheduled/read times, a valid
-provenance digest, and structurally valid no-target binding fields. Empty or
-oversized plateaus, unusable markers, incomplete points, and malformed binding
-bytes do not establish source drift.
+After that acceptance, the evaluator ingests each plateau into two independent
+results: bounded evidence admissibility and monotone noise validity. It borrows
+at most the first 4096 records, derives only the scheduled time, structural
+usability, and binding comparison from the 4097th record, latches overflow,
+and stops. It audits the retained records and that bounded overflow fact before
+any repetition-order, window, identity, actor, timing, projection, arithmetic,
+validation, or serialization failure can return. An expected-kind ready marker
+with structurally valid digest fields defines the source-audit time scope even
+when a separate marker identity check will reject it. A point establishes a
+source fact only when it has an authoritative global value, coherent
+scheduled/read times, a valid provenance digest, and structurally valid
+no-target binding fields. Empty plateaus, unusable markers, incomplete points,
+and malformed binding bytes do not establish source drift. Plateau overflow is
+an evidence defect, but it cannot erase source drift established by a retained
+record or the 4097th record.
 
 The audit covers the selected five-second baseline and loaded scopes and every
-release point scheduled at or after the release marker, including trailing
-release records. It completes across those eligible scopes before ordinary
-classification. Any mismatch with the immutable no-target bindings is
-therefore the strongest result: `SourceDrift` with
+ingested release fact scheduled at or after the release marker, including a
+trailing 4097th record. It completes across those eligible scopes before
+ordinary classification. Any mismatch with the immutable no-target bindings
+is therefore the strongest result: `SourceDrift` with
 `InvalidateNoiseResult` and the immutable noise-result checksum, even when an
 independent revision-only defect is also present or appears earlier. Without
-an established mismatch, the ordinary defect remains `RejectRevision`.
-Pre-repetition revalidation already applies the same severity ordering to its
-authenticated fields. Terminal hashing and serialization run only after all
-accepted repetitions have passed this audit, so they cannot downgrade an
-observed invalidator.
+an established mismatch, overflow is `InvalidWindow` with `RejectRevision`,
+no checksum, and no evidence. A vector tail after the audited 4097th record is
+never scanned and cannot establish a fact; the latched overflow still rejects
+the revision. Pre-repetition revalidation already applies the same severity
+ordering to its authenticated fields. Terminal hashing and serialization run
+only after all accepted repetitions have passed this audit, so they cannot
+downgrade an observed invalidator.
 
 For each repetition, the evaluator calls
 `revalidate_profiling_differential_input`. It continues only for disposition
@@ -161,9 +177,12 @@ and release:
    acquisition cadence. The evaluator requires a strictly ordered schedule,
    at least 50 complete points, no schedule or read-start gap above 100 ms,
    unchanged frozen, actor, containment, and source bindings, and a global
-   range no greater than the frozen `N_gtt`. The 100 ms observed-gap limit is
-   tolerance, not an alternate nominal cadence; evaluator acceptance alone
-   does not prove the caller's scheduler configuration.
+   range no greater than the frozen `N_gtt`. Exactly 4096 records remains
+   admissible when every other check passes. Record 4097 always latches
+   overflow and makes the plateau inadmissible, independently of the monotone
+   source-fact result. The 100 ms observed-gap limit is tolerance, not an
+   alternate nominal cadence; evaluator acceptance alone does not prove the
+   caller's scheduler configuration.
 4. Reject the repetition rather than selecting a quieter later window.
 
 After the three plateaus, the evaluator computes the nonnegative checked
@@ -227,14 +246,16 @@ release failures reject only the revision unless an independent
 noise-invalidating condition is also established.
 
 An established mismatch in any no-target source binding on a selected
-baseline or loaded point, or any checked release point, is `SourceDrift` with
-disposition `InvalidateNoiseResult`. The evaluation result carries the
-immutable `noise_result_checksum_sha256` required for checksum-keyed
-persistence. Identity, actor, marker, ordering, method, constraint,
-arithmetic, validation, and release failures remain `RejectRevision` only
-when the source-fact audit establishes no separate noise invalidator. A parser
-rejection produces no trusted component and does not by itself establish a
-new noise invalidation. Authentication and both durable mutations remain
+baseline or loaded point, or any ingested release point, is `SourceDrift` with
+disposition `InvalidateNoiseResult`. This includes a mismatch among the first
+4096 records or in the bounded 4097th-record fact even though the plateau is
+also oversized. The evaluation result carries the immutable
+`noise_result_checksum_sha256` required for checksum-keyed persistence.
+Identity, actor, marker, ordering, point-count, method, constraint, arithmetic,
+validation, and release failures remain `RejectRevision` only when the
+source-fact audit establishes no separate noise invalidator. A parser rejection
+produces no trusted component and does not by itself establish a new noise
+invalidation. Authentication and both durable mutations remain
 `lemond`-owned.
 
 ## Outcome branches
@@ -276,7 +297,9 @@ ctest --test-dir build --output-on-failure -R '^(ResidencyProfilingDifferentialE
 ```
 
 These tests use constructed deterministic records. They do not authenticate a
-live source or qualify a host, driver, backend, model, workload, or release.
+They exercise the Linux evaluator contract locally; hosted Windows and macOS
+checks, live device behavior, and physical campaign qualification remain
+separate evidence.
 The optional mutation-complete interval remains the unchanged stronger path in
 `src/cpp/include/lemon/residency/profiling_capture_authority.h`.
 

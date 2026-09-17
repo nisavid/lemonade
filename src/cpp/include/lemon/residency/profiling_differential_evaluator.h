@@ -253,7 +253,7 @@ private:
     evaluate_retained_gtt_differential(
         FrozenProfilingDifferentialInput input,
         ProfilingDifferentialMethodBinding method_binding,
-        std::vector<ProfilingDifferentialRepetition> repetitions);
+        const std::vector<ProfilingDifferentialRepetition> &repetitions);
     friend ProfilingDifferentialEvidenceParseResult
     parse_profiling_differential_evidence(std::string_view bytes);
 };
@@ -285,7 +285,7 @@ ProfilingDifferentialEvaluationResult
 evaluate_retained_gtt_differential(
     FrozenProfilingDifferentialInput input,
     ProfilingDifferentialMethodBinding method_binding,
-    std::vector<ProfilingDifferentialRepetition> repetitions);
+    const std::vector<ProfilingDifferentialRepetition> &repetitions);
 
 ProfilingDifferentialEvidenceParseResult
 parse_profiling_differential_evidence(std::string_view bytes);

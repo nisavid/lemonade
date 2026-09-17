@@ -48,9 +48,9 @@ This file captures implementation landmarks that are useful before changing Lemo
 - Agents evaluating exact-fingerprint retained-GTT repetitions must follow the
   [retained-GTT differential procedure](profiling-retained-gtt-differential.md),
   loading it before implementation or collection. They must preserve its
-  checkout-bound reviewed method, 50 ms caller schedule, strongest source-fact
-  disposition, exact byte-constraint binding, and preflight-before-freeze
-  requirements.
+  checkout-bound reviewed method, bounded 4096-record ingestion and 4097th
+  source-fact audit, 50 ms caller schedule, strongest source-fact disposition,
+  exact byte-constraint binding, and preflight-before-freeze requirements.
 - The accepted portable adapter, footprint, pressure-reclamation, configuration, explanation, validation, and promotion policies and their decision rationale live in [Choose portable residency adapter contracts](https://github.com/nisavid/lemonade/issues/31), [Choose footprint estimation and confidence policy](https://github.com/nisavid/lemonade/issues/32), [Choose portable pressure reclamation controls](https://github.com/nisavid/lemonade/issues/33), [Define portable residency configuration and explanations](https://github.com/nisavid/lemonade/issues/34), and [Define residency validation and capability promotion](https://github.com/nisavid/lemonade/issues/35); the bullets below are their scout map.
 - Continued fork maintenance is decided. Reconcile onto current stable upstream, then implement this target using upstream terminology and APIs where they fit.
 - One server-owned planner defines admission, pressure, protection, ordering, and refusal semantics. Platform and backend adapters describe residency-memory-domain topology, trustworthy capacity and pressure signals, footprint confidence, and available reclamation actions; adapters do not redefine common policy.

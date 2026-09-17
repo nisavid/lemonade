@@ -268,7 +268,12 @@ void append_plateau(std::string &bytes,
                     const ProfilingDifferentialPlateauObservation &plateau) {
     append_marker(bytes, plateau.marker);
     append_u64(bytes, static_cast<std::uint64_t>(plateau.points.size()));
-    for (const auto &point : plateau.points) append_point(bytes, point);
+    const auto retained_point_count = std::min(
+        plateau.points.size(),
+        profiling_differential_maximum_plateau_points);
+    for (std::size_t index = 0; index < retained_point_count; ++index) {
+        append_point(bytes, plateau.points[index]);
+    }
 }
 
 std::optional<std::string> repetition_provenance(
@@ -388,75 +393,167 @@ enum class SourceAuditScope {
     FromMarker,
 };
 
-bool establishes_source_drift(
+enum class MonotoneNoiseValidity {
+    Valid,
+    Invalidated,
+};
+
+struct BoundedSourceFact {
+    std::chrono::steady_clock::time_point scheduled_at;
+    bool usable = false;
+    bool mismatched = false;
+};
+
+struct BoundedPlateauIngestion {
+    const ProfilingDifferentialPlateauObservation *plateau = nullptr;
+    std::size_t retained_point_count = 0;
+    bool overflowed = false;
+    std::optional<BoundedSourceFact> overflow_source_fact;
+};
+
+struct BoundedRepetitionIngestion {
+    BoundedPlateauIngestion baseline;
+    BoundedPlateauIngestion loaded;
+    BoundedPlateauIngestion release;
+};
+
+BoundedSourceFact bounded_source_fact(
+    const ProfilingDifferentialGttPoint &point,
+    const FrozenProfilingDifferentialInput &input) noexcept {
+    const bool usable = point_has_usable_source_fact(point);
+    return {
+        point.scheduled_at,
+        usable,
+        usable &&
+            !bindings_equal(point.observed_bindings,
+                            input.noise().bindings()),
+    };
+}
+
+BoundedPlateauIngestion ingest_plateau(
     const ProfilingDifferentialPlateauObservation &plateau,
+    const FrozenProfilingDifferentialInput &input) noexcept {
+    BoundedPlateauIngestion result;
+    result.plateau = &plateau;
+    result.retained_point_count = std::min(
+        plateau.points.size(),
+        profiling_differential_maximum_plateau_points);
+    result.overflowed =
+        plateau.points.size() >
+        profiling_differential_maximum_plateau_points;
+    if (result.overflowed) {
+        result.overflow_source_fact = bounded_source_fact(
+            plateau.points[profiling_differential_maximum_plateau_points],
+            input);
+    }
+    return result;
+}
+
+BoundedRepetitionIngestion ingest_repetition(
+    const ProfilingDifferentialRepetition &repetition,
+    const FrozenProfilingDifferentialInput &input) noexcept {
+    return {
+        ingest_plateau(repetition.baseline, input),
+        ingest_plateau(repetition.loaded, input),
+        ingest_plateau(repetition.release, input),
+    };
+}
+
+MonotoneNoiseValidity audit_source_facts(
+    const BoundedPlateauIngestion &ingestion,
     ProfilingDifferentialMarkerKind expected_kind,
     SourceAuditScope scope,
     const FrozenProfilingDifferentialInput &input) noexcept {
+    const auto &plateau = *ingestion.plateau;
     if (!plateau.marker ||
         !marker_defines_source_audit_scope(*plateau.marker, expected_kind) ||
-        plateau.points.empty() ||
-        plateau.points.size() >
-            profiling_differential_maximum_plateau_points) {
-        return false;
+        ingestion.retained_point_count == 0) {
+        return MonotoneNoiseValidity::Valid;
     }
 
     auto scope_start = plateau.marker->marked_at;
     auto scope_end = std::chrono::steady_clock::time_point::max();
     if (scope == SourceAuditScope::FixedWindow) {
-        const ProfilingDifferentialGttPoint *first = nullptr;
-        for (const auto &point : plateau.points) {
+        std::optional<std::chrono::steady_clock::time_point> first;
+        for (std::size_t index = 0;
+             index < ingestion.retained_point_count; ++index) {
+            const auto &point = plateau.points[index];
             if (point.scheduled_at >= plateau.marker->marked_at &&
-                (first == nullptr ||
-                 point.scheduled_at < first->scheduled_at)) {
-                first = &point;
+                (!first || point.scheduled_at < *first)) {
+                first = point.scheduled_at;
             }
         }
-        if (first == nullptr) return false;
+        if (ingestion.overflow_source_fact &&
+            ingestion.overflow_source_fact->scheduled_at >=
+                plateau.marker->marked_at &&
+            (!first || ingestion.overflow_source_fact->scheduled_at <
+                           *first)) {
+            first = ingestion.overflow_source_fact->scheduled_at;
+        }
+        if (!first) return MonotoneNoiseValidity::Valid;
 
         const auto window_duration =
             std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 profiling_differential_window);
-        if (first->scheduled_at >
+        if (*first >
             std::chrono::steady_clock::time_point::max() - window_duration) {
-            return false;
+            return MonotoneNoiseValidity::Valid;
         }
-        scope_start = first->scheduled_at;
+        scope_start = *first;
         scope_end = scope_start + window_duration;
     }
 
-    return std::any_of(
-        plateau.points.begin(), plateau.points.end(), [&](const auto &point) {
-            return point.scheduled_at >= scope_start &&
-                   (scope == SourceAuditScope::FromMarker ||
-                    point.scheduled_at < scope_end) &&
-                   point_has_usable_source_fact(point) &&
-                   !bindings_equal(point.observed_bindings,
-                                   input.noise().bindings());
-        });
+    const auto in_scope = [&](const BoundedSourceFact &fact) {
+        return fact.scheduled_at >= scope_start &&
+               (scope == SourceAuditScope::FromMarker ||
+                fact.scheduled_at < scope_end);
+    };
+    auto validity = MonotoneNoiseValidity::Valid;
+    for (std::size_t index = 0;
+         index < ingestion.retained_point_count; ++index) {
+        const auto fact = bounded_source_fact(plateau.points[index], input);
+        if (in_scope(fact) && fact.usable && fact.mismatched) {
+            validity = MonotoneNoiseValidity::Invalidated;
+        }
+    }
+    if (ingestion.overflow_source_fact &&
+        in_scope(*ingestion.overflow_source_fact) &&
+        ingestion.overflow_source_fact->usable &&
+        ingestion.overflow_source_fact->mismatched) {
+        validity = MonotoneNoiseValidity::Invalidated;
+    }
+    return validity;
 }
 
-bool repetition_establishes_source_drift(
-    const ProfilingDifferentialRepetition &repetition,
+MonotoneNoiseValidity audit_repetition_source_facts(
+    const BoundedRepetitionIngestion &ingestion,
     const FrozenProfilingDifferentialInput &input) noexcept {
-    return establishes_source_drift(
-               repetition.baseline,
-               ProfilingDifferentialMarkerKind::BaselineReady,
-               SourceAuditScope::FixedWindow, input) ||
-           establishes_source_drift(
-               repetition.loaded,
-               ProfilingDifferentialMarkerKind::LoadedReady,
-               SourceAuditScope::FixedWindow, input) ||
-           establishes_source_drift(
-               repetition.release,
-               ProfilingDifferentialMarkerKind::ReleaseReady,
-               SourceAuditScope::FromMarker, input);
+    auto validity = MonotoneNoiseValidity::Valid;
+    const auto join = [&](MonotoneNoiseValidity observed) {
+        if (observed == MonotoneNoiseValidity::Invalidated) {
+            validity = MonotoneNoiseValidity::Invalidated;
+        }
+    };
+    join(audit_source_facts(
+        ingestion.baseline,
+        ProfilingDifferentialMarkerKind::BaselineReady,
+        SourceAuditScope::FixedWindow, input));
+    join(audit_source_facts(
+        ingestion.loaded,
+        ProfilingDifferentialMarkerKind::LoadedReady,
+        SourceAuditScope::FixedWindow, input));
+    join(audit_source_facts(
+        ingestion.release,
+        ProfilingDifferentialMarkerKind::ReleaseReady,
+        SourceAuditScope::FromMarker, input));
+    return validity;
 }
 
 PlateauResult evaluate_plateau(
-    const ProfilingDifferentialPlateauObservation &plateau,
+    const BoundedPlateauIngestion &ingestion,
     ProfilingDifferentialMarkerKind expected_kind,
     const FrozenProfilingDifferentialInput &input) {
+    const auto &plateau = *ingestion.plateau;
     if (!plateau.marker) {
         return {ProfilingDifferentialEvaluationStatus::MissingMarker,
                 "required phase-ready marker is missing", std::nullopt};
@@ -466,13 +563,12 @@ PlateauResult evaluate_plateau(
                 "phase-ready marker does not match the frozen input",
                 std::nullopt};
     }
-    if (plateau.points.empty() ||
-        plateau.points.size() >
-            profiling_differential_maximum_plateau_points) {
+    if (ingestion.retained_point_count == 0 || ingestion.overflowed) {
         return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
                 "plateau point count is invalid", std::nullopt};
     }
-    for (std::size_t index = 1; index < plateau.points.size(); ++index) {
+    for (std::size_t index = 1;
+         index < ingestion.retained_point_count; ++index) {
         if (plateau.points[index].scheduled_at <=
                 plateau.points[index - 1].scheduled_at ||
             plateau.points[index].read_started_at <=
@@ -483,12 +579,14 @@ PlateauResult evaluate_plateau(
         }
     }
 
+    const auto retained_end =
+        plateau.points.begin() + ingestion.retained_point_count;
     const auto first = std::find_if(
-        plateau.points.begin(), plateau.points.end(),
+        plateau.points.begin(), retained_end,
         [&](const auto &point) {
             return point.scheduled_at >= plateau.marker->marked_at;
         });
-    if (first == plateau.points.end()) {
+    if (first == retained_end) {
         return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
                 "plateau has no acquisition on or after its marker",
                 std::nullopt};
@@ -520,7 +618,7 @@ PlateauResult evaluate_plateau(
     const ProfilingDifferentialGttPoint *previous = nullptr;
     const ProfilingDifferentialGttPoint *last = nullptr;
     for (auto point = first;
-         point != plateau.points.end() && point->scheduled_at < window_end;
+         point != retained_end && point->scheduled_at < window_end;
          ++point) {
         if (!point->global_gtt_used_bytes ||
             point->read_started_at < point->scheduled_at ||
@@ -1297,7 +1395,7 @@ ProfilingDifferentialEvaluationResult
 evaluate_retained_gtt_differential(
     FrozenProfilingDifferentialInput input,
     ProfilingDifferentialMethodBinding method_binding,
-    std::vector<ProfilingDifferentialRepetition> repetitions) {
+    const std::vector<ProfilingDifferentialRepetition> &repetitions) {
     try {
         if (input.noise().bindings().procedure_revision_sha256 !=
             profiling_no_target_gtt_noise_procedure_revision_sha256) {
@@ -1343,7 +1441,7 @@ evaluate_retained_gtt_differential(
             previous_release_completed_at;
 
         for (std::size_t index = 0; index < repetitions.size(); ++index) {
-            auto &repetition = repetitions[index];
+            const auto &repetition = repetitions[index];
             const auto revalidation = revalidate_profiling_differential_input(
                 input, repetition.revalidation);
             if (!revalidation.accepted()) {
@@ -1355,9 +1453,9 @@ evaluate_retained_gtt_differential(
                 result.revalidation_status = revalidation.status;
                 return result;
             }
-            // Source invalidation is a repetition-level disposition, not the
-            // outcome of whichever point check happens to return first.
-            if (repetition_establishes_source_drift(repetition, input)) {
+            const auto ingestion = ingest_repetition(repetition, input);
+            if (audit_repetition_source_facts(ingestion, input) ==
+                MonotoneNoiseValidity::Invalidated) {
                 return reject_observation(
                     input,
                     ProfilingDifferentialEvaluationStatus::SourceDrift,
@@ -1392,21 +1490,21 @@ evaluate_retained_gtt_differential(
             }
 
             const auto baseline = evaluate_plateau(
-                repetition.baseline,
+                ingestion.baseline,
                 ProfilingDifferentialMarkerKind::BaselineReady, input);
             if (!baseline.summary) {
                 return reject_observation(
                     input, baseline.status, baseline.diagnostic);
             }
             const auto loaded = evaluate_plateau(
-                repetition.loaded,
+                ingestion.loaded,
                 ProfilingDifferentialMarkerKind::LoadedReady, input);
             if (!loaded.summary) {
                 return reject_observation(
                     input, loaded.status, loaded.diagnostic);
             }
             const auto release = evaluate_plateau(
-                repetition.release,
+                ingestion.release,
                 ProfilingDifferentialMarkerKind::ReleaseReady, input);
             if (!release.summary) {
                 return reject_observation(
@@ -1451,7 +1549,11 @@ evaluate_retained_gtt_differential(
                     "release-envelope upper bound overflows");
             }
             const auto release_upper = baseline.summary->maximum + n_gtt;
-            for (const auto &point : repetition.release.points) {
+            for (std::size_t point_index = 0;
+                 point_index < ingestion.release.retained_point_count;
+                 ++point_index) {
+                const auto &point =
+                    repetition.release.points[point_index];
                 if (point.scheduled_at <
                     repetition.release.marker->marked_at) {
                     continue;
