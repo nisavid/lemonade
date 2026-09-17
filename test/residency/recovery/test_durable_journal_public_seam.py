@@ -6137,8 +6137,7 @@ def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
         "::MoveFileExW(stage.c_str(),child.c_str(),MOVEFILE_WRITE_THROUGH)"
     )
     publish_result = compact.find(
-        "observe_publish_result(attempt,moved,"
-        "static_cast<unsignedlong>(move_error))"
+        "observe_publish_result(attempt,moved," "static_cast<unsignedlong>(move_error))"
     )
     if min(pre_publish, move, publish_result) < 0 or not (
         pre_publish < move < publish_result
