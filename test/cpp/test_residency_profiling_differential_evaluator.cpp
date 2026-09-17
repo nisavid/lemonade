@@ -22,7 +22,7 @@ using namespace lemon::residency;
 using namespace std::chrono_literals;
 
 constexpr std::string_view no_target_procedure_sha256 =
-    "3c5a0b66d6317cc4dd96211cd68887a7cd0949d44cf748a61d9fdc35f4df6e3c";
+    "5a7a73e909d08133ee6d8b5d3f4e27535f95107d4f04164801b6f6d14ec4c292";
 
 using IntervalBeginSignature = ProfilingRawIntervalBeginResult (
     ProfilingIntervalObservationSource::*)(
@@ -219,6 +219,11 @@ ProfilingDifferentialInputDraft differential_input_draft(
     std::uint64_t m_gtt_bytes = 32) {
     ProfilingDifferentialInputDraft draft;
     draft.identity.transaction = transaction_context(noise.bindings());
+    auto method_binding = resolve_retained_gtt_differential_method_binding(
+        draft.identity.transaction, "amd.shared_gtt.retained_bytes");
+    require(method_binding.has_value(),
+            "fixture method and constraint binding did not resolve");
+    draft.method_binding = std::move(*method_binding);
     draft.identity.target_client_identity_sha256 = digest('5');
     draft.identity.target_containment_identity_sha256 = digest('6');
     draft.identity.counter_continuity_epoch_sha256 =
@@ -251,12 +256,8 @@ FrozenProfilingDifferentialInput frozen_input(
     auto draft = differential_input_draft(
         noise, calibration_repetitions, validation_repetitions,
         x_gtt_bytes, m_gtt_bytes);
-    auto binding = resolve_retained_gtt_differential_method_binding(
-        draft.identity.transaction, "amd.shared_gtt.retained_bytes");
-    require(binding.has_value(),
-            "fixture method and constraint binding did not resolve");
-    auto preflight =
-        preflight_retained_gtt_differential(noise, draft, *binding);
+    auto preflight = preflight_retained_gtt_differential(
+        noise, draft, draft.method_binding);
     require(preflight.accepted(), "fixture evaluator preflight failed");
 
     auto frozen =
@@ -754,6 +755,7 @@ void require_maximum_legal_component_round_trips() {
         transaction, constraint_id);
     require(binding.has_value(),
             "maximum-identifier method binding did not resolve");
+    draft.method_binding = *binding;
     auto preflight = preflight_retained_gtt_differential(
         noise, draft, *binding);
     require(preflight.accepted(),
@@ -2271,6 +2273,117 @@ void require_exact_method_and_constraint_binding() {
             "an observation-contract revision did not revise the constraint");
 }
 
+void require_preflight_method_binding_cannot_be_relabelled() {
+    auto noise = parsed_noise_result();
+    auto draft = differential_input_draft(noise, 1, 1);
+    auto binding_a = resolve_retained_gtt_differential_method_binding(
+        draft.identity.transaction, "amd.shared_gtt.retained_bytes");
+    auto binding_b = resolve_retained_gtt_differential_method_binding(
+        draft.identity.transaction, "amd.shared_gtt.other_bytes");
+    require(binding_a.has_value() && binding_b.has_value() &&
+                binding_a->constraint_revision_sha256 !=
+                    binding_b->constraint_revision_sha256,
+            "independent constraint bindings did not resolve");
+    draft.method_binding = *binding_a;
+    auto mismatched_preflight =
+        preflight_retained_gtt_differential(noise, draft, *binding_b);
+    require(!mismatched_preflight.accepted() &&
+                mismatched_preflight.status ==
+                    ProfilingDifferentialPreflightStatus::InvalidMethodBinding,
+            "constraint B passed preflight for a draft bound to constraint A");
+    auto preflight =
+        preflight_retained_gtt_differential(noise, draft, *binding_a);
+    require(preflight.accepted(), "constraint A did not pass preflight");
+    auto frozen =
+        freeze_profiling_differential_input(noise, std::move(draft));
+    require(frozen.accepted(), "constraint A input did not freeze");
+    auto input = std::move(*frozen.input);
+
+    const auto first = std::chrono::steady_clock::time_point{79h + 45min};
+    std::vector<ProfilingDifferentialRepetition> repetitions;
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, first, 9200,
+        input));
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Validation, 0, first + 20s,
+        9200, input));
+    issue_live_receipts(input, repetitions);
+
+    auto accepted = evaluate_retained_gtt_differential(
+        input, *binding_a, repetitions);
+    require(accepted.accepted() &&
+                accepted.evidence->method_binding().constraint_id ==
+                    binding_a->constraint_id &&
+                accepted.evidence->method_binding().constraint_revision_sha256 ==
+                    binding_a->constraint_revision_sha256,
+            "constraint A did not accept observations preflighted and "
+            "collected under constraint A");
+
+    auto relabelled = evaluate_retained_gtt_differential(
+        input, std::move(*binding_b), repetitions);
+    require(!relabelled.accepted() &&
+                relabelled.status ==
+                    ProfilingDifferentialEvaluationStatus::InvalidMethodBinding &&
+                relabelled.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::RejectRevision &&
+                !relabelled.noise_result_checksum_sha256.has_value() &&
+                !relabelled.evidence.has_value(),
+            "constraint B relabelled observations preflighted and collected "
+            "under constraint A");
+}
+
+void require_method_binding_changes_the_frozen_receipt_chain() {
+    auto noise = parsed_noise_result();
+    auto draft_a = differential_input_draft(noise, 1, 1);
+    auto draft_b = differential_input_draft(noise, 1, 1);
+    auto binding_b = resolve_retained_gtt_differential_method_binding(
+        draft_b.identity.transaction, "amd.shared_gtt.other_bytes");
+    require(binding_b.has_value(), "constraint B did not resolve");
+    draft_b.method_binding = *binding_b;
+    require(preflight_retained_gtt_differential(
+                noise, draft_a, draft_a.method_binding)
+                .accepted() &&
+                preflight_retained_gtt_differential(
+                    noise, draft_b, draft_b.method_binding)
+                    .accepted(),
+            "independently bound drafts did not pass preflight");
+
+    auto frozen_a =
+        freeze_profiling_differential_input(noise, std::move(draft_a));
+    auto frozen_b =
+        freeze_profiling_differential_input(noise, std::move(draft_b));
+    require(frozen_a.accepted() && frozen_b.accepted(),
+            "independently bound drafts did not freeze");
+    auto input_a = std::move(*frozen_a.input);
+    auto input_b = std::move(*frozen_b.input);
+    require(input_a.frozen_input_sha256() != input_b.frozen_input_sha256(),
+            "the frozen input digest omitted the method binding");
+
+    const auto first = std::chrono::steady_clock::time_point{79h + 50min};
+    auto repetition_a = repetition(
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, first, 9200,
+        input_a);
+    auto repetition_b = repetition(
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, first, 9200,
+        input_b);
+    auto observation_a =
+        revalidation_observation_for(input_a, repetition_a);
+    auto observation_b =
+        revalidation_observation_for(input_b, repetition_b);
+    ProfilingDifferentialAttemptState attempt_a(input_a);
+    ProfilingDifferentialAttemptState attempt_b(input_b);
+    auto receipt_a = revalidate_profiling_differential_input(
+        input_a, attempt_a,
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, observation_a);
+    auto receipt_b = revalidate_profiling_differential_input(
+        input_b, attempt_b,
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, observation_b);
+    require(receipt_a.accepted() && receipt_b.accepted() &&
+                receipt_a.receipt->receipt_sha256() !=
+                    receipt_b.receipt->receipt_sha256(),
+            "the revalidation receipt chain omitted the frozen method binding");
+}
+
 void require_explicit_owner_projection_coverage() {
     auto noise = parsed_noise_result();
     const auto first = std::chrono::steady_clock::time_point{80h};
@@ -2818,6 +2931,8 @@ int main() {
         require_strongest_disposition_for_compound_observation_failures();
         require_reviewed_noise_procedure_revision();
         require_exact_method_and_constraint_binding();
+        require_preflight_method_binding_cannot_be_relabelled();
+        require_method_binding_changes_the_frozen_receipt_chain();
         require_explicit_owner_projection_coverage();
         require_incomplete_owner_projection_remains_explicit();
         require_zero_component_composes_into_profiling_input();

@@ -22,6 +22,15 @@ bool identifier_is_valid(std::string_view value) noexcept {
            });
 }
 
+bool method_binding_is_structurally_valid(
+    const ProfilingDifferentialMethodBinding &binding) noexcept {
+    return identifier_is_valid(binding.method_id) &&
+           digest_is_valid(binding.method_revision_sha256) &&
+           identifier_is_valid(binding.constraint_id) &&
+           digest_is_valid(binding.constraint_revision_sha256) &&
+           identifier_is_valid(binding.covered_effect);
+}
+
 bool bindings_equal_except_background(
     const ProfilingNoiseBindings &left,
     const ProfilingNoiseBindings &right) noexcept {
@@ -207,7 +216,7 @@ std::optional<std::string> frozen_input_digest(
     const ParsedProfilingNoiseResult &noise,
     const ProfilingDifferentialInputDraft &draft) {
     std::string bytes =
-        "lemonade/profiling-differential-input/v1";
+        "lemonade/profiling-differential-input/v2";
     append_string(bytes, noise.canonical_bytes());
     append_transaction(bytes, draft.identity.transaction);
     append_string(bytes,
@@ -219,6 +228,12 @@ std::optional<std::string> frozen_input_digest(
     append_string(bytes, draft.identity.safety_contract_sha256);
     append_string(bytes,
                   draft.identity.noise_trace_provenance_sha256);
+    append_string(bytes, draft.method_binding.method_id);
+    append_string(bytes, draft.method_binding.method_revision_sha256);
+    append_string(bytes, draft.method_binding.constraint_id);
+    append_string(bytes,
+                  draft.method_binding.constraint_revision_sha256);
+    append_string(bytes, draft.method_binding.covered_effect);
     append_string(
         bytes, draft.noise_validity.noise_result_checksum_sha256);
     append_u64(bytes,
@@ -358,6 +373,11 @@ FrozenProfilingDifferentialInput::noise() const noexcept {
 const ProfilingDifferentialInputIdentity &
 FrozenProfilingDifferentialInput::identity() const noexcept {
     return draft_.identity;
+}
+
+const ProfilingDifferentialMethodBinding &
+FrozenProfilingDifferentialInput::method_binding() const noexcept {
+    return draft_.method_binding;
 }
 
 const ProfilingDifferentialRevisionBinding &
@@ -537,6 +557,12 @@ freeze_profiling_differential_input(
         }
         draft.identity.transaction.selector =
             std::move(*canonical_selector.selector);
+
+        if (!method_binding_is_structurally_valid(draft.method_binding)) {
+            return freeze_failure(
+                ProfilingDifferentialInputFreezeStatus::InvalidMethodBinding,
+                "differential method binding is invalid");
+        }
 
         if (!digest_is_valid(
                 draft.identity.noise_trace_provenance_sha256)) {

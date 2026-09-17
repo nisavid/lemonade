@@ -116,6 +116,11 @@ FrozenProfilingDifferentialInput frozen_input(
     draft.identity.safety_contract_sha256 = digest('8');
     draft.identity.noise_trace_provenance_sha256 =
         std::string(noise.trace_provenance_sha256());
+    draft.method_binding.method_id = "differential_retained_gtt";
+    draft.method_binding.method_revision_sha256 = digest('8');
+    draft.method_binding.constraint_id = "amd.shared_gtt.retained_bytes";
+    draft.method_binding.constraint_revision_sha256 = digest('9');
+    draft.method_binding.covered_effect = "retained_gtt";
     draft.noise_validity.noise_result_checksum_sha256 =
         std::string(noise.checksum_sha256());
     draft.noise_validity.state = ProfilingNoiseValidityState::Valid;

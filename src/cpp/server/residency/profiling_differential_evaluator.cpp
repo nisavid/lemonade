@@ -1349,9 +1349,12 @@ preflight_retained_gtt_differential(
         }
         const auto supported_method =
             resolve_retained_gtt_differential_method_binding(
-                draft.identity.transaction, method_binding.constraint_id);
+                draft.identity.transaction,
+                draft.method_binding.constraint_id);
         if (!supported_method ||
-            !method_bindings_equal(method_binding, *supported_method)) {
+            !method_bindings_equal(draft.method_binding, method_binding) ||
+            !method_bindings_equal(draft.method_binding,
+                                   *supported_method)) {
             return {
                 ProfilingDifferentialPreflightStatus::InvalidMethodBinding,
                 "retained-GTT method binding is invalid",
@@ -1543,11 +1546,15 @@ evaluate_retained_gtt_differential(
                 ProfilingDifferentialEvaluationStatus::InvalidMethodBinding,
                 "no-target noise procedure revision is unsupported");
         }
+        const auto &frozen_method_binding = input.method_binding();
         const auto supported_method =
             resolve_retained_gtt_differential_method_binding(
-                input.identity().transaction, method_binding.constraint_id);
+                input.identity().transaction,
+                frozen_method_binding.constraint_id);
         if (!supported_method ||
-            !method_bindings_equal(method_binding, *supported_method)) {
+            !method_bindings_equal(method_binding, frozen_method_binding) ||
+            !method_bindings_equal(frozen_method_binding,
+                                   *supported_method)) {
             return reject(
                 ProfilingDifferentialEvaluationStatus::InvalidMethodBinding,
                 "retained-GTT method binding is invalid");
@@ -1996,7 +2003,7 @@ evaluate_retained_gtt_differential(
              repetitions_document(calibration_evidence)},
             {"calibration_revision_sha256",
              input.revision().calibration_revision_sha256},
-            {"covered_effect", method_binding.covered_effect},
+            {"covered_effect", frozen_method_binding.covered_effect},
             {"exact_fingerprint",
              selector_document(identity.transaction.selector)},
             {"frozen_identities",
@@ -2041,18 +2048,18 @@ evaluate_retained_gtt_differential(
                    identity.target_containment_identity_sha256}}},
             {"frozen_input_sha256", input.frozen_input_sha256()},
             {"method_binding",
-             json{{"constraint_id", method_binding.constraint_id},
+             json{{"constraint_id", frozen_method_binding.constraint_id},
                   {"constraint_revision_sha256",
-                   method_binding.constraint_revision_sha256},
-                  {"method_id", method_binding.method_id},
+                   frozen_method_binding.constraint_revision_sha256},
+                  {"method_id", frozen_method_binding.method_id},
                   {"method_revision_sha256",
-                   method_binding.method_revision_sha256}}},
+                   frozen_method_binding.method_revision_sha256}}},
             {"owner_projection_coverage",
              projection_coverage_wire(projection_coverage)},
             {"retained_gtt_bound_bytes", retained_bound},
             {"retained_gtt_claim",
              json{{"amount", retained_bound},
-                  {"constraint_id", method_binding.constraint_id},
+                  {"constraint_id", frozen_method_binding.constraint_id},
                   {"unit", "bytes"}}},
             {"schema", json{{"major", 1}, {"minor", 0}}},
             {"validation_repetitions",

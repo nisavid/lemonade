@@ -12,7 +12,7 @@ transient lifecycle envelope, or authorize admission.
 Load [the no-target GTT noise procedure](profiling-no-target-gtt-noise.md)
 before freezing or evaluating input. This consumer requires producer procedure
 bytes with raw-file SHA-256
-`3c5a0b66d6317cc4dd96211cd68887a7cd0949d44cf748a61d9fdc35f4df6e3c`.
+`5a7a73e909d08133ee6d8b5d3f4e27535f95107d4f04164801b6f6d14ec4c292`.
 The invocation review receipt must bind those bytes and the corresponding
 implementation at one immutable revision. Do not substitute rendered Markdown,
 a moving branch, or a procedure from a different implementation revision.
@@ -39,8 +39,9 @@ evaluator, it must authenticate and assemble:
 
 1. One `FrozenProfilingDifferentialInput` with a fresh revision, a currently
    valid noise-result checksum, exact target and containment identities, and
-   disjoint `N_gtt`, `X_gtt`, and `M_gtt` terms.
-2. One exact `ProfilingDifferentialMethodBinding` returned by
+   disjoint `N_gtt`, `X_gtt`, and `M_gtt` terms. Its frozen draft contains the
+   complete method binding used for this attempt.
+2. That same exact `ProfilingDifferentialMethodBinding`, returned by
    `resolve_retained_gtt_differential_method_binding` for method
    `differential_retained_gtt`, covered effect `retained_gtt`, and the
    transaction's retained byte-constraint instance.
@@ -104,20 +105,28 @@ the earlier contract.
    SHA-256, and the observation-contract SHA-256, each encoded as an unsigned
    64-bit big-endian byte length followed by its raw bytes.
 
-Before calling `freeze_profiling_differential_input`, call
-`preflight_retained_gtt_differential` with the parsed noise result, draft, and
-resolved method binding. Continue only on `Accepted`. Preflight requires the
-reviewed no-target procedure revision, the exact method and constraint
-binding, positive calibration and validation counts, and at most 128 total
-repetitions. Evaluation and parsing repeat the applicable checks, but that
-terminal defense does not authorize collecting an input that preflight has
-rejected. Constraint resolution, review-receipt verification, and record
-authentication remain `lemond` obligations.
+Store the resolved binding in `draft.method_binding`, then call
+`preflight_retained_gtt_differential` with the parsed noise result, that draft,
+and the same binding. Continue only on `Accepted`, and freeze that unchanged
+draft before collecting any target observation. The version-2 frozen-input
+digest covers every method-binding field, and each revalidation receipt binds
+that frozen-input digest into its receipt chain. Preflight requires the
+reviewed no-target procedure revision, exact agreement between the draft and
+supplied method and constraint binding, positive calibration and validation
+counts, and at most 128 total repetitions. Evaluation requires the supplied
+binding to equal the frozen binding and independently resolves the supported
+binding again. A separately resolved, internally consistent binding cannot
+relabel records collected under the frozen binding. Parsing repeats the
+applicable support checks, but those terminal defenses do not authorize
+collecting an input that preflight has rejected. Constraint resolution,
+review-receipt verification, and record authentication remain `lemond`
+obligations.
 
 ## Evaluate the fixed repetitions
 
-Pass the immutable frozen input and caller-owned repetition vector by constant
-reference to `evaluate_retained_gtt_differential`. The evaluator does not
+Pass the immutable frozen input, the same method binding used for preflight,
+and the caller-owned repetition vector to
+`evaluate_retained_gtt_differential`. The evaluator does not
 mutate the input, advance the attempt state, replay revalidation, or copy an
 untrusted vector. Its bounded ingestion borrows only the first 4096 records
 from each plateau, audits the 4097th record as described below, latches
@@ -323,6 +332,7 @@ profiling and local-overlay tests:
 cmake --build --preset default --parallel 4 --target \
   test_residency_profiling_differential_evaluator \
   test_residency_profiling_differential_input \
+  test_residency_profiling_differential_hash_failures \
   test_residency_profiling_noise \
   test_residency_profiling_noise_trend \
   test_residency_profiling_noise_provenance \
@@ -331,7 +341,7 @@ cmake --build --preset default --parallel 4 --target \
   test_residency_profiling_interval \
   test_residency_profiling_capture_authority \
   test_residency_local_overlay
-ctest --test-dir build --output-on-failure -R '^(ResidencyProfilingDifferentialEvaluator|ResidencyProfilingDifferentialInput|ResidencyProfilingNoise|ResidencyProfilingNoiseTrend|ResidencyProfilingNoiseProvenance|ResidencyProfilingTransaction|ResidencyProfilingProvider|ResidencyProfilingInterval|ResidencyProfilingCaptureAuthority|ResidencyLocalOverlay)$'
+ctest --test-dir build --output-on-failure -R '^(ResidencyProfilingDifferentialEvaluator|ResidencyProfilingDifferentialInput|ResidencyProfilingDifferentialHashFailures|ResidencyProfilingNoise|ResidencyProfilingNoiseTrend|ResidencyProfilingNoiseProvenance|ResidencyProfilingTransaction|ResidencyProfilingProvider|ResidencyProfilingInterval|ResidencyProfilingCaptureAuthority|ResidencyLocalOverlay)$'
 ```
 
 These tests use constructed deterministic records. They do not authenticate a
@@ -344,14 +354,16 @@ The optional mutation-complete interval remains the unchanged stronger path in
 ## Later `lemond` composition
 
 Before this component can contribute to an admission candidate, later `lemond`
-work must establish the exclusive gate and queued-client behavior, own and
-advance one attempt state, retain each receipt before issuing the corresponding
+work must load and invoke this maintained procedure and its required no-target
+procedure from one reviewed source revision. It must establish the exclusive
+gate and queued-client behavior, own and advance one attempt state, retain each
+receipt before issuing the corresponding
 marker, perform live point collection and authentication, preserve workload
 and containment ownership and actor continuity, durably journal rejection and
 noise invalidation, verify cleanup, and handle cancellation and restart. It
 must supply the revised observation-contract digest and freshly produced noise
-evidence bound to this producer procedure; old immutable noise evidence is not
-relabeled. It must separately close the complete
+evidence bound to the required producer procedure; old immutable noise evidence
+is not relabeled. It must separately close the complete
 transient lifecycle envelope, host floor, cardinality, ownership/recovery,
 action-lease, and every other selector-required claim, then persist the whole
 candidate atomically. Method selection, activation, qualification, signing,

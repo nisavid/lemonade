@@ -39,15 +39,7 @@ inline constexpr std::string_view profiling_differential_covered_effect =
     "retained_gtt";
 inline constexpr std::string_view
     profiling_no_target_gtt_noise_procedure_revision_sha256 =
-        "3c5a0b66d6317cc4dd96211cd68887a7cd0949d44cf748a61d9fdc35f4df6e3c";
-
-struct ProfilingDifferentialMethodBinding {
-    std::string method_id;
-    std::string method_revision_sha256;
-    std::string constraint_id;
-    std::string constraint_revision_sha256;
-    std::string covered_effect;
-};
+        "5a7a73e909d08133ee6d8b5d3f4e27535f95107d4f04164801b6f6d14ec4c292";
 
 std::optional<ProfilingDifferentialMethodBinding>
 resolve_retained_gtt_differential_method_binding(

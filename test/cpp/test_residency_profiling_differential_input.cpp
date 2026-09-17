@@ -201,6 +201,11 @@ ProfilingDifferentialInputDraft input_draft(
         std::string(noise.trace_provenance_sha256());
     draft.identity.counter_continuity_epoch_sha256 =
         bindings.counter_continuity_epoch_sha256;
+    draft.method_binding.method_id = "differential_retained_gtt";
+    draft.method_binding.method_revision_sha256 = digest('6');
+    draft.method_binding.constraint_id = "amd.shared_gtt.retained_bytes";
+    draft.method_binding.constraint_revision_sha256 = digest('7');
+    draft.method_binding.covered_effect = "retained_gtt";
     draft.noise_validity.noise_result_checksum_sha256 =
         std::string(noise.checksum_sha256());
     draft.noise_validity.state = ProfilingNoiseValidityState::Valid;
@@ -620,6 +625,13 @@ void require_consumer_failure_contract() {
         noise, std::move(accounting_overflow),
         ProfilingDifferentialInputFreezeStatus::InvalidAccountingPartition,
         "overflowing differential accounting was accepted");
+
+    auto missing_method_binding = input_draft(trace.bindings, noise);
+    missing_method_binding.method_binding.constraint_revision_sha256.clear();
+    require_freeze_rejected(
+        noise, std::move(missing_method_binding),
+        ProfilingDifferentialInputFreezeStatus::InvalidMethodBinding,
+        "an incomplete differential method binding was accepted");
 
     auto mismatched_identity = input_draft(trace.bindings, noise);
     mismatched_identity.identity.transaction.selector

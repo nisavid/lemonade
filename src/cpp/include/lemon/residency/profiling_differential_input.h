@@ -51,8 +51,17 @@ struct ProfilingDifferentialInputIdentity {
     std::string noise_trace_provenance_sha256;
 };
 
+struct ProfilingDifferentialMethodBinding {
+    std::string method_id;
+    std::string method_revision_sha256;
+    std::string constraint_id;
+    std::string constraint_revision_sha256;
+    std::string covered_effect;
+};
+
 struct ProfilingDifferentialInputDraft {
     ProfilingDifferentialInputIdentity identity;
+    ProfilingDifferentialMethodBinding method_binding;
     ProfilingNoiseValidityBinding noise_validity;
     ProfilingDifferentialRevisionBinding revision;
     ProfilingDifferentialAccountingPartition accounting;
@@ -87,6 +96,7 @@ enum class ProfilingDifferentialInputFreezeStatus {
     EvidenceUnavailable,
     InvalidNoiseResult,
     InvalidIdentity,
+    InvalidMethodBinding,
     InvalidAccountingPartition,
     InvalidRepetitionCount,
     TraceProvenanceUnavailable,
@@ -136,6 +146,7 @@ public:
 
     const ParsedProfilingNoiseResult &noise() const noexcept;
     const ProfilingDifferentialInputIdentity &identity() const noexcept;
+    const ProfilingDifferentialMethodBinding &method_binding() const noexcept;
     const ProfilingDifferentialRevisionBinding &revision() const noexcept;
     const ProfilingDifferentialAccountingPartition &accounting() const noexcept;
     std::uint32_t calibration_repetitions() const noexcept;
