@@ -979,6 +979,8 @@ set(SOURCES_CORE
     src/cpp/server/residency/local_overlay.cpp
     src/cpp/server/residency/profiling_capture_authority.cpp
     src/cpp/server/residency/profiling_common.cpp
+    src/cpp/server/residency/profiling_differential_input.cpp
+    src/cpp/server/residency/profiling_noise.cpp
     src/cpp/server/residency/profiling_provider.cpp
     src/cpp/server/residency/profiling_transaction.cpp
     src/cpp/server/wrapped_server.cpp
@@ -3613,6 +3615,90 @@ if(BUILD_TESTING AND EXISTS "${_ROUTER_MODEL_LIFECYCLE_TEST_SRC}")
     target_link_libraries(test_router_model_lifecycle PRIVATE lemonade-server-core)
     add_cpp_ci_test(RouterModelLifecycleTest CI ON COMMAND test_router_model_lifecycle)
     set_tests_properties(RouterModelLifecycleTest PROPERTIES TIMEOUT 30)
+endif()
+
+set(_RESIDENCY_PROFILING_NOISE_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_noise.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_NOISE_TEST_SRC}")
+    add_executable(
+        test_residency_profiling_noise
+        test/cpp/test_residency_profiling_noise.cpp
+    )
+    target_link_libraries(test_residency_profiling_noise PRIVATE
+        lemonade-server-core
+    )
+    add_cpp_ci_test(
+        ResidencyProfilingNoise
+        CI ON
+        COMMAND test_residency_profiling_noise
+    )
+    set_tests_properties(
+        ResidencyProfilingNoise PROPERTIES TIMEOUT 30
+    )
+endif()
+
+set(_RESIDENCY_PROFILING_NOISE_TREND_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_noise_trend.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_NOISE_TREND_TEST_SRC}")
+    add_executable(
+        test_residency_profiling_noise_trend
+        test/cpp/test_residency_profiling_noise_trend.cpp
+    )
+    target_link_libraries(test_residency_profiling_noise_trend PRIVATE
+        lemonade-server-core
+    )
+    add_cpp_ci_test(
+        ResidencyProfilingNoiseTrend
+        CI ON
+        COMMAND test_residency_profiling_noise_trend
+    )
+    set_tests_properties(
+        ResidencyProfilingNoiseTrend PROPERTIES TIMEOUT 30
+    )
+endif()
+
+set(_RESIDENCY_PROFILING_NOISE_PROVENANCE_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_noise_provenance.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_NOISE_PROVENANCE_TEST_SRC}")
+    add_executable(
+        test_residency_profiling_noise_provenance
+        test/cpp/test_residency_profiling_noise_provenance.cpp
+    )
+    target_link_libraries(test_residency_profiling_noise_provenance PRIVATE
+        lemonade-server-core
+    )
+    add_cpp_ci_test(
+        ResidencyProfilingNoiseProvenance
+        CI ON
+        COMMAND test_residency_profiling_noise_provenance
+    )
+    set_tests_properties(
+        ResidencyProfilingNoiseProvenance PROPERTIES TIMEOUT 30
+    )
+endif()
+
+set(_RESIDENCY_PROFILING_DIFFERENTIAL_INPUT_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_differential_input.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_DIFFERENTIAL_INPUT_TEST_SRC}")
+    add_executable(
+        test_residency_profiling_differential_input
+        test/cpp/test_residency_profiling_differential_input.cpp
+    )
+    target_link_libraries(test_residency_profiling_differential_input PRIVATE
+        lemonade-server-core
+    )
+    add_cpp_ci_test(
+        ResidencyProfilingDifferentialInput
+        CI ON
+        COMMAND test_residency_profiling_differential_input
+    )
+    set_tests_properties(
+        ResidencyProfilingDifferentialInput PROPERTIES TIMEOUT 30
+    )
 endif()
 
 set(_RESIDENCY_PROFILING_TRANSACTION_TEST_SRC

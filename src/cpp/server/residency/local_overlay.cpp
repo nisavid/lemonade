@@ -2037,6 +2037,40 @@ ParsedOverlayActivationRootResult rejected_root(const OverlayFailure &failure) {
 
 } // namespace
 
+bool CanonicalLocalOverlaySelectorResult::accepted() const noexcept {
+    return status == OverlayContractStatus::Accepted &&
+           selector.has_value();
+}
+
+CanonicalLocalOverlaySelectorResult
+canonicalize_local_overlay_selector(
+    LocalOverlaySelectorIdentity selector) {
+    try {
+        normalize_selector(selector);
+        auto selector_sha256 = selector_digest(selector);
+        return {
+            OverlayContractStatus::Accepted,
+            {},
+            std::move(selector),
+            std::move(selector_sha256),
+        };
+    } catch (const OverlayFailure &failure) {
+        return {
+            failure.status(),
+            bounded_diagnostic(failure.what()),
+            std::nullopt,
+            {},
+        };
+    } catch (...) {
+        return {
+            OverlayContractStatus::InvalidValue,
+            "selector validation failed closed",
+            std::nullopt,
+            {},
+        };
+    }
+}
+
 ParsedProfilingInputEnvelope::ParsedProfilingInputEnvelope(
     ProfilingInputEnvelopeDraft draft, std::string selector_sha256,
     std::string checksum_sha256, std::string canonical_bytes)
