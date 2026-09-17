@@ -39,6 +39,8 @@ bool bindings_equal_except_background(
            left.counter_source_id == right.counter_source_id &&
            left.counter_source_revision_sha256 ==
                right.counter_source_revision_sha256 &&
+           left.counter_continuity_epoch_sha256 ==
+               right.counter_continuity_epoch_sha256 &&
            left.campaign_contract_sha256 ==
                right.campaign_contract_sha256 &&
            left.procedure_revision_sha256 ==
@@ -121,6 +123,8 @@ bool input_identity_is_valid(
            digest_is_valid(
                identity.target_containment_identity_sha256) &&
            digest_is_valid(identity.counter_continuity_epoch_sha256) &&
+           identity.counter_continuity_epoch_sha256 ==
+               bindings.counter_continuity_epoch_sha256 &&
            digest_is_valid(identity.safety_contract_sha256);
 }
 
@@ -199,6 +203,10 @@ std::optional<std::string> frozen_input_digest(
     append_string(bytes, draft.identity.safety_contract_sha256);
     append_string(bytes,
                   draft.identity.noise_trace_provenance_sha256);
+    append_string(
+        bytes, draft.noise_validity.noise_result_checksum_sha256);
+    append_u64(bytes,
+               static_cast<std::uint64_t>(draft.noise_validity.state));
     append_string(bytes, draft.revision.calibration_revision_sha256);
     append_string(bytes, draft.revision.attempt_receipt_sha256);
     append_u64(bytes,
@@ -278,13 +286,20 @@ bool FrozenProfilingDifferentialInput::revision_rejected() const noexcept {
     return revision_rejected_;
 }
 
+bool
+FrozenProfilingDifferentialInput::noise_result_invalidated() const noexcept {
+    return noise_result_invalidated_;
+}
+
 bool ProfilingDifferentialInputFreezeResult::accepted() const noexcept {
     return status == ProfilingDifferentialInputFreezeStatus::Accepted &&
            input.has_value();
 }
 
 bool ProfilingDifferentialRevalidationResult::accepted() const noexcept {
-    return status == ProfilingDifferentialRevalidationStatus::Accepted;
+    return status == ProfilingDifferentialRevalidationStatus::Accepted &&
+           disposition ==
+               ProfilingDifferentialRevalidationDisposition::Continue;
 }
 
 ProfilingDifferentialInputFreezeResult
@@ -297,6 +312,23 @@ freeze_profiling_differential_input(
                 ProfilingDifferentialInputFreezeStatus::
                     InvalidNoiseResult,
                 "canonical no-target noise result is invalid");
+        }
+        if (!digest_is_valid(
+                draft.noise_validity.noise_result_checksum_sha256) ||
+            draft.noise_validity.noise_result_checksum_sha256 !=
+                noise.checksum_sha256()) {
+            return freeze_failure(
+                ProfilingDifferentialInputFreezeStatus::
+                    NoiseValidityMismatch,
+                "noise validity binding does not match the immutable "
+                "noise result");
+        }
+        if (draft.noise_validity.state !=
+            ProfilingNoiseValidityState::Valid) {
+            return freeze_failure(
+                ProfilingDifferentialInputFreezeStatus::
+                    NoiseResultInvalidated,
+                "no-target noise result is invalidated");
         }
 
         auto canonical_selector =
@@ -399,10 +431,17 @@ revalidate_profiling_differential_input(
     const ProfilingDifferentialRevalidationObservation &observation) {
     auto reject =
         [&](ProfilingDifferentialRevalidationStatus status,
+            ProfilingDifferentialRevalidationDisposition disposition,
             std::string diagnostic) {
             input.revision_rejected_ = true;
+            if (disposition ==
+                ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult) {
+                input.noise_result_invalidated_ = true;
+            }
             ProfilingDifferentialRevalidationResult result;
             result.status = status;
+            result.disposition = disposition;
             result.diagnostic = std::move(diagnostic);
             return result;
         };
@@ -412,17 +451,26 @@ revalidate_profiling_differential_input(
             return reject(
                 ProfilingDifferentialRevalidationStatus::
                     RevisionRejected,
+                input.noise_result_invalidated_
+                    ? ProfilingDifferentialRevalidationDisposition::
+                          InvalidateNoiseResult
+                    : ProfilingDifferentialRevalidationDisposition::
+                          RejectRevision,
                 "calibration revision is terminally rejected");
         }
         if (observation.counter_reset_detected) {
             return reject(
                 ProfilingDifferentialRevalidationStatus::CounterReset,
+                ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult,
                 "global GTT counter reset was detected");
         }
         if (observation.counter_discontinuity_detected) {
             return reject(
                 ProfilingDifferentialRevalidationStatus::
                     CounterDiscontinuity,
+                ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult,
                 "global GTT counter discontinuity was detected");
         }
         if (!digest_is_valid(
@@ -432,6 +480,8 @@ revalidate_profiling_differential_input(
             return reject(
                 ProfilingDifferentialRevalidationStatus::
                     NoiseResultMismatch,
+                ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult,
                 "no-target noise result binding changed");
         }
         if (!digest_is_valid(
@@ -442,6 +492,8 @@ revalidate_profiling_differential_input(
             return reject(
                 ProfilingDifferentialRevalidationStatus::
                     CounterDiscontinuity,
+                ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult,
                 "global GTT counter continuity binding changed");
         }
 
@@ -451,6 +503,8 @@ revalidate_profiling_differential_input(
             return reject(
                 ProfilingDifferentialRevalidationStatus::
                     BindingMismatch,
+                ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult,
                 "boot-scoped no-target binding changed");
         }
         if (observation.observed_bindings
@@ -460,6 +514,8 @@ revalidate_profiling_differential_input(
             return reject(
                 ProfilingDifferentialRevalidationStatus::
                     BackgroundDrift,
+                ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult,
                 "non-target GTT client inventory changed");
         }
         if (observation.observed_non_target_gtt_range_bytes >
@@ -467,6 +523,8 @@ revalidate_profiling_differential_input(
             return reject(
                 ProfilingDifferentialRevalidationStatus::
                     ExcessVariation,
+                ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult,
                 "non-target GTT variation exceeds the frozen bound");
         }
         if (observation.target_activity.has_value()) {
@@ -483,6 +541,8 @@ revalidate_profiling_differential_input(
                 return reject(
                     ProfilingDifferentialRevalidationStatus::
                         TargetMismatch,
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision,
                     "observed target activity is not the frozen "
                     "contained target");
             }
@@ -494,6 +554,8 @@ revalidate_profiling_differential_input(
             return reject(
                 ProfilingDifferentialRevalidationStatus::
                     NonIncreasingObservation,
+                ProfilingDifferentialRevalidationDisposition::
+                    RejectRevision,
                 "revalidation observation is not newer than the "
                 "last accepted observation");
         }
@@ -502,6 +564,8 @@ revalidate_profiling_differential_input(
         ProfilingDifferentialRevalidationResult result;
         result.status =
             ProfilingDifferentialRevalidationStatus::Accepted;
+        result.disposition =
+            ProfilingDifferentialRevalidationDisposition::Continue;
         result.diagnostic =
             "frozen differential input remains valid";
         return result;
@@ -509,6 +573,11 @@ revalidate_profiling_differential_input(
         return reject(
             ProfilingDifferentialRevalidationStatus::
                 RevisionRejected,
+            input.noise_result_invalidated_
+                ? ProfilingDifferentialRevalidationDisposition::
+                      InvalidateNoiseResult
+                : ProfilingDifferentialRevalidationDisposition::
+                      RejectRevision,
             "differential profiling input revalidation failed");
     }
 }

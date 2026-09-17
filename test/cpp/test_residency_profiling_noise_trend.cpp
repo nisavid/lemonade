@@ -32,6 +32,7 @@ ProfilingNoiseBindings bindings() {
     result.driver_identity_sha256 = digest('5');
     result.counter_source_id = "linux-amd-mem-info-gtt-used";
     result.counter_source_revision_sha256 = digest('6');
+    result.counter_continuity_epoch_sha256 = digest('a');
     result.campaign_contract_sha256 = digest('7');
     result.procedure_revision_sha256 = digest('8');
     result.background_inventory_sha256 = digest('9');

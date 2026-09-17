@@ -100,6 +100,7 @@ ProfilingNoiseBindings noise_bindings() {
     bindings.driver_identity_sha256 = digest('5');
     bindings.counter_source_id = "linux-amd-mem-info-gtt-used";
     bindings.counter_source_revision_sha256 = digest('6');
+    bindings.counter_continuity_epoch_sha256 = digest('8');
     bindings.campaign_contract_sha256 = digest('7');
     bindings.procedure_revision_sha256 = digest('8');
     bindings.background_inventory_sha256 = digest('9');
@@ -195,10 +196,14 @@ ProfilingDifferentialInputDraft input_draft(
         canonical_selector_sha256(draft.identity.transaction);
     draft.identity.target_client_identity_sha256 = digest('6');
     draft.identity.target_containment_identity_sha256 = digest('7');
-    draft.identity.counter_continuity_epoch_sha256 = digest('8');
     draft.identity.safety_contract_sha256 = digest('9');
     draft.identity.noise_trace_provenance_sha256 =
         std::string(noise.trace_provenance_sha256());
+    draft.identity.counter_continuity_epoch_sha256 =
+        bindings.counter_continuity_epoch_sha256;
+    draft.noise_validity.noise_result_checksum_sha256 =
+        std::string(noise.checksum_sha256());
+    draft.noise_validity.state = ProfilingNoiseValidityState::Valid;
     draft.revision.calibration_revision_sha256 = digest('b');
     draft.revision.attempt_receipt_sha256 = digest('c');
     draft.revision.state = ProfilingDifferentialRevisionState::Fresh;
@@ -253,11 +258,17 @@ void require_revalidation_rejected(
     FrozenProfilingDifferentialInput &input,
     ProfilingDifferentialRevalidationObservation observation,
     ProfilingDifferentialRevalidationStatus expected,
+    ProfilingDifferentialRevalidationDisposition expected_disposition,
     const std::string &message) {
     auto rejected =
         revalidate_profiling_differential_input(input, observation);
     require(!rejected.accepted() && rejected.status == expected &&
-                input.revision_rejected(),
+                rejected.disposition == expected_disposition &&
+                input.revision_rejected() &&
+                input.noise_result_invalidated() ==
+                    (expected_disposition ==
+                     ProfilingDifferentialRevalidationDisposition::
+                         InvalidateNoiseResult),
             message);
 }
 
@@ -351,8 +362,11 @@ void require_input_freezes_and_revalidates_before_repetitions() {
         observation_for(input, trace.exact_end + 1h);
     auto baseline_check =
         revalidate_profiling_differential_input(input, baseline);
-    require(baseline_check.accepted(),
-            "matching no-target bindings do not begin a repetition");
+    require(
+        baseline_check.accepted() &&
+            baseline_check.disposition ==
+                ProfilingDifferentialRevalidationDisposition::Continue,
+        "matching no-target bindings did not continue the revision");
 
     auto loaded =
         observation_for(input, trace.exact_end + std::chrono::hours(24 * 30));
@@ -361,25 +375,34 @@ void require_input_freezes_and_revalidates_before_repetitions() {
         input.identity().target_containment_identity_sha256};
     auto loaded_check =
         revalidate_profiling_differential_input(input, loaded);
-    require(loaded_check.accepted(),
+    require(loaded_check.accepted() &&
+                loaded_check.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::Continue,
             "elapsed time or the declared contained target invalidated the "
             "input");
 
-    auto unrelated = loaded;
-    unrelated.target_activity->client_identity_sha256 = digest('1');
-    auto unrelated_check =
-        revalidate_profiling_differential_input(input, unrelated);
-    require(!unrelated_check.accepted() &&
-                unrelated_check.status ==
+    auto mismatched_target = loaded;
+    mismatched_target.target_activity->client_identity_sha256 = digest('1');
+    auto target_check =
+        revalidate_profiling_differential_input(input, mismatched_target);
+    require(!target_check.accepted() &&
+                target_check.status ==
                     ProfilingDifferentialRevalidationStatus::TargetMismatch &&
-                input.revision_rejected(),
-            "unrelated GTT client drift did not reject the revision");
+                target_check.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision &&
+                input.revision_rejected() &&
+                !input.noise_result_invalidated(),
+            "mismatched declared target did not reject the revision");
 
     auto same_revision_retry =
         revalidate_profiling_differential_input(input, loaded);
     require(!same_revision_retry.accepted() &&
                 same_revision_retry.status ==
-                    ProfilingDifferentialRevalidationStatus::RevisionRejected,
+                    ProfilingDifferentialRevalidationStatus::RevisionRejected &&
+                same_revision_retry.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision,
             "a rejected revision was allowed to refit");
 
     auto rejected_draft =
@@ -435,6 +458,14 @@ void require_consumer_failure_contract() {
         ProfilingDifferentialInputFreezeStatus::InvalidIdentity,
         "a target transaction bound to another device was accepted");
 
+    auto mismatched_counter_epoch = input_draft(trace.bindings, noise);
+    mismatched_counter_epoch.identity.counter_continuity_epoch_sha256 =
+        digest('a');
+    require_freeze_rejected(
+        noise, std::move(mismatched_counter_epoch),
+        ProfilingDifferentialInputFreezeStatus::InvalidIdentity,
+        "a differential input from another counter epoch was accepted");
+
     auto unrelated_constraint = input_draft(trace.bindings, noise);
     unrelated_constraint.identity.transaction.selector.catalog_selector
         .constraints = {ConstraintKind::ModelTypePool};
@@ -468,6 +499,7 @@ void require_consumer_failure_contract() {
     require_revalidation_rejected(
         reset_input, std::move(reset),
         ProfilingDifferentialRevalidationStatus::CounterReset,
+        ProfilingDifferentialRevalidationDisposition::InvalidateNoiseResult,
         "a global GTT counter reset did not invalidate the input");
 
     auto discontinuity_input = freeze_valid_input(noise, trace.bindings);
@@ -477,6 +509,7 @@ void require_consumer_failure_contract() {
     require_revalidation_rejected(
         discontinuity_input, std::move(discontinuity),
         ProfilingDifferentialRevalidationStatus::CounterDiscontinuity,
+        ProfilingDifferentialRevalidationDisposition::InvalidateNoiseResult,
         "a global GTT counter discontinuity did not invalidate the input");
 
     auto reboot_input = freeze_valid_input(noise, trace.bindings);
@@ -485,6 +518,7 @@ void require_consumer_failure_contract() {
     require_revalidation_rejected(
         reboot_input, std::move(reboot),
         ProfilingDifferentialRevalidationStatus::BindingMismatch,
+        ProfilingDifferentialRevalidationDisposition::InvalidateNoiseResult,
         "a changed boot identity did not invalidate the input");
 
     auto background_input = freeze_valid_input(noise, trace.bindings);
@@ -495,6 +529,7 @@ void require_consumer_failure_contract() {
     require_revalidation_rejected(
         background_input, std::move(background),
         ProfilingDifferentialRevalidationStatus::BackgroundDrift,
+        ProfilingDifferentialRevalidationDisposition::InvalidateNoiseResult,
         "changed non-target background inventory did not invalidate the "
         "input");
 
@@ -506,6 +541,7 @@ void require_consumer_failure_contract() {
     require_revalidation_rejected(
         variation_input, std::move(variation),
         ProfilingDifferentialRevalidationStatus::ExcessVariation,
+        ProfilingDifferentialRevalidationDisposition::InvalidateNoiseResult,
         "non-target variation above N_gtt did not invalidate the input");
 
     auto checksum_input = freeze_valid_input(noise, trace.bindings);
@@ -520,6 +556,7 @@ void require_consumer_failure_contract() {
     require_revalidation_rejected(
         checksum_input, std::move(checksum),
         ProfilingDifferentialRevalidationStatus::NoiseResultMismatch,
+        ProfilingDifferentialRevalidationDisposition::InvalidateNoiseResult,
         "a changed immutable noise-result checksum did not invalidate the "
         "input");
 
@@ -533,6 +570,7 @@ void require_consumer_failure_contract() {
     require_revalidation_rejected(
         repeated_input, repeated_observation,
         ProfilingDifferentialRevalidationStatus::NonIncreasingObservation,
+        ProfilingDifferentialRevalidationDisposition::RejectRevision,
         "a repeated revalidation observation was accepted");
 
     auto decreasing_input = freeze_valid_input(noise, trace.bindings);
@@ -547,7 +585,99 @@ void require_consumer_failure_contract() {
     require_revalidation_rejected(
         decreasing_input, std::move(older_observation),
         ProfilingDifferentialRevalidationStatus::NonIncreasingObservation,
+        ProfilingDifferentialRevalidationDisposition::RejectRevision,
         "an older revalidation observation was accepted");
+}
+
+void require_noise_validity_across_calibration_revisions() {
+    auto trace = stable_noise_trace();
+    auto produced = produce_no_target_gtt_noise(trace);
+    require(produced.accepted(),
+            "noise-validity fixture did not produce canonical noise");
+    const auto &noise = *produced.result;
+
+    auto reset_input = freeze_valid_input(noise, trace.bindings);
+    auto reset = observation_for(reset_input, trace.exact_end + 9h);
+    reset.counter_reset_detected = true;
+    auto reset_result =
+        revalidate_profiling_differential_input(reset_input, reset);
+    require(!reset_result.accepted() &&
+                reset_result.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        InvalidateNoiseResult,
+            "counter reset did not require fresh noise");
+
+    auto after_reset = input_draft(trace.bindings, noise);
+    after_reset.revision.calibration_revision_sha256 = digest('a');
+    after_reset.revision.attempt_receipt_sha256 = digest('0');
+    after_reset.identity.counter_continuity_epoch_sha256 = digest('a');
+    after_reset.noise_validity.state =
+        ProfilingNoiseValidityState::Invalidated;
+    require_freeze_rejected(
+        noise, std::move(after_reset),
+        ProfilingDifferentialInputFreezeStatus::NoiseResultInvalidated,
+        "a fresh calibration revision revived reset-invalidated noise");
+
+    auto variation_input = freeze_valid_input(noise, trace.bindings);
+    auto variation =
+        observation_for(variation_input, trace.exact_end + 10h);
+    variation.observed_non_target_gtt_range_bytes =
+        noise.n_gtt_bytes() + 1;
+    auto variation_result = revalidate_profiling_differential_input(
+        variation_input, variation);
+    require(!variation_result.accepted() &&
+                variation_result.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        InvalidateNoiseResult,
+            "background range breach did not require fresh noise");
+
+    auto after_variation = input_draft(trace.bindings, noise);
+    after_variation.revision.calibration_revision_sha256 = digest('d');
+    after_variation.revision.attempt_receipt_sha256 = digest('e');
+    after_variation.noise_validity.state =
+        ProfilingNoiseValidityState::Invalidated;
+    require_freeze_rejected(
+        noise, std::move(after_variation),
+        ProfilingDifferentialInputFreezeStatus::NoiseResultInvalidated,
+        "a fresh calibration revision revived range-invalidated noise");
+
+    auto wrong_validity_key = input_draft(trace.bindings, noise);
+    wrong_validity_key.noise_validity.noise_result_checksum_sha256 =
+        digest('0');
+    require_freeze_rejected(
+        noise, std::move(wrong_validity_key),
+        ProfilingDifferentialInputFreezeStatus::NoiseValidityMismatch,
+        "noise validity for another result was accepted");
+
+    auto replacement_trace = stable_noise_trace();
+    replacement_trace.bindings.counter_continuity_epoch_sha256 = digest('a');
+    for (auto &reading : replacement_trace.readings) {
+        reading.observed_bindings = replacement_trace.bindings;
+    }
+    auto replacement = produce_no_target_gtt_noise(replacement_trace);
+    require(replacement.accepted() &&
+                replacement.result->checksum_sha256() !=
+                    noise.checksum_sha256(),
+            "fresh-trace replacement did not bind the new counter epoch");
+    auto replacement_frozen = freeze_profiling_differential_input(
+        *replacement.result,
+        input_draft(replacement_trace.bindings, *replacement.result));
+    require(replacement_frozen.accepted(),
+            "fresh noise from the new counter epoch did not freeze");
+
+    auto uninterrupted = freeze_valid_input(noise, trace.bindings);
+    auto matching = observation_for(uninterrupted, trace.exact_end + 11h);
+    auto matching_result = revalidate_profiling_differential_input(
+        uninterrupted, matching);
+    require(matching_result.accepted(),
+            "matching same-boot observation invalidated noise");
+    auto later_revision = input_draft(trace.bindings, noise);
+    later_revision.revision.calibration_revision_sha256 = digest('1');
+    later_revision.revision.attempt_receipt_sha256 = digest('2');
+    auto reused = freeze_profiling_differential_input(
+        noise, std::move(later_revision));
+    require(reused.accepted(),
+            "uninterrupted same-boot noise did not serve a later revision");
 }
 
 } // namespace
@@ -557,6 +687,7 @@ int main() {
         require_parser_rejects_bound_below_uncertainty();
         require_input_freezes_and_revalidates_before_repetitions();
         require_consumer_failure_contract();
+        require_noise_validity_across_calibration_revisions();
         std::cout << "PASS: residency profiling differential input tests\n";
         return 0;
     } catch (const std::exception &error) {

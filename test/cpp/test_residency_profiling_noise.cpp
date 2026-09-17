@@ -38,6 +38,7 @@ ProfilingNoiseBindings bindings() {
     result.driver_identity_sha256 = digest('5');
     result.counter_source_id = "linux-amd-mem-info-gtt-used";
     result.counter_source_revision_sha256 = digest('6');
+    result.counter_continuity_epoch_sha256 = digest('a');
     result.campaign_contract_sha256 = digest('7');
     result.procedure_revision_sha256 = digest('8');
     result.background_inventory_sha256 = digest('9');
@@ -56,6 +57,8 @@ bool bindings_equal(const ProfilingNoiseBindings &left,
            left.counter_source_id == right.counter_source_id &&
            left.counter_source_revision_sha256 ==
                right.counter_source_revision_sha256 &&
+           left.counter_continuity_epoch_sha256 ==
+               right.counter_continuity_epoch_sha256 &&
            left.campaign_contract_sha256 == right.campaign_contract_sha256 &&
            left.procedure_revision_sha256 == right.procedure_revision_sha256 &&
            left.background_inventory_sha256 ==
@@ -238,6 +241,37 @@ bool parse_rejects(std::string_view bytes,
     const auto parsed = parse_profiling_noise_result(bytes);
     return !parsed.accepted() && parsed.status == status &&
            !parsed.result.has_value();
+}
+
+bool counter_continuity_epoch_contract_is_enforced(
+    const ParsedProfilingNoiseResult &first) {
+    const auto first_epoch = digest('a');
+    const auto second_epoch = digest('b');
+    const auto parsed = parse_profiling_noise_result(first.canonical_bytes());
+    if (!parsed.accepted() ||
+        parsed.result->bindings().counter_continuity_epoch_sha256 !=
+            first_epoch) {
+        std::cerr << "FAIL: canonical parsing lost the trace-era counter "
+                     "continuity epoch\n";
+        return false;
+    }
+
+    auto second_trace = stable_trace();
+    second_trace.bindings.counter_continuity_epoch_sha256 = second_epoch;
+    for (auto &reading : second_trace.readings) {
+        reading.observed_bindings = second_trace.bindings;
+    }
+    const auto second = produce_no_target_gtt_noise(second_trace);
+    if (!second.accepted() ||
+        first.bindings_sha256() == second.result->bindings_sha256() ||
+        first.checksum_sha256() == second.result->checksum_sha256() ||
+        first.trace_provenance_sha256() ==
+            second.result->trace_provenance_sha256()) {
+        std::cerr << "FAIL: the trace-era counter continuity epoch is not "
+                     "integrity-bound\n";
+        return false;
+    }
+    return true;
 }
 
 bool invalid_trace_contract_is_enforced() {
@@ -496,6 +530,9 @@ int main() {
     if (produced.result->n_gtt_bytes() != 72) {
         std::cerr << "FAIL: N_gtt includes the largest window range and "
                      "read/skew uncertainty exactly once\n";
+        return 1;
+    }
+    if (!counter_continuity_epoch_contract_is_enforced(*produced.result)) {
         return 1;
     }
 

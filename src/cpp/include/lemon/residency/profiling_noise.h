@@ -28,6 +28,7 @@ struct ProfilingNoiseBindings {
     std::string driver_identity_sha256;
     std::string counter_source_id;
     std::string counter_source_revision_sha256;
+    std::string counter_continuity_epoch_sha256;
     std::string campaign_contract_sha256;
     std::string procedure_revision_sha256;
     std::string background_inventory_sha256;

@@ -23,6 +23,17 @@ struct ProfilingDifferentialRevisionBinding {
         ProfilingDifferentialRevisionState::PreviouslyRejected;
 };
 
+enum class ProfilingNoiseValidityState {
+    Valid,
+    Invalidated,
+};
+
+struct ProfilingNoiseValidityBinding {
+    std::string noise_result_checksum_sha256;
+    ProfilingNoiseValidityState state =
+        ProfilingNoiseValidityState::Invalidated;
+};
+
 struct ProfilingDifferentialAccountingPartition {
     std::uint64_t x_gtt_bytes = 0;
     std::uint64_t m_gtt_bytes = 0;
@@ -42,6 +53,7 @@ struct ProfilingDifferentialInputIdentity {
 
 struct ProfilingDifferentialInputDraft {
     ProfilingDifferentialInputIdentity identity;
+    ProfilingNoiseValidityBinding noise_validity;
     ProfilingDifferentialRevisionBinding revision;
     ProfilingDifferentialAccountingPartition accounting;
     std::uint32_t calibration_repetitions = 0;
@@ -74,6 +86,8 @@ enum class ProfilingDifferentialInputFreezeStatus {
     InvalidRepetitionCount,
     TraceProvenanceUnavailable,
     TraceProvenanceMismatch,
+    NoiseValidityMismatch,
+    NoiseResultInvalidated,
     RevisionAlreadyRejected,
     DigestUnavailable,
 };
@@ -89,6 +103,12 @@ enum class ProfilingDifferentialRevalidationStatus {
     ExcessVariation,
     TargetMismatch,
     NonIncreasingObservation,
+};
+
+enum class ProfilingDifferentialRevalidationDisposition {
+    Continue,
+    RejectRevision,
+    InvalidateNoiseResult,
 };
 
 struct ProfilingDifferentialInputFreezeResult;
@@ -114,6 +134,7 @@ public:
     std::uint32_t validation_repetitions() const noexcept;
     std::string_view frozen_input_sha256() const noexcept;
     bool revision_rejected() const noexcept;
+    bool noise_result_invalidated() const noexcept;
 
 private:
     FrozenProfilingDifferentialInput(
@@ -125,6 +146,7 @@ private:
     ProfilingDifferentialInputDraft draft_;
     std::string frozen_input_sha256_;
     bool revision_rejected_ = false;
+    bool noise_result_invalidated_ = false;
     std::optional<std::chrono::steady_clock::time_point>
         last_accepted_revalidation_at_;
 
@@ -150,6 +172,8 @@ struct ProfilingDifferentialInputFreezeResult {
 struct ProfilingDifferentialRevalidationResult {
     ProfilingDifferentialRevalidationStatus status =
         ProfilingDifferentialRevalidationStatus::RevisionRejected;
+    ProfilingDifferentialRevalidationDisposition disposition =
+        ProfilingDifferentialRevalidationDisposition::RejectRevision;
     std::string diagnostic;
 
     bool accepted() const noexcept;

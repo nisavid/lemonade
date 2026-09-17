@@ -68,6 +68,7 @@ bool bindings_are_valid(const ProfilingNoiseBindings &bindings) noexcept {
            digest_is_valid(bindings.driver_identity_sha256) &&
            identifier_is_valid(bindings.counter_source_id) &&
            digest_is_valid(bindings.counter_source_revision_sha256) &&
+           digest_is_valid(bindings.counter_continuity_epoch_sha256) &&
            digest_is_valid(bindings.campaign_contract_sha256) &&
            digest_is_valid(bindings.procedure_revision_sha256) &&
            digest_is_valid(bindings.background_inventory_sha256);
@@ -102,6 +103,8 @@ void require_valid_bindings(const ProfilingNoiseBindings &bindings) {
     require_identifier(bindings.counter_source_id, "counter source ID");
     require_digest(bindings.counter_source_revision_sha256,
                    "counter source revision digest");
+    require_digest(bindings.counter_continuity_epoch_sha256,
+                   "counter continuity epoch digest");
     require_digest(bindings.campaign_contract_sha256,
                    "campaign contract digest");
     require_digest(bindings.procedure_revision_sha256,
@@ -122,6 +125,8 @@ bool bindings_equal(const ProfilingNoiseBindings &left,
            left.counter_source_id == right.counter_source_id &&
            left.counter_source_revision_sha256 ==
                right.counter_source_revision_sha256 &&
+           left.counter_continuity_epoch_sha256 ==
+               right.counter_continuity_epoch_sha256 &&
            left.campaign_contract_sha256 == right.campaign_contract_sha256 &&
            left.procedure_revision_sha256 == right.procedure_revision_sha256 &&
            left.background_inventory_sha256 ==
@@ -134,6 +139,8 @@ json bindings_document(const ProfilingNoiseBindings &bindings) {
          bindings.background_inventory_sha256},
         {"boot_id_sha256", bindings.boot_id_sha256},
         {"campaign_contract_sha256", bindings.campaign_contract_sha256},
+        {"counter_continuity_epoch_sha256",
+         bindings.counter_continuity_epoch_sha256},
         {"counter_source_id", bindings.counter_source_id},
         {"counter_source_revision_sha256",
          bindings.counter_source_revision_sha256},
@@ -288,7 +295,8 @@ ProfilingNoiseBindings parse_bindings(const json &value) {
     require_exact_keys(
         value,
         {"background_inventory_sha256", "boot_id_sha256",
-         "campaign_contract_sha256", "counter_source_id",
+         "campaign_contract_sha256", "counter_continuity_epoch_sha256",
+         "counter_source_id",
          "counter_source_revision_sha256", "deployment_epoch_sha256",
          "deployment_id", "device_identity_sha256",
          "driver_identity_sha256", "kernel_identity_sha256",
@@ -304,6 +312,9 @@ ProfilingNoiseBindings parse_bindings(const json &value) {
     bindings.campaign_contract_sha256 = require_string(
         required(value, "campaign_contract_sha256"),
         "campaign contract digest");
+    bindings.counter_continuity_epoch_sha256 = require_string(
+        required(value, "counter_continuity_epoch_sha256"),
+        "counter continuity epoch digest");
     bindings.counter_source_id = require_string(
         required(value, "counter_source_id"), "counter source ID");
     bindings.counter_source_revision_sha256 = require_string(
