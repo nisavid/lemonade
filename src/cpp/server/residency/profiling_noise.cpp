@@ -424,6 +424,10 @@ parse_profiling_noise_result(std::string_view bytes) {
         const auto read_skew_uncertainty_bytes = require_u64(
             required(document, "read_skew_uncertainty_bytes"),
             "read/skew uncertainty");
+        if (n_gtt_bytes < read_skew_uncertainty_bytes) {
+            reject_parse(ProfilingNoiseParseStatus::InvalidValue,
+                         "N_gtt is below read/skew uncertainty");
+        }
         require_digest(trace_provenance_sha256, "trace provenance digest");
 
         const auto binding_payload = bindings_document(bindings);

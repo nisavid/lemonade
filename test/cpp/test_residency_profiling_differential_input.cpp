@@ -1,11 +1,16 @@
 #include "lemon/residency/profiling_differential_input.h"
 
+#include <mbedtls/md.h>
+#include <nlohmann/json.hpp>
+
+#include <array>
 #include <chrono>
 #include <iostream>
 #include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -20,6 +25,50 @@ void require(bool condition, const std::string &message) {
 
 std::string digest(char value) {
     return std::string(64, value);
+}
+
+std::string raw_sha256(std::string_view bytes) {
+    const auto *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (info == nullptr) throw std::runtime_error("SHA-256 is unavailable");
+
+    mbedtls_md_context_t context;
+    mbedtls_md_init(&context);
+    std::array<unsigned char, 32> output{};
+    const bool failed =
+        mbedtls_md_setup(&context, info, 0) != 0 ||
+        mbedtls_md_starts(&context) != 0 ||
+        mbedtls_md_update(
+            &context,
+            reinterpret_cast<const unsigned char *>(bytes.data()),
+            bytes.size()) != 0 ||
+        mbedtls_md_finish(&context, output.data()) != 0;
+    mbedtls_md_free(&context);
+    if (failed) throw std::runtime_error("SHA-256 failed");
+
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(64);
+    for (const auto byte : output) {
+        result.push_back(hex[(byte >> 4) & 0x0f]);
+        result.push_back(hex[byte & 0x0f]);
+    }
+    return result;
+}
+
+std::string canonical_noise_result_with_n_gtt(
+    const ParsedProfilingNoiseResult &result,
+    std::uint64_t n_gtt_bytes) {
+    auto document = nlohmann::json::parse(
+        result.canonical_bytes().begin(), result.canonical_bytes().end());
+    document.erase("checksum_sha256");
+    document["n_gtt_bytes"] = n_gtt_bytes;
+
+    constexpr char domain[] =
+        "lemonade.residency.profiling-noise-result/v1\0";
+    std::string checksummed_bytes(domain, sizeof(domain) - 1);
+    checksummed_bytes += document.dump();
+    document["checksum_sha256"] = raw_sha256(checksummed_bytes);
+    return document.dump();
 }
 
 template <typename Result, typename = void>
@@ -212,6 +261,29 @@ void require_revalidation_rejected(
             message);
 }
 
+void require_parser_rejects_bound_below_uncertainty() {
+    auto trace = stable_noise_trace();
+    auto produced = produce_no_target_gtt_noise(trace);
+    require(produced.accepted(),
+            "parser-to-freeze fixture did not produce canonical noise");
+
+    const auto invalid_bytes = canonical_noise_result_with_n_gtt(
+        *produced.result, trace.read_skew_uncertainty_bytes - 1);
+    auto parsed = parse_profiling_noise_result(invalid_bytes);
+    if (parsed.accepted()) {
+        auto frozen = freeze_profiling_differential_input(
+            *parsed.result, input_draft(trace.bindings, *parsed.result));
+        require(!frozen.accepted(),
+                "canonical N_gtt below read/skew uncertainty parsed and "
+                "froze");
+    }
+    require(!parsed.accepted() &&
+                parsed.status == ProfilingNoiseParseStatus::InvalidValue &&
+                !parsed.result.has_value(),
+            "canonical N_gtt below read/skew uncertainty was not rejected "
+            "semantically");
+}
+
 void require_input_freezes_and_revalidates_before_repetitions() {
     auto trace = stable_noise_trace();
     auto produced = produce_no_target_gtt_noise(trace);
@@ -363,6 +435,17 @@ void require_consumer_failure_contract() {
         ProfilingDifferentialInputFreezeStatus::InvalidIdentity,
         "a target transaction bound to another device was accepted");
 
+    auto unrelated_constraint = input_draft(trace.bindings, noise);
+    unrelated_constraint.identity.transaction.selector.catalog_selector
+        .constraints = {ConstraintKind::ModelTypePool};
+    unrelated_constraint.identity.transaction.selector_sha256 =
+        canonical_selector_sha256(
+            unrelated_constraint.identity.transaction);
+    require_freeze_rejected(
+        noise, std::move(unrelated_constraint),
+        ProfilingDifferentialInputFreezeStatus::InvalidIdentity,
+        "a selector without the shared-GTT constraint was accepted");
+
     auto invalid_closed_value = input_draft(trace.bindings, noise);
     invalid_closed_value.identity.transaction.selector.catalog_selector
         .operation_kind = static_cast<OperationKind>(255);
@@ -471,6 +554,7 @@ void require_consumer_failure_contract() {
 
 int main() {
     try {
+        require_parser_rejects_bound_below_uncertainty();
         require_input_freezes_and_revalidates_before_repetitions();
         require_consumer_failure_contract();
         std::cout << "PASS: residency profiling differential input tests\n";

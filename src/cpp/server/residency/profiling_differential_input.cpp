@@ -104,7 +104,12 @@ bool input_identity_is_valid(
     const ProfilingDifferentialInputIdentity &identity,
     const ProfilingNoiseBindings &bindings) noexcept {
     const auto &transaction = identity.transaction;
+    const auto &constraints =
+        transaction.selector.catalog_selector.constraints;
     return transaction_identity_is_valid(transaction) &&
+           std::find(constraints.begin(), constraints.end(),
+                     ConstraintKind::GpuSharedResidency) !=
+               constraints.end() &&
            transaction.deployment_id == bindings.deployment_id &&
            transaction.selector.device_identity_sha256 ==
                bindings.device_identity_sha256 &&
