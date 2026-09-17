@@ -5806,6 +5806,37 @@ std::string_view durable_file_status_wire(
     }
     return "unknown";
 }
+
+std::optional<std::string>
+windows_directory_identity(const std::filesystem::path &directory) {
+    const auto handle = ::CreateFileW(
+        directory.c_str(), FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return std::nullopt;
+    }
+    FILE_ATTRIBUTE_TAG_INFO attributes {};
+    FILE_ID_INFO information {};
+    const bool captured =
+        ::GetFileInformationByHandleEx(handle, FileAttributeTagInfo,
+                                       &attributes, sizeof(attributes)) != 0 &&
+        (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0 &&
+        (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+        ::GetFileInformationByHandleEx(handle, FileIdInfo, &information,
+                                       sizeof(information)) != 0;
+    if (!::CloseHandle(handle) || !captured) {
+        return std::nullopt;
+    }
+    constexpr char digits[] = "0123456789abcdef";
+    std::string identity = std::to_string(information.VolumeSerialNumber);
+    identity.push_back(':');
+    for (const auto byte : information.FileId.Identifier) {
+        identity.push_back(digits[(byte >> 4) & 0x0f]);
+        identity.push_back(digits[byte & 0x0f]);
+    }
+    return identity;
+}
 #endif
 
 int reproduce_windows_fixed_namespace_stage_race() {
@@ -5861,6 +5892,13 @@ int reproduce_windows_fixed_namespace_stage_race() {
         losing_creator.join();
         require(false, "Windows reproducer could not create stage S-prime");
     }
+    const auto replacement_stage_identity = windows_directory_identity(stage);
+    if (!replacement_stage_identity.has_value()) {
+        probe.release();
+        losing_creator.join();
+        require(false,
+                "Windows reproducer could not capture stage S-prime identity");
+    }
 
     probe.release();
     losing_creator.join();
@@ -5868,7 +5906,13 @@ int reproduce_windows_fixed_namespace_stage_race() {
             "Windows reproducer loser returned no adapter");
 
     const auto observation = probe.snapshot();
-    const bool foreign_stage_preserved = std::filesystem::is_directory(stage);
+    auto third_adapter =
+        make_platform_durable_file_adapter_in_fixed_namespace(parent.path(),
+                                                               child_name);
+    const auto retained_stage_identity = windows_directory_identity(stage);
+    const bool foreign_stage_preserved =
+        std::filesystem::is_directory(stage) &&
+        retained_stage_identity == replacement_stage_identity;
 
     const auto winner_lock = winning_adapter->lock_authority();
     const auto winner_preflight = winning_adapter->preflight_capabilities();
@@ -5884,6 +5928,56 @@ int reproduce_windows_fixed_namespace_stage_race() {
                                   ? losing_adapter->unlock_authority()
                                   : DurableFileResult{};
 
+    const auto third_lock = third_adapter->lock_authority();
+    const auto third_preflight = third_adapter->preflight_capabilities();
+    const auto third_identity = third_adapter->authority_identity();
+    const auto third_unlock = third_lock.succeeded()
+                                  ? third_adapter->unlock_authority()
+                                  : DurableFileResult{};
+
+    NativeDirectory owned_parent("fixed-namespace-owned-stage-cleanup");
+    const auto owned_child = owned_parent.path() / child_name;
+    const auto owned_stage =
+        owned_parent.path() / ".residency-local-overlay.directory-stage";
+    require(::CreateDirectoryW(owned_stage.c_str(), nullptr) != 0,
+            "Windows owned-cleanup fixture could not create its stage");
+    const auto owned_stage_identity = windows_directory_identity(owned_stage);
+    require(owned_stage_identity.has_value(),
+            "Windows owned-cleanup fixture could not capture its stage");
+
+    FixedNamespaceIdentityMismatchProbe owned_probe;
+    std::unique_ptr<lemon::residency::detail::DurableFileAdapter> owned_adapter;
+    std::thread owned_creator([&] {
+        owned_adapter =
+            make_platform_durable_file_adapter_in_fixed_namespace_for_test(
+                owned_parent.path(), child_name, owned_probe);
+    });
+    const bool owned_creator_is_blocked = owned_probe.wait_for_pre_publish(5000);
+    if (!owned_creator_is_blocked) {
+        owned_probe.release();
+        owned_creator.join();
+        require(false,
+                "Windows owned-cleanup creator did not reach its publish gate");
+    }
+    if (::CreateDirectoryW(owned_child.c_str(), nullptr) == 0) {
+        owned_probe.release();
+        owned_creator.join();
+        require(false,
+                "Windows owned-cleanup fixture could not create the winner");
+    }
+    owned_probe.release();
+    owned_creator.join();
+    require(owned_adapter != nullptr,
+            "Windows owned-cleanup creator returned no adapter");
+    const auto owned_observation = owned_probe.snapshot();
+    const bool owned_stage_removed = !std::filesystem::exists(owned_stage);
+    const auto owned_lock = owned_adapter->lock_authority();
+    const auto owned_preflight = owned_adapter->preflight_capabilities();
+    const auto owned_identity = owned_adapter->authority_identity();
+    const auto owned_unlock = owned_lock.succeeded()
+                                  ? owned_adapter->unlock_authority()
+                                  : DurableFileResult{};
+
     const auto diagnostic_wire = [](const std::string &diagnostic) {
         return diagnostic.empty() ? std::string_view("<empty>")
                                   : std::string_view(diagnostic);
@@ -5892,16 +5986,35 @@ int reproduce_windows_fixed_namespace_stage_race() {
         observation.cleanup_identity_mismatch &&
         observation.expected_stage_identity !=
             observation.observed_stage_identity;
-    const bool converged =
+    const bool constructed_schedule_observed =
         observation.pre_publish_reached &&
         observation.publish_result_observed && !observation.publish_moved &&
-        observation.publish_error != 0 &&
-        foreign_stage_preserved && winner_lock.succeeded() &&
+        observation.publish_error != 0 && identity_mismatch_observed;
+    const bool identities_converged =
+        winner_identity.result.succeeded() &&
+        loser_identity.result.succeeded() &&
+        third_identity.result.succeeded() &&
+        winner_identity.identity == loser_identity.identity &&
+        winner_identity.identity == third_identity.identity;
+    const bool owned_cleanup_satisfied =
+        owned_observation.pre_publish_reached &&
+        owned_observation.publish_result_observed &&
+        !owned_observation.publish_moved &&
+        owned_observation.publish_error != 0 &&
+        !owned_observation.cleanup_identity_mismatch && owned_stage_removed &&
+        owned_lock.succeeded() && owned_preflight.succeeded() &&
+        owned_identity.result.succeeded() && owned_unlock.succeeded();
+    const bool converged =
+        constructed_schedule_observed && foreign_stage_preserved &&
+        observation.observed_stage_identity == *replacement_stage_identity &&
+        winner_lock.succeeded() &&
         winner_preflight.succeeded() && winner_identity.result.succeeded() &&
         winner_unlock.succeeded() && loser_lock.succeeded() &&
         loser_preflight.succeeded() && loser_identity.result.succeeded() &&
-        loser_unlock.succeeded() &&
-        loser_identity.identity == winner_identity.identity;
+        loser_unlock.succeeded() && third_lock.succeeded() &&
+        third_preflight.succeeded() && third_identity.result.succeeded() &&
+        third_unlock.succeeded() && identities_converged &&
+        owned_cleanup_satisfied;
 
     std::cout << std::boolalpha
               << "pre_publish_reached=" << observation.pre_publish_reached
@@ -5914,8 +6027,8 @@ int reproduce_windows_fixed_namespace_stage_race() {
               << "publish_moved=" << observation.publish_moved << '\n'
               << "publish_native_error=" << observation.publish_error << '\n'
               << "cleanup_status="
-              << (observation.cleanup_identity_mismatch
-                      ? "unsafe_identity_mismatch"
+              << (identity_mismatch_observed && foreign_stage_preserved
+                      ? "foreign_identity_preserved"
                       : "not_observed")
               << '\n'
               << "cleanup_expected_stage_identity="
@@ -5938,22 +6051,36 @@ int reproduce_windows_fixed_namespace_stage_race() {
               << durable_file_status_wire(loser_preflight.status) << '\n'
               << "loser_preflight_diagnostic="
               << diagnostic_wire(loser_preflight.diagnostic) << '\n'
+              << "third_lock_status="
+              << durable_file_status_wire(third_lock.status) << '\n'
+              << "third_lock_diagnostic="
+              << diagnostic_wire(third_lock.diagnostic) << '\n'
+              << "third_preflight_status="
+              << durable_file_status_wire(third_preflight.status) << '\n'
+              << "third_preflight_diagnostic="
+              << diagnostic_wire(third_preflight.diagnostic) << '\n'
               << "foreign_stage_preserved=" << foreign_stage_preserved << '\n'
+              << "foreign_stage_identity_preserved="
+              << (retained_stage_identity == replacement_stage_identity) << '\n'
               << "winning_identity_status="
               << durable_file_status_wire(winner_identity.result.status) << '\n'
               << "losing_identity_status="
               << durable_file_status_wire(loser_identity.result.status) << '\n'
-              << "identities_converged="
-              << (winner_identity.result.succeeded() &&
-                  loser_identity.result.succeeded() &&
-                  winner_identity.identity == loser_identity.identity)
+              << "third_identity_status="
+              << durable_file_status_wire(third_identity.result.status) << '\n'
+              << "identities_converged=" << identities_converged
+              << '\n'
+              << "owned_cleanup_stage_removed=" << owned_stage_removed << '\n'
+              << "owned_cleanup_identity_mismatch="
+              << owned_observation.cleanup_identity_mismatch << '\n'
+              << "owned_cleanup_contract_satisfied="
+              << owned_cleanup_satisfied
+              << '\n'
+              << "constructed_schedule_observed="
+              << constructed_schedule_observed
               << '\n'
               << "hypothesis_observed="
-              << (observation.pre_publish_reached &&
-                  observation.publish_result_observed &&
-                  !observation.publish_moved &&
-                  observation.publish_error != 0 &&
-                  identity_mismatch_observed && !loser_lock.succeeded() &&
+              << (constructed_schedule_observed && !loser_lock.succeeded() &&
                   !loser_preflight.succeeded())
               << '\n'
               << "convergence_contract_satisfied=" << converged << std::endl;
@@ -5972,6 +6099,100 @@ void require_fixed_namespace_publish_barrier_tracks_retries() {
                 !should_block_fixed_namespace_publish_attempt(3, true),
             "fixed-namespace publish barrier did not block solely on an "
             "unmoved stage, independent of the retry ordinal");
+}
+
+bool is_explicit_symlink_fixture_unavailability(const std::error_code &error) {
+#ifdef _WIN32
+    if (error.category() == std::system_category() &&
+        error.value() == ERROR_PRIVILEGE_NOT_HELD) {
+        return true;
+    }
+#endif
+    return error == std::errc::operation_not_permitted ||
+           error == std::errc::permission_denied ||
+           error == std::errc::function_not_supported ||
+           error == std::errc::not_supported ||
+           error == std::errc::read_only_file_system;
+}
+
+enum class SymlinkFixtureCreation {
+    Created,
+    Unavailable,
+    UnexpectedFailure,
+};
+
+SymlinkFixtureCreation
+classify_symlink_fixture_creation(const std::error_code &error) {
+    if (!error) {
+        return SymlinkFixtureCreation::Created;
+    }
+    if (is_explicit_symlink_fixture_unavailability(error)) {
+        return SymlinkFixtureCreation::Unavailable;
+    }
+    return SymlinkFixtureCreation::UnexpectedFailure;
+}
+
+#ifdef _WIN32
+bool require_symlink_fixture_created_or_unavailable(
+    const std::error_code &error, std::string_view label) {
+    const auto creation = classify_symlink_fixture_creation(error);
+    const auto diagnostic = std::string(label) + " (" +
+                            error.category().name() + ':' +
+                            std::to_string(error.value()) + ')';
+    require(creation != SymlinkFixtureCreation::UnexpectedFailure,
+            diagnostic + " failed unexpectedly");
+    if (creation == SymlinkFixtureCreation::Unavailable) {
+        std::cout << "SKIP: " << diagnostic << " unavailable\n";
+        return false;
+    }
+    return true;
+}
+#endif
+
+void require_native_fixed_namespace_reparse_protection() {
+#ifdef _WIN32
+    using lemon::residency::detail::make_platform_durable_file_adapter_in_fixed_namespace;
+
+    constexpr std::string_view child_name = "residency-local-overlay";
+    NativeDirectory linked_parent("task119-fixed-namespace-windows-link");
+    NativeDirectory linked_outside(
+        "task119-fixed-namespace-windows-link-target");
+    const auto linked_child = linked_parent.path() / child_name;
+    std::error_code link_error;
+    std::filesystem::create_directory_symlink(linked_outside.path(),
+                                              linked_child, link_error);
+    if (require_symlink_fixture_created_or_unavailable(
+            link_error, "Windows fixed-namespace child reparse fixture")) {
+        auto linked = make_platform_durable_file_adapter_in_fixed_namespace(
+            linked_parent.path(), child_name);
+        require(!linked->lock_authority().succeeded() &&
+                    std::filesystem::is_symlink(
+                        std::filesystem::symlink_status(linked_child)),
+                "Windows fixed-namespace factory followed or replaced a child "
+                "reparse point");
+    }
+
+    NativeDirectory linked_stage_parent(
+        "task119-fixed-namespace-windows-stage-link");
+    const auto linked_stage =
+        linked_stage_parent.path() /
+        ".residency-local-overlay.directory-stage";
+    link_error.clear();
+    std::filesystem::create_directory_symlink(linked_outside.path(),
+                                              linked_stage, link_error);
+    if (require_symlink_fixture_created_or_unavailable(
+            link_error, "Windows fixed-namespace stage reparse fixture")) {
+        auto linked = make_platform_durable_file_adapter_in_fixed_namespace(
+            linked_stage_parent.path(), child_name);
+        require(!linked->lock_authority().succeeded() &&
+                    std::filesystem::is_symlink(
+                        std::filesystem::symlink_status(linked_stage)) &&
+                    !std::filesystem::exists(linked_stage_parent.path() /
+                                             child_name),
+                "Windows fixed-namespace factory followed or replaced a stage "
+                "reparse point");
+    }
+#endif
 }
 
 void require_native_fixed_namespace_factory() {
@@ -6144,6 +6365,8 @@ void require_native_fixed_namespace_factory() {
                     std::filesystem::symlink_status(linked_child)),
             "native fixed-namespace factory followed or replaced a symlink");
 #else
+    require_native_fixed_namespace_reparse_protection();
+
     NativeDirectory staged_parent("task119-fixed-namespace-stage");
     const auto stage = staged_parent.path() /
                        ".residency-local-overlay.directory-stage";
@@ -6448,31 +6671,28 @@ void require_native_fresh_namespace_asymmetry() {
             "native create changed an unrelated sentinel");
 }
 
-bool is_explicit_symlink_fixture_unavailability(const std::error_code &error) {
-#ifdef _WIN32
-    if (error.category() == std::system_category() &&
-        error.value() == ERROR_PRIVILEGE_NOT_HELD) {
-        return true;
-    }
-#endif
-    return error == std::errc::operation_not_permitted ||
-           error == std::errc::permission_denied ||
-           error == std::errc::function_not_supported ||
-           error == std::errc::not_supported ||
-           error == std::errc::read_only_file_system;
-}
-
 void require_symlink_fixture_unavailability_contract() {
+    const std::error_code created_error;
 #ifdef _WIN32
-    require(is_explicit_symlink_fixture_unavailability(std::error_code(
-                ERROR_PRIVILEGE_NOT_HELD, std::system_category())),
-            "Windows symlink privilege failure was not treated as fixture "
-            "unavailability");
-    require(!is_explicit_symlink_fixture_unavailability(
-                std::error_code(ERROR_INVALID_NAME, std::system_category())),
-            "unrelated Windows symlink failure was treated as fixture "
-            "unavailability");
+    const auto unavailable_error = std::error_code(
+        ERROR_PRIVILEGE_NOT_HELD, std::system_category());
+    const auto unexpected_error =
+        std::error_code(ERROR_INVALID_NAME, std::system_category());
+#else
+    const auto unavailable_error =
+        std::make_error_code(std::errc::operation_not_permitted);
+    const auto unexpected_error =
+        std::make_error_code(std::errc::invalid_argument);
 #endif
+    require(classify_symlink_fixture_creation(created_error) ==
+                SymlinkFixtureCreation::Created,
+            "successful symlink fixture creation was treated as unavailable");
+    require(classify_symlink_fixture_creation(unavailable_error) ==
+                SymlinkFixtureCreation::Unavailable,
+            "symlink platform unavailability was not recognized");
+    require(classify_symlink_fixture_creation(unexpected_error) ==
+                SymlinkFixtureCreation::UnexpectedFailure,
+            "unexpected symlink fixture failure was treated as unavailable");
 }
 
 void require_native_fixed_child_poisoning() {
@@ -6853,6 +7073,7 @@ int run_command(int argc, char **argv) {
     if (argc == 2 &&
         std::string_view(argv[1]) ==
             "--reproduce-windows-fixed-namespace-stage-race") {
+        require_native_fixed_namespace_reparse_protection();
         return reproduce_windows_fixed_namespace_stage_race();
     }
     if (argc == 4 && std::string_view(argv[1]) == "--race-init") {
@@ -6928,6 +7149,10 @@ int main(int argc, char **argv) {
     require_native_unbound_adapter_preserves_working_directory();
     require_native_immutable_objects();
     require_fixed_namespace_publish_barrier_tracks_retries();
+#ifdef _WIN32
+    require(reproduce_windows_fixed_namespace_stage_race() == 0,
+            "required Windows fixed-namespace regression failed");
+#endif
     require_native_fixed_namespace_factory();
     require_native_bounded_read_boundaries();
     require_native_literal_children();

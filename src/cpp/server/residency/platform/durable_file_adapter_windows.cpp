@@ -454,7 +454,13 @@ DurableFileResult clear_verified_stage(HANDLE handle) {
 
 enum class WindowsDirectoryBindStatus { Bound, NotFound, Retry, Unsafe };
 
-enum class WindowsStageCleanupStatus { Clean, Retry, Unsafe };
+enum class WindowsStageCleanupStatus {
+    Absent,
+    OwnedRemoved,
+    ForeignPreserved,
+    Retry,
+    Unsafe,
+};
 
 bool fixed_namespace_error_is_retryable(DWORD error) {
     return error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION ||
@@ -485,10 +491,11 @@ struct WindowsDirectoryBinding {
 
 WindowsDirectoryBinding
 bind_windows_directory(const std::filesystem::path &directory,
-                       bool retry_access_denied = false) {
+                       bool retry_access_denied = false,
+                       DWORD access = FILE_READ_ATTRIBUTES | SYNCHRONIZE) {
     const auto handle = ::CreateFileW(
-        directory.c_str(), FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+        directory.c_str(), access, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+        OPEN_EXISTING,
         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
         const auto error = ::GetLastError();
@@ -1699,10 +1706,25 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
     const auto stage = parent.path /
                        (L"." + child_name + L".directory-stage");
 
+    const auto stage_is_safe_for_existing_child =
+        [](WindowsStageCleanupStatus status) {
+            return status == WindowsStageCleanupStatus::Absent ||
+                   status == WindowsStageCleanupStatus::ForeignPreserved;
+        };
+    const auto stage_is_safe_after_failed_publish =
+        [](WindowsStageCleanupStatus status) {
+            return status == WindowsStageCleanupStatus::Absent ||
+                   status == WindowsStageCleanupStatus::OwnedRemoved ||
+                   status == WindowsStageCleanupStatus::ForeignPreserved;
+        };
     const auto cleanup_stage = [&](std::optional<FILE_ID_INFO> expected) {
-        auto bound_stage = bind_windows_directory(stage, true);
+        const auto access =
+            expected.has_value()
+                ? DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE
+                : FILE_READ_ATTRIBUTES | SYNCHRONIZE;
+        auto bound_stage = bind_windows_directory(stage, true, access);
         if (bound_stage.status == WindowsDirectoryBindStatus::NotFound) {
-            return WindowsStageCleanupStatus::Clean;
+            return WindowsStageCleanupStatus::Absent;
         }
         if (bound_stage.status == WindowsDirectoryBindStatus::Retry) {
             return WindowsStageCleanupStatus::Retry;
@@ -1717,28 +1739,38 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
                 file_id_string(bound_stage.identity));
         }
 #endif
-        if (bound_stage.status != WindowsDirectoryBindStatus::Bound ||
-            (expected.has_value() &&
-             !same_file_identity(bound_stage.identity, *expected))) {
+        if (bound_stage.status != WindowsDirectoryBindStatus::Bound) {
             close_windows_directory(bound_stage);
             return WindowsStageCleanupStatus::Unsafe;
         }
         const auto empty = windows_directory_is_empty(bound_stage.path);
-        const auto bound_stage_path = bound_stage.path;
-        const auto stage_closed = close_windows_directory(bound_stage);
-        if (!empty.has_value() || !*empty || !stage_closed) {
+        if (!empty.has_value() || !*empty) {
+            static_cast<void>(close_windows_directory(bound_stage));
             return WindowsStageCleanupStatus::Unsafe;
         }
-        if (::RemoveDirectoryW(bound_stage_path.c_str())) {
-            return WindowsStageCleanupStatus::Clean;
+        if (!expected.has_value() ||
+            !same_file_identity(bound_stage.identity, *expected)) {
+            const auto stage_closed = close_windows_directory(bound_stage);
+            return stage_closed
+                       ? WindowsStageCleanupStatus::ForeignPreserved
+                       : WindowsStageCleanupStatus::Unsafe;
         }
-        const auto error = ::GetLastError();
-        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
-            return WindowsStageCleanupStatus::Clean;
+        FILE_DISPOSITION_INFO disposition {TRUE};
+        if (!::SetFileInformationByHandle(
+                bound_stage.handle, FileDispositionInfo, &disposition,
+                sizeof(disposition))) {
+            const auto error = ::GetLastError();
+            const auto stage_closed = close_windows_directory(bound_stage);
+            if (!stage_closed) {
+                return WindowsStageCleanupStatus::Unsafe;
+            }
+            return fixed_namespace_stage_error_is_retryable(error)
+                       ? WindowsStageCleanupStatus::Retry
+                       : WindowsStageCleanupStatus::Unsafe;
         }
-        return fixed_namespace_stage_error_is_retryable(error)
-                   ? WindowsStageCleanupStatus::Retry
-                   : WindowsStageCleanupStatus::Unsafe;
+        const auto stage_closed = close_windows_directory(bound_stage);
+        return stage_closed ? WindowsStageCleanupStatus::OwnedRemoved
+                            : WindowsStageCleanupStatus::Unsafe;
     };
     const auto release_parent = [&] {
         return close_windows_directory(parent);
@@ -1764,10 +1796,13 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
         auto bound_child = bind_windows_directory(child);
         if (bound_child.status == WindowsDirectoryBindStatus::Bound) {
             const auto cleaned = cleanup_stage(std::nullopt);
-            if (cleaned == WindowsStageCleanupStatus::Clean) {
+            if (stage_is_safe_for_existing_child(cleaned)) {
                 return publish(bound_child);
             }
             if (cleaned == WindowsStageCleanupStatus::Unsafe) {
+                return reject(&bound_child);
+            }
+            if (cleaned != WindowsStageCleanupStatus::Retry) {
                 return reject(&bound_child);
             }
             if (!close_windows_directory(bound_child)) {
@@ -1840,16 +1875,20 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
                 }
             } else {
                 const auto cleaned = cleanup_stage(stage_identity);
+                if (stage_is_safe_after_failed_publish(cleaned)) {
+                    return publish(published_child);
+                }
                 if (cleaned == WindowsStageCleanupStatus::Unsafe) {
                     return reject(&published_child);
                 }
-                if (cleaned == WindowsStageCleanupStatus::Retry) {
-                    if (!close_windows_directory(published_child)) {
-                        return reject();
-                    }
-                    yield_fixed_namespace_convergence();
-                    continue;
+                if (cleaned != WindowsStageCleanupStatus::Retry) {
+                    return reject(&published_child);
                 }
+                if (!close_windows_directory(published_child)) {
+                    return reject();
+                }
+                yield_fixed_namespace_convergence();
+                continue;
             }
             return publish(published_child);
         }

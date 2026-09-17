@@ -468,6 +468,9 @@ def require_platform_source_contract() -> None:
     test_support = strip_cpp_comments_and_literals(
         TEST_SUPPORT.read_text(encoding="utf-8")
     )
+    public_seam = strip_cpp_comments_and_literals(
+        PUBLIC_SEAM.read_text(encoding="utf-8")
+    )
     durable = DURABLE_SOURCE.read_text(encoding="utf-8")
     authority_fence = AUTHORITY_FENCE.read_text(encoding="utf-8")
     durable_header_raw = DURABLE_HEADER.read_text(encoding="utf-8")
@@ -1034,6 +1037,8 @@ enum class JournalQuiescence { Unconfirmed, Confirmed, Assumed };
         adapter_header, common, posix, macos, windows
     )
     require_windows_fixed_namespace_convergence_mutants(windows)
+    require_windows_fixed_namespace_fixture_contract(public_seam)
+    require_windows_fixed_namespace_fixture_mutants(public_seam)
     require_windows_bound_directory_factory(windows)
     require_windows_bound_directory_factory_mutants(windows)
     require_test_storage_identity_capture_contract(test_support)
@@ -6101,6 +6106,11 @@ def windows_child_bind_matches(compact_factory: str) -> list[re.Match[str]]:
 
 
 def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
+    require_exact_enum_members(
+        source,
+        "WindowsStageCleanupStatus",
+        ("Absent", "OwnedRemoved", "ForeignPreserved", "Retry", "Unsafe"),
+    )
     factories = function_bodies(source, "make_windows_fixed_namespace_adapter")
     binders = function_bodies(source, "bind_windows_directory")
     generic_helpers = function_bodies(source, "fixed_namespace_error_is_retryable")
@@ -6150,7 +6160,7 @@ def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
         raise AssertionError(
             "Windows fixed namespace does not classify stage errors narrowly"
         )
-    if compact.count("bind_windows_directory(stage,true)") < 2:
+    if compact.count("bind_windows_directory(stage,true") < 2:
         raise AssertionError(
             "Windows fixed namespace does not retry access-denied stage binds"
         )
@@ -6200,6 +6210,60 @@ def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
         )
     if factory.count("yield_fixed_namespace_convergence();") < 2:
         raise AssertionError("Windows fixed namespace spins during convergence")
+    cleanup_empty = compact.find("windows_directory_is_empty(bound_stage.path)")
+    preserve_foreign = compact.find(
+        "if(!expected.has_value()||"
+        "!same_file_identity(bound_stage.identity,*expected))"
+    )
+    delete_owned = compact.find(
+        "::SetFileInformationByHandle(bound_stage.handle,FileDispositionInfo"
+    )
+    if min(cleanup_empty, preserve_foreign, delete_owned) < 0 or not (
+        cleanup_empty < preserve_foreign < delete_owned
+    ):
+        raise AssertionError(
+            "Windows fixed namespace does not preserve foreign stages before "
+            "identity-anchored cleanup"
+        )
+    if "RemoveDirectoryW" in factory:
+        raise AssertionError("Windows fixed namespace deletes a stage by path")
+    if not all(
+        token in compact
+        for token in (
+            "expected.has_value()?DELETE|FILE_READ_ATTRIBUTES|SYNCHRONIZE:"
+            "FILE_READ_ATTRIBUTES|SYNCHRONIZE",
+            "WindowsStageCleanupStatus::ForeignPreserved",
+            "WindowsStageCleanupStatus::OwnedRemoved",
+            "stage_is_safe_for_existing_child(cleaned)",
+            "stage_is_safe_after_failed_publish(cleaned)",
+        )
+    ):
+        raise AssertionError(
+            "Windows fixed namespace does not distinguish owned cleanup from "
+            "foreign preservation"
+        )
+    safe_existing = re.search(
+        r"stage_is_safe_for_existing_child\s*=\s*\[\]\s*\(\s*"
+        r"WindowsStageCleanupStatus\s+status\s*\)\s*\{\s*return\s+"
+        r"status\s*==\s*WindowsStageCleanupStatus::Absent\s*\|\|\s*"
+        r"status\s*==\s*WindowsStageCleanupStatus::ForeignPreserved\s*;",
+        factory,
+        re.DOTALL,
+    )
+    safe_after_failed_publish = re.search(
+        r"stage_is_safe_after_failed_publish\s*=\s*\[\]\s*\(\s*"
+        r"WindowsStageCleanupStatus\s+status\s*\)\s*\{\s*return\s+"
+        r"status\s*==\s*WindowsStageCleanupStatus::Absent\s*\|\|\s*"
+        r"status\s*==\s*WindowsStageCleanupStatus::OwnedRemoved\s*\|\|\s*"
+        r"status\s*==\s*WindowsStageCleanupStatus::ForeignPreserved\s*;",
+        factory,
+        re.DOTALL,
+    )
+    if safe_existing is None or safe_after_failed_publish is None:
+        raise AssertionError(
+            "Windows fixed namespace rejects a valid child beside a preserved "
+            "foreign stage"
+        )
     if (
         re.search(
             r"if\s*\(\s*cleaned\s*==\s*"
@@ -6224,6 +6288,28 @@ def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
         raise AssertionError(
             f"Windows fixed-namespace convergence accepted {name} mutant"
         )
+
+    def reject_publication_loser(body: str) -> str:
+        target = "status == WindowsStageCleanupStatus::ForeignPreserved;"
+        first = body.find(target)
+        second = body.find(target, first + len(target))
+        if first < 0 or second < 0:
+            raise AssertionError("foreign-stage loser mutation target drifted")
+        replacement = "status == WindowsStageCleanupStatus::Unsafe;"
+        return body[:second] + replacement + body[second + len(target) :]
+
+    def restore_path_delete(body: str) -> str:
+        mutant, replacements = re.subn(
+            r"::SetFileInformationByHandle\s*\(\s*bound_stage\.handle\s*,\s*"
+            r"FileDispositionInfo\s*,\s*&disposition\s*,\s*"
+            r"sizeof\s*\(\s*disposition\s*\)\s*\)",
+            "::RemoveDirectoryW(bound_stage.path.c_str())",
+            body,
+            count=1,
+        )
+        if replacements != 1:
+            raise AssertionError("path-delete mutation target drifted")
+        return mutant
 
     rejected(
         replace_unique_function_body(
@@ -6366,31 +6452,312 @@ def require_windows_fixed_namespace_convergence_mutants(source: str) -> None:
         "winner-rebind",
     )
 
-    def restore_unsafe_cleanup_short_circuit(body: str) -> str:
-        guarded_close = re.compile(
-            r"if\s*\(\s*cleaned\s*==\s*"
-            r"WindowsStageCleanupStatus::Unsafe\s*\)\s*\{\s*"
-            r"return\s+reject\s*\(\s*&bound_child\s*\)\s*;\s*\}\s*"
-            r"if\s*\(\s*!\s*close_windows_directory\s*"
-            r"\(\s*bound_child\s*\)\s*\)\s*\{\s*"
-            r"return\s+reject\s*\(\s*\)\s*;\s*\}",
-            re.DOTALL,
-        )
-        return guarded_close.sub(
-            "if (cleaned == WindowsStageCleanupStatus::Unsafe || "
-            "!close_windows_directory(bound_child)) { return reject(); }",
-            body,
-            count=1,
-        )
-
     rejected(
         replace_unique_function_body(
             source,
             "make_windows_fixed_namespace_adapter",
-            restore_unsafe_cleanup_short_circuit,
+            lambda body: body.replace(
+                "if (!expected.has_value() ||",
+                "if (!expected.has_value() &&",
+                1,
+            ),
         ),
-        "unsafe-cleanup-short-circuit",
+        "unowned-stage-deletion",
     )
+    rejected(
+        replace_unique_function_body(
+            source,
+            "make_windows_fixed_namespace_adapter",
+            lambda body: body.replace(
+                "status == WindowsStageCleanupStatus::ForeignPreserved;",
+                "status == WindowsStageCleanupStatus::Unsafe;",
+                1,
+            ),
+        ),
+        "foreign-stage-existing-child-rejection",
+    )
+    rejected(
+        replace_unique_function_body(
+            source,
+            "make_windows_fixed_namespace_adapter",
+            reject_publication_loser,
+        ),
+        "foreign-stage-publication-loser-rejection",
+    )
+    rejected(
+        replace_unique_function_body(
+            source,
+            "make_windows_fixed_namespace_adapter",
+            restore_path_delete,
+        ),
+        "path-based-stage-deletion",
+    )
+
+
+def require_windows_symlink_fixture_handling_contract(source: str) -> None:
+    classifiers = function_bodies(source, "classify_symlink_fixture_creation")
+    handlers = bool_function_bodies(
+        source, "require_symlink_fixture_created_or_unavailable"
+    )
+    controls = function_bodies(
+        source, "require_native_fixed_namespace_reparse_protection"
+    )
+    contracts = function_bodies(
+        source, "require_symlink_fixture_unavailability_contract"
+    )
+    factories = function_bodies(source, "require_native_fixed_namespace_factory")
+    commands = function_bodies(source, "run_command")
+    if not all(
+        len(bodies) == 1
+        for bodies in (classifiers, handlers, controls, contracts, factories, commands)
+    ):
+        raise AssertionError("Windows symlink fixture handling is not unique")
+
+    classifier = compact_cpp(classifiers[0])
+    handler = compact_cpp(handlers[0])
+    reparse_controls = compact_cpp(controls[0])
+    contract = compact_cpp(contracts[0])
+    factory = compact_cpp(factories[0])
+    command = compact_cpp(commands[0])
+    if not all(
+        token in classifier
+        for token in (
+            "if(!error){returnSymlinkFixtureCreation::Created;}",
+            "if(is_explicit_symlink_fixture_unavailability(error))"
+            "{returnSymlinkFixtureCreation::Unavailable;}",
+            "returnSymlinkFixtureCreation::UnexpectedFailure;",
+        )
+    ):
+        raise AssertionError("Windows symlink fixture errors are not fail-closed")
+    if not all(
+        token in handler
+        for token in (
+            "classify_symlink_fixture_creation(error)",
+            "creation!=SymlinkFixtureCreation::UnexpectedFailure",
+            "if(creation==SymlinkFixtureCreation::Unavailable)",
+            "error.category().name()",
+            "std::to_string(error.value())",
+            "std::cout<<",
+            "<<diagnostic<<",
+            "returnfalse;",
+            "returntrue;",
+        )
+    ):
+        raise AssertionError(
+            "Windows symlink fixture setup does not distinguish unavailable, "
+            "failed, and created states"
+        )
+    if (
+        reparse_controls.count("std::filesystem::create_directory_symlink(") != 2
+        or reparse_controls.count(
+            "require_symlink_fixture_created_or_unavailable(link_error,"
+        )
+        != 2
+        or not all(
+            "std::filesystem::create_directory_symlink("
+            f"linked_outside.path(),{entry},link_error);"
+            "if(require_symlink_fixture_created_or_unavailable(link_error,"
+            in reparse_controls
+            for entry in ("linked_child", "linked_stage")
+        )
+    ):
+        raise AssertionError(
+            "Windows child and stage reparse controls bypass fixture error handling"
+        )
+    if factory.count("require_native_fixed_namespace_reparse_protection();") != 1:
+        raise AssertionError("default Windows regression omits reparse controls")
+    diagnostic = (
+        "require_native_fixed_namespace_reparse_protection();"
+        "returnreproduce_windows_fixed_namespace_stage_race();"
+    )
+    if diagnostic not in command:
+        raise AssertionError("opt-in Windows diagnostic omits reparse controls")
+    if (
+        not all(
+            token in contract
+            for token in (
+                "SymlinkFixtureCreation::Created",
+                "SymlinkFixtureCreation::Unavailable",
+                "SymlinkFixtureCreation::UnexpectedFailure",
+            )
+        )
+        or contract.count("classify_symlink_fixture_creation(") != 3
+    ):
+        raise AssertionError(
+            "symlink fixture contract does not exercise every creation outcome"
+        )
+
+
+def require_windows_fixed_namespace_fixture_contract(source: str) -> None:
+    fixtures = function_bodies(source, "reproduce_windows_fixed_namespace_stage_race")
+    mains = function_bodies(source, "main")
+    identity_helpers = function_bodies(source, "windows_directory_identity")
+    if len(fixtures) != 1 or len(mains) != 1 or len(identity_helpers) != 1:
+        raise AssertionError("Windows fixed-namespace regression seam is not unique")
+
+    fixture = compact_cpp(fixtures[0])
+    main = compact_cpp(mains[0])
+    if "reproduce_windows_fixed_namespace_stage_race()==0" not in main:
+        raise AssertionError(
+            "Windows fixed-namespace regression is not in the required path"
+        )
+    if (
+        fixture.count("make_platform_durable_file_adapter_in_fixed_namespace_for_test(")
+        < 2
+    ):
+        raise AssertionError(
+            "Windows fixed-namespace regression omits an owned cleanup schedule"
+        )
+    required = (
+        "autothird_adapter=" "make_platform_durable_file_adapter_in_fixed_namespace(",
+        "observation.observed_stage_identity==*replacement_stage_identity",
+        "!owned_observation.cleanup_identity_mismatch",
+        "owned_stage_removed",
+    )
+    if not all(token in fixture for token in required):
+        raise AssertionError(
+            "Windows fixed-namespace regression does not prove three-creator "
+            "identity and stage ownership"
+        )
+    foreign_preserved = re.search(
+        r"constboolforeign_stage_preserved=(?P<value>.*?);", fixture
+    )
+    identities_converged = re.search(
+        r"constboolidentities_converged=(?P<value>.*?);", fixture
+    )
+    if (
+        foreign_preserved is None
+        or "retained_stage_identity==replacement_stage_identity"
+        not in foreign_preserved.group("value")
+        or identities_converged is None
+        or "third_identity.result.succeeded()"
+        not in identities_converged.group("value")
+        or "winner_identity.identity==third_identity.identity"
+        not in identities_converged.group("value")
+    ):
+        raise AssertionError(
+            "Windows fixed-namespace regression permits foreign replacement or "
+            "third-creator divergence"
+        )
+    converged = re.search(r"constboolconverged=(?P<value>.*?);", fixture)
+    if converged is None or "owned_cleanup_satisfied" not in converged.group("value"):
+        raise AssertionError(
+            "Windows fixed-namespace regression does not require owned cleanup"
+        )
+    if source.count("std::filesystem::create_directory_symlink") < 3:
+        raise AssertionError(
+            "Windows fixed-namespace controls omit supported reparse states"
+        )
+    require_windows_symlink_fixture_handling_contract(source)
+
+
+def require_windows_fixed_namespace_fixture_mutants(source: str) -> None:
+    def rejected(mutant: str, name: str) -> None:
+        try:
+            require_windows_fixed_namespace_fixture_contract(mutant)
+        except AssertionError:
+            return
+        raise AssertionError(f"Windows fixed-namespace fixture accepted {name} mutant")
+
+    def bypass_reparse_handler(body: str, occurrence: int) -> str:
+        call = "require_symlink_fixture_created_or_unavailable"
+        matches = tuple(re.finditer(rf"\b{call}\s*\(", body))
+        if len(matches) != 2:
+            raise AssertionError("reparse fixture handler mutation target drifted")
+        opening = body.find("(", matches[occurrence].start())
+        closing = matching_delimiter(body, opening, "(", ")")
+        return body[: matches[occurrence].start()] + "!link_error" + body[closing + 1 :]
+
+    mutants = (
+        (
+            "required-path",
+            "main",
+            lambda body: body.replace(
+                "reproduce_windows_fixed_namespace_stage_race() == 0",
+                "true",
+                1,
+            ),
+        ),
+        (
+            "foreign-stage-replacement",
+            "reproduce_windows_fixed_namespace_stage_race",
+            lambda body: body.replace(
+                "retained_stage_identity == replacement_stage_identity",
+                "retained_stage_identity != replacement_stage_identity",
+                1,
+            ),
+        ),
+        (
+            "third-creator-divergence",
+            "reproduce_windows_fixed_namespace_stage_race",
+            lambda body: body.replace(
+                "winner_identity.identity == third_identity.identity",
+                "winner_identity.identity == winner_identity.identity",
+                1,
+            ),
+        ),
+        (
+            "owned-cleanup-optional",
+            "reproduce_windows_fixed_namespace_stage_race",
+            lambda body: body.replace("owned_cleanup_satisfied;", "true;", 1),
+        ),
+        (
+            "unexpected-symlink-error-accepted",
+            "require_symlink_fixture_created_or_unavailable",
+            lambda body: body.replace(
+                "creation != SymlinkFixtureCreation::UnexpectedFailure",
+                "true",
+                1,
+            ),
+        ),
+        (
+            "recognized-symlink-unavailability-rejected",
+            "require_symlink_fixture_created_or_unavailable",
+            lambda body: body.replace(
+                "creation == SymlinkFixtureCreation::Unavailable",
+                "false",
+                1,
+            ),
+        ),
+        (
+            "successful-symlink-creation-skipped",
+            "require_symlink_fixture_created_or_unavailable",
+            lambda body: body.replace("return true;", "return false;", 1),
+        ),
+        (
+            "unexpected-symlink-error-misclassified",
+            "classify_symlink_fixture_creation",
+            lambda body: body.replace(
+                "return SymlinkFixtureCreation::UnexpectedFailure;",
+                "return SymlinkFixtureCreation::Unavailable;",
+                1,
+            ),
+        ),
+        (
+            "child-reparse-handler-bypass",
+            "require_native_fixed_namespace_reparse_protection",
+            lambda body: bypass_reparse_handler(body, 0),
+        ),
+        (
+            "stage-reparse-handler-bypass",
+            "require_native_fixed_namespace_reparse_protection",
+            lambda body: bypass_reparse_handler(body, 1),
+        ),
+        (
+            "opt-in-reparse-controls-bypass",
+            "run_command",
+            lambda body: body.replace(
+                "require_native_fixed_namespace_reparse_protection();",
+                "",
+                1,
+            ),
+        ),
+    )
+    for name, function, transform in mutants:
+        rejected(
+            replace_unique_function_body(source, function, transform),
+            name,
+        )
 
 
 def require_test_storage_identity_capture_contract(source: str) -> None:
