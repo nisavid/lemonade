@@ -24,6 +24,11 @@ on:
         required: false
         default: false
         type: boolean
+      probe_windows_durable_convergence:
+        description: 'Run the opt-in Windows durable namespace convergence assertion'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -141,6 +146,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build durable residency tests on Windows
+        id: build-durable-residency-tests
         shell: PowerShell
         run: |
           cmake --build build --config Release --target test_durable_residency_journal test_durable_local_overlay
@@ -173,6 +179,36 @@ jobs:
             }
           }
           if ($diagnostic_exit -ne 0) { exit $diagnostic_exit }
+
+      - name: Probe Windows durable namespace convergence
+        if: >-
+          always() && github.event_name == 'workflow_dispatch' &&
+          inputs.probe_windows_durable_convergence == true &&
+          steps.build-durable-residency-tests.outcome == 'success'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $false
+          git rev-parse HEAD
+          $exe = "$PWD/build/Release/test_durable_residency_journal.exe"
+          $log = "$PWD/windows-fixed-namespace-reproducer.log"
+          & $exe --reproduce-windows-fixed-namespace-stage-race 2>&1 | Tee-Object -FilePath $log
+          $reproducer_exit = $LASTEXITCODE
+          "exit_code=$reproducer_exit" | Tee-Object -FilePath $log -Append
+          "log_sha256=$((Get-FileHash -Algorithm SHA256 $log).Hash.ToLowerInvariant())"
+          exit $reproducer_exit
+
+      - name: Preserve Windows durable namespace probe evidence
+        if: >-
+          always() && github.event_name == 'workflow_dispatch' &&
+          inputs.probe_windows_durable_convergence == true &&
+          steps.build-durable-residency-tests.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: Windows_Durable_Namespace_Probe
+          path: windows-fixed-namespace-reproducer.log
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Upload Lemonade Server Installers
         id: upload-unsigned-msi

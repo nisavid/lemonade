@@ -1707,6 +1707,16 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
         if (bound_stage.status == WindowsDirectoryBindStatus::Retry) {
             return WindowsStageCleanupStatus::Retry;
         }
+#ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
+        if (probe != nullptr &&
+            bound_stage.status == WindowsDirectoryBindStatus::Bound &&
+            expected.has_value() &&
+            !same_file_identity(bound_stage.identity, *expected)) {
+            probe->observe_stage_cleanup_identity_mismatch(
+                file_id_string(*expected),
+                file_id_string(bound_stage.identity));
+        }
+#endif
         if (bound_stage.status != WindowsDirectoryBindStatus::Bound ||
             (expected.has_value() &&
              !same_file_identity(bound_stage.identity, *expected))) {
@@ -1806,6 +1816,8 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
         const auto move_error = moved ? ERROR_SUCCESS : ::GetLastError();
 #ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
         if (probe != nullptr) {
+            probe->observe_publish_result(
+                attempt, moved, static_cast<unsigned long>(move_error));
             probe->after_publish_attempt(attempt, moved);
         }
 #endif

@@ -5716,7 +5716,254 @@ private:
     std::size_t publish_attempts_ = 0;
     bool released_ = false;
 };
+
+class FixedNamespaceIdentityMismatchProbe final
+    : public lemon::residency::detail::DurableFixedNamespaceConvergenceProbe {
+public:
+    struct Snapshot {
+        std::size_t publish_attempt = 0;
+        bool publish_moved = false;
+        unsigned long publish_error = 0;
+        bool cleanup_identity_mismatch = false;
+        std::string expected_stage_identity;
+        std::string observed_stage_identity;
+    };
+
+    void observe_publish_result(std::size_t attempt, bool moved,
+                                unsigned long native_error) override {
+        std::lock_guard lock(mutex_);
+        snapshot_.publish_attempt = attempt;
+        snapshot_.publish_moved = moved;
+        snapshot_.publish_error = native_error;
+    }
+
+    void observe_stage_cleanup_identity_mismatch(
+        std::string_view expected, std::string_view observed) override {
+        std::lock_guard lock(mutex_);
+        snapshot_.cleanup_identity_mismatch = true;
+        snapshot_.expected_stage_identity = expected;
+        snapshot_.observed_stage_identity = observed;
+    }
+
+    void after_publish_attempt(std::size_t, bool moved) override {
+        if (moved) {
+            return;
+        }
+        std::unique_lock lock(mutex_);
+        failed_publish_reached_ = true;
+        condition_.notify_all();
+        condition_.wait(lock, [&] { return released_; });
+    }
+
+    bool wait_for_failed_publish(std::uint64_t timeout_milliseconds) {
+        std::unique_lock lock(mutex_);
+        return condition_.wait_for(
+            lock, std::chrono::milliseconds(timeout_milliseconds),
+            [&] { return failed_publish_reached_; });
+    }
+
+    void release() {
+        std::lock_guard lock(mutex_);
+        released_ = true;
+        condition_.notify_all();
+    }
+
+    Snapshot snapshot() const {
+        std::lock_guard lock(mutex_);
+        return snapshot_;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::condition_variable condition_;
+    Snapshot snapshot_;
+    bool failed_publish_reached_ = false;
+    bool released_ = false;
+};
+
+std::string_view durable_file_status_wire(
+    lemon::residency::detail::DurableFileStatus status) {
+    using lemon::residency::detail::DurableFileStatus;
+
+    switch (status) {
+    case DurableFileStatus::Succeeded:
+        return "succeeded";
+    case DurableFileStatus::NotFound:
+        return "not_found";
+    case DurableFileStatus::AlreadyExists:
+        return "already_exists";
+    case DurableFileStatus::Unsupported:
+        return "unsupported";
+    case DurableFileStatus::Interrupted:
+        return "interrupted";
+    case DurableFileStatus::FailedBeforeEffect:
+        return "failed_before_effect";
+    case DurableFileStatus::EffectMayHaveOccurred:
+        return "effect_may_have_occurred";
+    }
+    return "unknown";
+}
 #endif
+
+int reproduce_windows_fixed_namespace_stage_race() {
+#ifndef _WIN32
+    std::cout << "windows_fixed_namespace_reproducer=unavailable\n";
+    return 2;
+#else
+    using lemon::residency::detail::DurableFileResult;
+    using lemon::residency::detail::make_platform_durable_file_adapter_in_fixed_namespace;
+    using lemon::residency::detail::make_platform_durable_file_adapter_in_fixed_namespace_for_test;
+
+    constexpr std::string_view child_name = "residency-local-overlay";
+    NativeDirectory parent("fixed-namespace-stage-identity-reproducer");
+    const auto child = parent.path() / child_name;
+    const auto stage =
+        parent.path() / ".residency-local-overlay.directory-stage";
+
+    require(::CreateDirectoryW(stage.c_str(), nullptr) != 0,
+            "Windows reproducer could not create stage S");
+    const auto held_stage = ::CreateFileW(
+        stage.c_str(), FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    require(held_stage != INVALID_HANDLE_VALUE,
+            "Windows reproducer could not pin stage S against publication");
+
+    FixedNamespaceIdentityMismatchProbe probe;
+    std::unique_ptr<lemon::residency::detail::DurableFileAdapter>
+        losing_adapter;
+    std::thread losing_creator([&] {
+        losing_adapter =
+            make_platform_durable_file_adapter_in_fixed_namespace_for_test(
+                parent.path(), child_name, probe);
+    });
+
+    const bool loser_is_blocked = probe.wait_for_failed_publish(5000);
+    if (!loser_is_blocked) {
+        ::CloseHandle(held_stage);
+        probe.release();
+        losing_creator.join();
+        require(false,
+                "Windows reproducer loser did not reach its held-stage "
+                "publication failure");
+    }
+    const bool stage_released = ::CloseHandle(held_stage) != 0;
+    if (!stage_released) {
+        probe.release();
+        losing_creator.join();
+        require(false, "Windows reproducer could not release stage S");
+    }
+
+    auto winning_adapter =
+        make_platform_durable_file_adapter_in_fixed_namespace(parent.path(),
+                                                               child_name);
+    const bool winner_published = std::filesystem::is_directory(child) &&
+                                  !std::filesystem::exists(stage);
+    if (!winner_published) {
+        probe.release();
+        losing_creator.join();
+        require(false, "Windows reproducer did not publish stage S as child");
+    }
+
+    const bool replacement_stage_created =
+        ::CreateDirectoryW(stage.c_str(), nullptr) != 0;
+    if (!replacement_stage_created) {
+        probe.release();
+        losing_creator.join();
+        require(false, "Windows reproducer could not create stage S-prime");
+    }
+
+    probe.release();
+    losing_creator.join();
+    require(losing_adapter != nullptr,
+            "Windows reproducer loser returned no adapter");
+
+    const auto observation = probe.snapshot();
+    const bool foreign_stage_preserved = std::filesystem::is_directory(stage);
+
+    const auto winner_lock = winning_adapter->lock_authority();
+    const auto winner_preflight = winning_adapter->preflight_capabilities();
+    const auto winner_identity = winning_adapter->authority_identity();
+    const auto winner_unlock = winner_lock.succeeded()
+                                   ? winning_adapter->unlock_authority()
+                                   : DurableFileResult{};
+
+    const auto loser_lock = losing_adapter->lock_authority();
+    const auto loser_preflight = losing_adapter->preflight_capabilities();
+    const auto loser_identity = losing_adapter->authority_identity();
+    const auto loser_unlock = loser_lock.succeeded()
+                                  ? losing_adapter->unlock_authority()
+                                  : DurableFileResult{};
+
+    const auto diagnostic_wire = [](const std::string &diagnostic) {
+        return diagnostic.empty() ? std::string_view("<empty>")
+                                  : std::string_view(diagnostic);
+    };
+    const bool identity_mismatch_observed =
+        observation.cleanup_identity_mismatch &&
+        observation.expected_stage_identity !=
+            observation.observed_stage_identity;
+    const bool converged =
+        !observation.publish_moved && observation.publish_error != 0 &&
+        foreign_stage_preserved && winner_lock.succeeded() &&
+        winner_preflight.succeeded() && winner_identity.result.succeeded() &&
+        winner_unlock.succeeded() && loser_lock.succeeded() &&
+        loser_preflight.succeeded() && loser_identity.result.succeeded() &&
+        loser_unlock.succeeded() &&
+        loser_identity.identity == winner_identity.identity;
+
+    std::cout << std::boolalpha
+              << "publish_attempt=" << observation.publish_attempt << '\n'
+              << "publish_moved=" << observation.publish_moved << '\n'
+              << "publish_native_error=" << observation.publish_error << '\n'
+              << "cleanup_status="
+              << (observation.cleanup_identity_mismatch
+                      ? "unsafe_identity_mismatch"
+                      : "not_observed")
+              << '\n'
+              << "cleanup_expected_stage_identity="
+              << diagnostic_wire(observation.expected_stage_identity) << '\n'
+              << "cleanup_observed_stage_identity="
+              << diagnostic_wire(observation.observed_stage_identity) << '\n'
+              << "winner_lock_status="
+              << durable_file_status_wire(winner_lock.status) << '\n'
+              << "winner_lock_diagnostic="
+              << diagnostic_wire(winner_lock.diagnostic) << '\n'
+              << "winner_preflight_status="
+              << durable_file_status_wire(winner_preflight.status) << '\n'
+              << "winner_preflight_diagnostic="
+              << diagnostic_wire(winner_preflight.diagnostic) << '\n'
+              << "loser_lock_status="
+              << durable_file_status_wire(loser_lock.status) << '\n'
+              << "loser_lock_diagnostic="
+              << diagnostic_wire(loser_lock.diagnostic) << '\n'
+              << "loser_preflight_status="
+              << durable_file_status_wire(loser_preflight.status) << '\n'
+              << "loser_preflight_diagnostic="
+              << diagnostic_wire(loser_preflight.diagnostic) << '\n'
+              << "foreign_stage_preserved=" << foreign_stage_preserved << '\n'
+              << "winning_identity_status="
+              << durable_file_status_wire(winner_identity.result.status) << '\n'
+              << "losing_identity_status="
+              << durable_file_status_wire(loser_identity.result.status) << '\n'
+              << "identities_converged="
+              << (winner_identity.result.succeeded() &&
+                  loser_identity.result.succeeded() &&
+                  winner_identity.identity == loser_identity.identity)
+              << '\n'
+              << "hypothesis_observed="
+              << (identity_mismatch_observed && !loser_lock.succeeded() &&
+                  !loser_preflight.succeeded())
+              << '\n'
+              << "convergence_contract_satisfied=" << converged << std::endl;
+    if (!converged) {
+        std::cerr << "FAIL: deterministic Windows fixed-namespace creators "
+                     "did not converge\n";
+        return 1;
+    }
+    return 0;
+#endif
+}
 
 void require_fixed_namespace_publish_barrier_tracks_retries() {
     require(should_block_fixed_namespace_publish_attempt(2, false) &&
@@ -6602,6 +6849,11 @@ int race_verify(const std::filesystem::path &directory,
 }
 
 int run_command(int argc, char **argv) {
+    if (argc == 2 &&
+        std::string_view(argv[1]) ==
+            "--reproduce-windows-fixed-namespace-stage-race") {
+        return reproduce_windows_fixed_namespace_stage_race();
+    }
     if (argc == 4 && std::string_view(argv[1]) == "--race-init") {
         return race_init(argv[2], argv[3]);
     }
