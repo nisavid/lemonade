@@ -620,6 +620,37 @@ void require_profiling_input_codec() {
                     sealed.candidate->selector_sha256(),
             "profiling input round-trip changed canonical identity");
 
+    auto zero_retained = profiling_draft();
+    std::get<DifferentialRetainedGttEvidenceDraft>(
+        zero_retained.method_evidence)
+        .retained_gtt_claim.amount = 0;
+    zero_retained.completion.manifest_claims = claims(0);
+    auto zero_sealed = seal_profiling_input(std::move(zero_retained));
+    require(zero_sealed.accepted(),
+            "profiling input rejected a zero retained bound with an explicit "
+            "known-zero manifest");
+    auto zero_reparsed =
+        parse_profiling_input(zero_sealed.candidate->canonical_bytes());
+    require(zero_reparsed.accepted() &&
+                zero_reparsed.candidate->differential_retained_gtt() !=
+                    nullptr &&
+                zero_reparsed.candidate->differential_retained_gtt()
+                        ->retained_gtt_claim.amount == 0,
+            "zero retained evidence did not round-trip without clamping");
+
+    auto unmatched_zero = profiling_draft();
+    std::get<DifferentialRetainedGttEvidenceDraft>(
+        unmatched_zero.method_evidence)
+        .retained_gtt_claim.amount = 0;
+    unmatched_zero.completion.manifest_claims.front()
+        .entries.front()
+        .constraint_id = "gpu/other";
+    require_rejected(
+        seal_profiling_input(std::move(unmatched_zero)),
+        OverlayContractStatus::IncompleteClaimClosure,
+        "zero retained evidence bypassed constraint-specific manifest "
+        "coverage");
+
     require_rejected(parse_profiling_input(" " + canonical),
                      OverlayContractStatus::NonCanonical,
                      "profiling input accepted noncanonical whitespace");

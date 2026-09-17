@@ -108,6 +108,7 @@ enum class ProfilingDifferentialRevalidationStatus {
     ExcessVariation,
     TargetMismatch,
     NonIncreasingObservation,
+    DigestUnavailable,
 };
 
 enum class ProfilingDifferentialRevalidationDisposition {

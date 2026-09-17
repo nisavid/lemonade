@@ -218,7 +218,7 @@ def _local_overlay_claim_closure() -> dict[str, Any]:
 def _local_overlay_retained_gtt_claim() -> dict[str, Any]:
     return _object(
         {
-            "amount": _json_integer(minimum=1, maximum=UINT64_MAX),
+            "amount": _json_integer(minimum=0, maximum=UINT64_MAX),
             "constraint_id": _opaque(),
             "unit": {"const": "bytes"},
         },

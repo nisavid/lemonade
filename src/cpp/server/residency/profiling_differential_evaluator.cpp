@@ -556,6 +556,7 @@ MonotoneNoiseValidity audit_source_facts(
 
     auto scope_start = plateau.marker->marked_at;
     auto scope_end = std::chrono::steady_clock::time_point::max();
+    bool scope_end_is_representable = true;
     if (scope == SourceAuditScope::FixedWindow) {
         std::optional<std::chrono::steady_clock::time_point> first;
         for (std::size_t index = 0;
@@ -578,17 +579,19 @@ MonotoneNoiseValidity audit_source_facts(
         const auto window_duration =
             std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 profiling_differential_window);
-        if (*first >
+        if (*first <=
             std::chrono::steady_clock::time_point::max() - window_duration) {
-            return MonotoneNoiseValidity::Valid;
+            scope_end = *first + window_duration;
+        } else {
+            scope_end_is_representable = false;
         }
         scope_start = *first;
-        scope_end = scope_start + window_duration;
     }
 
     const auto in_scope = [&](const BoundedSourceFact &fact) {
         return fact.scheduled_at >= scope_start &&
                (scope == SourceAuditScope::FromMarker ||
+                !scope_end_is_representable ||
                 fact.scheduled_at < scope_end);
     };
     auto validity = MonotoneNoiseValidity::Valid;
@@ -1475,6 +1478,45 @@ ParsedProfilingDifferentialEvidence::checksum_sha256() const noexcept {
 std::string_view
 ParsedProfilingDifferentialEvidence::canonical_bytes() const noexcept {
     return canonical_bytes_;
+}
+
+std::optional<DifferentialRetainedGttEvidenceDraft>
+compose_retained_gtt_profiling_input_evidence(
+    const ParsedProfilingDifferentialEvidence &evidence,
+    std::string transient_envelope_sha256) {
+    try {
+        if (!digest_is_valid(transient_envelope_sha256)) {
+            return std::nullopt;
+        }
+
+        ProfilingOwnerCoverage owner_projection_coverage;
+        switch (evidence.owner_projection_coverage()) {
+        case ProfilingDifferentialOwnerProjectionCoverage::Complete:
+            owner_projection_coverage = ProfilingOwnerCoverage::Complete;
+            break;
+        case ProfilingDifferentialOwnerProjectionCoverage::Incomplete:
+            owner_projection_coverage = ProfilingOwnerCoverage::Incomplete;
+            break;
+        case ProfilingDifferentialOwnerProjectionCoverage::Absent:
+            owner_projection_coverage = ProfilingOwnerCoverage::Unknown;
+            break;
+        default:
+            return std::nullopt;
+        }
+
+        return DifferentialRetainedGttEvidenceDraft{
+            ClaimAmount{
+                evidence.method_binding().constraint_id,
+                ClaimUnit::Bytes,
+                evidence.retained_gtt_bound_bytes(),
+            },
+            std::string(evidence.checksum_sha256()),
+            std::move(transient_envelope_sha256),
+            owner_projection_coverage,
+        };
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 bool ProfilingDifferentialEvaluationResult::accepted() const noexcept {

@@ -3729,6 +3729,40 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_DIFFERENTIAL_INPUT_TEST_SRC}
     )
 endif()
 
+set(_RESIDENCY_PROFILING_DIFFERENTIAL_HASH_FAILURE_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_differential_hash_failures.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_DIFFERENTIAL_HASH_FAILURE_TEST_SRC}")
+    add_executable(
+        test_residency_profiling_differential_hash_failures
+        test/cpp/test_residency_profiling_differential_hash_failures.cpp
+        test/cpp/residency_profiling_hash_failure_test_support.cpp
+        src/cpp/server/residency/claims.cpp
+        src/cpp/server/residency/local_overlay.cpp
+        src/cpp/server/residency/profiling_noise.cpp
+        src/cpp/server/residency/profiling_differential_input.cpp
+    )
+    target_include_directories(
+        test_residency_profiling_differential_hash_failures PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/residency
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/cpp
+    )
+    target_link_libraries(
+        test_residency_profiling_differential_hash_failures PRIVATE
+        lemonade-digest-crypto
+        nlohmann_json::nlohmann_json
+    )
+    add_cpp_ci_test(
+        ResidencyProfilingDifferentialHashFailures
+        CI ON
+        COMMAND test_residency_profiling_differential_hash_failures
+    )
+    set_tests_properties(
+        ResidencyProfilingDifferentialHashFailures PROPERTIES TIMEOUT 30
+    )
+endif()
+
 set(_RESIDENCY_PROFILING_DIFFERENTIAL_EVALUATOR_TEST_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_differential_evaluator.cpp"
 )

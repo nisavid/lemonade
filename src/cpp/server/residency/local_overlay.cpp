@@ -1327,10 +1327,9 @@ void normalize_method_evidence(ProfilingMethodEvidenceDraft &evidence,
         std::get<DifferentialRetainedGttEvidenceDraft>(evidence);
     require_identifier(differential.retained_gtt_claim.constraint_id,
                        "retained-GTT constraint ID");
-    if (differential.retained_gtt_claim.unit != ClaimUnit::Bytes ||
-        differential.retained_gtt_claim.amount == 0) {
+    if (differential.retained_gtt_claim.unit != ClaimUnit::Bytes) {
         reject(OverlayContractStatus::InvalidClaimClosure,
-               "retained-GTT evidence must be a positive byte claim");
+               "retained-GTT evidence must be a nonnegative byte claim");
     }
     require_digest(differential.calibration_evidence_sha256,
                    "calibration evidence digest");
@@ -1351,7 +1350,11 @@ void normalize_method_evidence(ProfilingMethodEvidenceDraft &evidence,
                    claim.unit == differential.retained_gtt_claim.unit &&
                    claim.amount >= differential.retained_gtt_claim.amount;
         });
-    if (covering == capacity.end()) {
+    const bool known_zero_manifest =
+        differential.retained_gtt_claim.amount == 0 &&
+        manifest.completeness(ClaimFamily::ConsumableCapacity) ==
+            ClaimCompleteness::KnownZero;
+    if (covering == capacity.end() && !known_zero_manifest) {
         reject(OverlayContractStatus::IncompleteClaimClosure,
                "profiling manifest does not cover the retained-GTT claim");
     }

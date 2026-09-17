@@ -254,19 +254,24 @@ void append_bindings(std::string &bytes,
     append_string(bytes, bindings.background_inventory_sha256);
 }
 
+bool revalidation_observation_is_structurally_valid(
+    const ProfilingDifferentialRevalidationObservation &observation) noexcept {
+    return bindings_are_valid(observation.observed_bindings) &&
+           digest_is_valid(
+               observation.observed_noise_result_checksum_sha256) &&
+           digest_is_valid(
+               observation.observed_counter_continuity_epoch_sha256) &&
+           (!observation.target_activity ||
+            (digest_is_valid(
+                 observation.target_activity->client_identity_sha256) &&
+             digest_is_valid(
+                 observation.target_activity
+                     ->containment_identity_sha256)));
+}
+
 std::optional<std::string> revalidation_observation_digest(
     const ProfilingDifferentialRevalidationObservation &observation) {
-    if (!bindings_are_valid(observation.observed_bindings) ||
-        !digest_is_valid(
-            observation.observed_noise_result_checksum_sha256) ||
-        !digest_is_valid(
-            observation.observed_counter_continuity_epoch_sha256) ||
-        (observation.target_activity &&
-         (!digest_is_valid(
-              observation.target_activity->client_identity_sha256) ||
-          !digest_is_valid(
-              observation.target_activity
-                  ->containment_identity_sha256)))) {
+    if (!revalidation_observation_is_structurally_valid(observation)) {
         return std::nullopt;
     }
 
@@ -767,12 +772,23 @@ revalidate_profiling_differential_input(
             revalidation_observation_digest(observation);
         if (!observation_sha256) {
             attempt.revision_rejected_ = true;
-            attempt.noise_result_invalidated_ = true;
+            if (!revalidation_observation_is_structurally_valid(
+                    observation)) {
+                return without_receipt(status, disposition,
+                                       std::string(diagnostic));
+            }
+            attempt.noise_result_invalidated_ =
+                attempt.noise_result_invalidated_ ||
+                disposition == ProfilingDifferentialRevalidationDisposition::
+                                   InvalidateNoiseResult;
             return without_receipt(
-                ProfilingDifferentialRevalidationStatus::BindingMismatch,
-                ProfilingDifferentialRevalidationDisposition::
-                    InvalidateNoiseResult,
-                "revalidation observation is structurally invalid");
+                ProfilingDifferentialRevalidationStatus::DigestUnavailable,
+                attempt.noise_result_invalidated_
+                    ? ProfilingDifferentialRevalidationDisposition::
+                          InvalidateNoiseResult
+                    : ProfilingDifferentialRevalidationDisposition::
+                          RejectRevision,
+                "revalidation observation digest is unavailable");
         }
         const auto receipt_sha256 = revalidation_receipt_digest(
             input, phase, ordinal, observation.checked_at,
@@ -780,9 +796,17 @@ revalidate_profiling_differential_input(
             disposition);
         if (!receipt_sha256) {
             attempt.revision_rejected_ = true;
+            attempt.noise_result_invalidated_ =
+                attempt.noise_result_invalidated_ ||
+                disposition == ProfilingDifferentialRevalidationDisposition::
+                                   InvalidateNoiseResult;
             return without_receipt(
-                ProfilingDifferentialRevalidationStatus::RevisionRejected,
-                ProfilingDifferentialRevalidationDisposition::RejectRevision,
+                ProfilingDifferentialRevalidationStatus::DigestUnavailable,
+                attempt.noise_result_invalidated_
+                    ? ProfilingDifferentialRevalidationDisposition::
+                          InvalidateNoiseResult
+                    : ProfilingDifferentialRevalidationDisposition::
+                          RejectRevision,
                 "revalidation receipt digest is unavailable");
         }
 

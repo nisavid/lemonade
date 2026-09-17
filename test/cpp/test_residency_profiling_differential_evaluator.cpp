@@ -126,12 +126,14 @@ ProfilingNoiseBindings noise_bindings() {
 }
 
 ParsedProfilingNoiseResult parsed_noise_result(
-    ProfilingNoiseBindings bindings = noise_bindings()) {
+    ProfilingNoiseBindings bindings = noise_bindings(),
+    std::uint64_t read_skew_uncertainty_bytes = 8,
+    std::uint64_t point_variation_bytes = 64) {
     ProfilingNoTargetGttTrace trace;
     trace.started_at = std::chrono::steady_clock::time_point{1h};
     trace.exact_end = trace.started_at + profiling_noise_trace_duration;
     trace.bindings = std::move(bindings);
-    trace.read_skew_uncertainty_bytes = 8;
+    trace.read_skew_uncertainty_bytes = read_skew_uncertainty_bytes;
 
     std::uint64_t index = 0;
     for (auto scheduled = trace.started_at; scheduled < trace.exact_end;
@@ -140,7 +142,8 @@ ParsedProfilingNoiseResult parsed_noise_result(
         reading.scheduled_at = scheduled;
         reading.read_started_at = scheduled;
         reading.read_finished_at = scheduled + 1ms;
-        reading.gtt_used_bytes = 8192 + (index % 2) * 64;
+        reading.gtt_used_bytes =
+            8192 + (index % 2) * point_variation_bytes;
         reading.observed_bindings = trace.bindings;
         trace.readings.push_back(std::move(reading));
     }
@@ -1763,6 +1766,76 @@ void require_overflow_source_drift_beats_ordinary_faults() {
     }
 }
 
+void require_clock_boundary_overflow_preserves_source_invalidation() {
+    auto noise = parsed_noise_result();
+    auto input = frozen_input(noise, 1, 1);
+    const auto noise_checksum =
+        std::string(input.noise().checksum_sha256());
+    const auto first = std::chrono::steady_clock::time_point{89h};
+    std::vector<ProfilingDifferentialRepetition> repetitions;
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, first, 9200,
+        input));
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Validation, 0, first + 20s,
+        9200, input));
+    issue_live_receipts(input, repetitions);
+
+    auto &baseline = repetitions.back().baseline;
+    const auto near_maximum =
+        std::chrono::steady_clock::time_point::max() - 1s;
+    baseline.marker->marked_at = near_maximum;
+    auto changed_source = baseline.points.front();
+    changed_source.scheduled_at = near_maximum;
+    changed_source.read_started_at = near_maximum;
+    changed_source.read_finished_at = near_maximum + 1ms;
+    changed_source.observed_bindings.boot_id_sha256 = digest('0');
+    baseline.points.clear();
+    baseline.points.push_back(std::move(changed_source));
+
+    auto result = evaluate_component(
+        input, method_binding(), repetitions);
+    require(!result.accepted() &&
+                result.status ==
+                    ProfilingDifferentialEvaluationStatus::SourceDrift &&
+                result.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        InvalidateNoiseResult &&
+                result.noise_result_checksum_sha256 == noise_checksum &&
+                !result.evidence.has_value(),
+            "clock-boundary overflow masked an authorized source change");
+
+    auto clean_input = frozen_input(noise, 1, 1);
+    std::vector<ProfilingDifferentialRepetition> clean_repetitions;
+    clean_repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, first + 40s,
+        9200, clean_input));
+    clean_repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Validation, 0, first + 60s,
+        9200, clean_input));
+    issue_live_receipts(clean_input, clean_repetitions);
+    auto &clean_baseline = clean_repetitions.back().baseline;
+    clean_baseline.marker->marked_at = near_maximum;
+    auto clean_source = clean_baseline.points.front();
+    clean_source.scheduled_at = near_maximum;
+    clean_source.read_started_at = near_maximum;
+    clean_source.read_finished_at = near_maximum + 1ms;
+    clean_baseline.points.clear();
+    clean_baseline.points.push_back(std::move(clean_source));
+
+    auto clean_result = evaluate_component(
+        clean_input, method_binding(), clean_repetitions);
+    require(!clean_result.accepted() &&
+                clean_result.status ==
+                    ProfilingDifferentialEvaluationStatus::InvalidWindow &&
+                clean_result.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision &&
+                !clean_result.noise_result_checksum_sha256.has_value() &&
+                !clean_result.evidence.has_value(),
+            "clean clock-boundary overflow gained invalidation authority");
+}
+
 void require_revalidation_authority_precedes_source_audit() {
     auto noise = parsed_noise_result();
     const auto first = std::chrono::steady_clock::time_point{90h};
@@ -2396,6 +2469,97 @@ void require_incomplete_owner_projection_remains_explicit() {
             "incomplete attribution exceeded its authoritative global point");
 }
 
+void require_zero_component_composes_into_profiling_input() {
+    auto noise = parsed_noise_result(noise_bindings(), 0, 0);
+    auto input = frozen_input(noise, 1, 1, 0, 0);
+    const auto first = std::chrono::steady_clock::time_point{88h};
+    std::vector<ProfilingDifferentialRepetition> repetitions;
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, first, 8192,
+        input));
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Validation, 0, first + 20s,
+        8192, input));
+    for (auto &record : repetitions) {
+        for (auto *plateau : {&record.baseline, &record.loaded,
+                              &record.release}) {
+            for (auto &point : plateau->points) {
+                point.global_gtt_used_bytes = 8192;
+            }
+        }
+    }
+
+    auto component = evaluate_component(
+        input, method_binding(), repetitions);
+    require(component.accepted() &&
+                component.evidence->retained_gtt_bound_bytes() == 0 &&
+                component.evidence->owner_projection_coverage() ==
+                    ProfilingDifferentialOwnerProjectionCoverage::Absent,
+            "zero-bound component fixture was not accepted with absent "
+            "attribution");
+
+    const auto transient_envelope_sha256 = digest('d');
+    auto method_evidence =
+        compose_retained_gtt_profiling_input_evidence(
+            *component.evidence, transient_envelope_sha256);
+    require(method_evidence.has_value() &&
+                method_evidence->retained_gtt_claim.constraint_id ==
+                    component.evidence->method_binding().constraint_id &&
+                method_evidence->retained_gtt_claim.unit == ClaimUnit::Bytes &&
+                method_evidence->retained_gtt_claim.amount == 0 &&
+                method_evidence->calibration_evidence_sha256 ==
+                    component.evidence->checksum_sha256() &&
+                method_evidence->transient_envelope_sha256 ==
+                    transient_envelope_sha256 &&
+                method_evidence->owner_projection_coverage ==
+                    ProfilingOwnerCoverage::Unknown,
+            "component composition changed a zero bound, dropped evidence, "
+            "or mapped absent attribution as known");
+    require(!compose_retained_gtt_profiling_input_evidence(
+                 *component.evidence, {})
+                 .has_value(),
+            "component composition omitted the transient envelope binding");
+
+    const auto &transaction = input.identity().transaction;
+    ProfilingInputEnvelopeDraft envelope;
+    envelope.deployment_id = transaction.deployment_id;
+    envelope.sequence = transaction.sequence;
+    envelope.profiling_transaction_id = transaction.profiling_transaction_id;
+    envelope.selector = transaction.selector;
+    envelope.generations = transaction.generations;
+    envelope.method_evidence = std::move(*method_evidence);
+    envelope.completion.manifest_claims = {
+        {ClaimFamily::ConsumableCapacity, ClaimCompleteness::KnownZero, {}},
+        {ClaimFamily::SafetyFloor, ClaimCompleteness::KnownZero, {}},
+        {ClaimFamily::CardinalityPool, ClaimCompleteness::KnownZero, {}},
+        {ClaimFamily::CompatibilityExclusivity,
+         ClaimCompleteness::NotApplicable, {}},
+    };
+    envelope.completion.ownership_recovery_evidence_sha256 =
+        transaction.ownership_recovery_evidence_sha256;
+    envelope.completion.action_lease_closure_sha256 =
+        transaction.action_lease_closure_sha256;
+    envelope.observation_contract_sha256 =
+        transaction.observation_contract_sha256;
+    envelope.predictor_contract_sha256 = transaction.predictor_contract_sha256;
+    envelope.observed_at = "2026-09-17T10:00:00Z";
+    envelope.fresh_until = "2026-09-17T10:05:00Z";
+    envelope.max_clock_skew_milliseconds = 1;
+
+    auto sealed = seal_profiling_input(std::move(envelope));
+    require(sealed.accepted(),
+            "a faithfully composed zero-bound profiling input was rejected");
+    auto parsed = parse_profiling_input(sealed.candidate->canonical_bytes());
+    require(parsed.accepted() &&
+                parsed.candidate->differential_retained_gtt() != nullptr &&
+                parsed.candidate->differential_retained_gtt()
+                        ->retained_gtt_claim.amount == 0 &&
+                parsed.candidate->differential_retained_gtt()
+                        ->owner_projection_coverage ==
+                    ProfilingOwnerCoverage::Unknown,
+            "the zero-bound component envelope did not round-trip faithfully");
+}
+
 void require_complete_ordered_point_schedule() {
     auto noise = parsed_noise_result();
     auto input = frozen_input(noise, 1, 1);
@@ -2647,6 +2811,7 @@ int main() {
         require_bounded_vector_tail_is_never_evidence();
         require_phase_scoped_source_audits();
         require_overflow_source_drift_beats_ordinary_faults();
+        require_clock_boundary_overflow_preserves_source_invalidation();
         require_revalidation_authority_precedes_source_audit();
         require_invalidating_revalidations_beat_plateau_faults();
         require_checksum_keyed_invalidation_crosses_revisions();
@@ -2655,6 +2820,7 @@ int main() {
         require_exact_method_and_constraint_binding();
         require_explicit_owner_projection_coverage();
         require_incomplete_owner_projection_remains_explicit();
+        require_zero_component_composes_into_profiling_input();
         require_complete_ordered_point_schedule();
         require_fresh_revalidation_and_preserved_dispositions();
         require_phase_markers_follow_completed_reads();

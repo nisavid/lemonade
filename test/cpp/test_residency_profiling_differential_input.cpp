@@ -505,6 +505,59 @@ void require_invalidation_precedence_and_terminal_authority_boundary() {
                 compound_attempt.noise_result_invalidated(),
             "same-observation target mismatch masked counter invalidation");
 
+    auto malformed_target_input =
+        freeze_valid_input(*produced.result, trace.bindings);
+    ProfilingDifferentialAttemptState malformed_target_attempt(
+        malformed_target_input);
+    auto malformed_target = observation_for(
+        malformed_target_input, trace.exact_end + 3h + 1min);
+    malformed_target.target_activity = ProfilingDifferentialTargetActivity{
+        {},
+        malformed_target_input.identity()
+            .target_containment_identity_sha256};
+    auto malformed_target_result = revalidate_profiling_differential_input(
+        malformed_target_input, malformed_target_attempt,
+        ProfilingDifferentialRepetitionPhase::Calibration, 0,
+        malformed_target);
+    require(!malformed_target_result.accepted() &&
+                !malformed_target_result.receipt.has_value() &&
+                malformed_target_result.status ==
+                    ProfilingDifferentialRevalidationStatus::TargetMismatch &&
+                malformed_target_result.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision &&
+                malformed_target_attempt.revision_rejected() &&
+                !malformed_target_attempt.noise_result_invalidated(),
+            "malformed target identity was reported as noise-binding drift");
+
+    auto malformed_compound_input =
+        freeze_valid_input(*produced.result, trace.bindings);
+    ProfilingDifferentialAttemptState malformed_compound_attempt(
+        malformed_compound_input);
+    auto malformed_compound = observation_for(
+        malformed_compound_input, trace.exact_end + 3h + 2min);
+    malformed_compound.counter_reset_detected = true;
+    malformed_compound.target_activity =
+        ProfilingDifferentialTargetActivity{
+            {},
+            malformed_compound_input.identity()
+                .target_containment_identity_sha256};
+    auto malformed_compound_result =
+        revalidate_profiling_differential_input(
+            malformed_compound_input, malformed_compound_attempt,
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            malformed_compound);
+    require(!malformed_compound_result.accepted() &&
+                !malformed_compound_result.receipt.has_value() &&
+                malformed_compound_result.status ==
+                    ProfilingDifferentialRevalidationStatus::CounterReset &&
+                malformed_compound_result.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        InvalidateNoiseResult &&
+                malformed_compound_attempt.revision_rejected() &&
+                malformed_compound_attempt.noise_result_invalidated(),
+            "malformed target identity masked same-observation invalidation");
+
     auto rejected_input =
         freeze_valid_input(*produced.result, trace.bindings);
     ProfilingDifferentialAttemptState rejected_attempt(rejected_input);

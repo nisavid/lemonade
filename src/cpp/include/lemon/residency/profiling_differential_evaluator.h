@@ -270,6 +270,11 @@ private:
     parse_profiling_differential_evidence(std::string_view bytes);
 };
 
+std::optional<DifferentialRetainedGttEvidenceDraft>
+compose_retained_gtt_profiling_input_evidence(
+    const ParsedProfilingDifferentialEvidence &evidence,
+    std::string transient_envelope_sha256);
+
 struct ProfilingDifferentialEvaluationResult {
     ProfilingDifferentialEvaluationStatus status =
         ProfilingDifferentialEvaluationStatus::EvidenceUnavailable;
