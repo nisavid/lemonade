@@ -143,6 +143,10 @@ make_platform_durable_file_adapter_in_fixed_namespace(
 class DurableFixedNamespaceConvergenceProbe {
 public:
     virtual ~DurableFixedNamespaceConvergenceProbe() = default;
+    virtual void before_publish_attempt(std::size_t) {}
+    virtual void observe_publish_result(std::size_t, bool, unsigned long) {}
+    virtual void observe_stage_cleanup_identity_mismatch(std::string_view,
+                                                          std::string_view) {}
     virtual void after_publish_attempt(std::size_t attempt, bool moved) = 0;
 };
 
