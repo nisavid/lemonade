@@ -5721,7 +5721,10 @@ class FixedNamespaceIdentityMismatchProbe final
     : public lemon::residency::detail::DurableFixedNamespaceConvergenceProbe {
 public:
     struct Snapshot {
+        std::size_t pre_publish_attempt = 0;
+        bool pre_publish_reached = false;
         std::size_t publish_attempt = 0;
+        bool publish_result_observed = false;
         bool publish_moved = false;
         unsigned long publish_error = 0;
         bool cleanup_identity_mismatch = false;
@@ -5729,10 +5732,19 @@ public:
         std::string observed_stage_identity;
     };
 
+    void before_publish_attempt(std::size_t attempt) override {
+        std::unique_lock lock(mutex_);
+        snapshot_.pre_publish_attempt = attempt;
+        snapshot_.pre_publish_reached = true;
+        condition_.notify_all();
+        condition_.wait(lock, [&] { return released_; });
+    }
+
     void observe_publish_result(std::size_t attempt, bool moved,
                                 unsigned long native_error) override {
         std::lock_guard lock(mutex_);
         snapshot_.publish_attempt = attempt;
+        snapshot_.publish_result_observed = true;
         snapshot_.publish_moved = moved;
         snapshot_.publish_error = native_error;
     }
@@ -5745,21 +5757,13 @@ public:
         snapshot_.observed_stage_identity = observed;
     }
 
-    void after_publish_attempt(std::size_t, bool moved) override {
-        if (moved) {
-            return;
-        }
-        std::unique_lock lock(mutex_);
-        failed_publish_reached_ = true;
-        condition_.notify_all();
-        condition_.wait(lock, [&] { return released_; });
-    }
+    void after_publish_attempt(std::size_t, bool) override {}
 
-    bool wait_for_failed_publish(std::uint64_t timeout_milliseconds) {
+    bool wait_for_pre_publish(std::uint64_t timeout_milliseconds) {
         std::unique_lock lock(mutex_);
         return condition_.wait_for(
             lock, std::chrono::milliseconds(timeout_milliseconds),
-            [&] { return failed_publish_reached_; });
+            [&] { return snapshot_.pre_publish_reached; });
     }
 
     void release() {
@@ -5777,7 +5781,6 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable condition_;
     Snapshot snapshot_;
-    bool failed_publish_reached_ = false;
     bool released_ = false;
 };
 
@@ -5822,12 +5825,6 @@ int reproduce_windows_fixed_namespace_stage_race() {
 
     require(::CreateDirectoryW(stage.c_str(), nullptr) != 0,
             "Windows reproducer could not create stage S");
-    const auto held_stage = ::CreateFileW(
-        stage.c_str(), FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
-        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-    require(held_stage != INVALID_HANDLE_VALUE,
-            "Windows reproducer could not pin stage S against publication");
 
     FixedNamespaceIdentityMismatchProbe probe;
     std::unique_ptr<lemon::residency::detail::DurableFileAdapter>
@@ -5838,20 +5835,12 @@ int reproduce_windows_fixed_namespace_stage_race() {
                 parent.path(), child_name, probe);
     });
 
-    const bool loser_is_blocked = probe.wait_for_failed_publish(5000);
+    const bool loser_is_blocked = probe.wait_for_pre_publish(5000);
     if (!loser_is_blocked) {
-        ::CloseHandle(held_stage);
         probe.release();
         losing_creator.join();
         require(false,
-                "Windows reproducer loser did not reach its held-stage "
-                "publication failure");
-    }
-    const bool stage_released = ::CloseHandle(held_stage) != 0;
-    if (!stage_released) {
-        probe.release();
-        losing_creator.join();
-        require(false, "Windows reproducer could not release stage S");
+                "Windows reproducer loser did not reach its pre-publish gate");
     }
 
     auto winning_adapter =
@@ -5904,7 +5893,9 @@ int reproduce_windows_fixed_namespace_stage_race() {
         observation.expected_stage_identity !=
             observation.observed_stage_identity;
     const bool converged =
-        !observation.publish_moved && observation.publish_error != 0 &&
+        observation.pre_publish_reached &&
+        observation.publish_result_observed && !observation.publish_moved &&
+        observation.publish_error != 0 &&
         foreign_stage_preserved && winner_lock.succeeded() &&
         winner_preflight.succeeded() && winner_identity.result.succeeded() &&
         winner_unlock.succeeded() && loser_lock.succeeded() &&
@@ -5913,7 +5904,13 @@ int reproduce_windows_fixed_namespace_stage_race() {
         loser_identity.identity == winner_identity.identity;
 
     std::cout << std::boolalpha
+              << "pre_publish_reached=" << observation.pre_publish_reached
+              << '\n'
+              << "pre_publish_attempt=" << observation.pre_publish_attempt
+              << '\n'
               << "publish_attempt=" << observation.publish_attempt << '\n'
+              << "publish_result_observed="
+              << observation.publish_result_observed << '\n'
               << "publish_moved=" << observation.publish_moved << '\n'
               << "publish_native_error=" << observation.publish_error << '\n'
               << "cleanup_status="
@@ -5952,7 +5949,11 @@ int reproduce_windows_fixed_namespace_stage_race() {
                   winner_identity.identity == loser_identity.identity)
               << '\n'
               << "hypothesis_observed="
-              << (identity_mismatch_observed && !loser_lock.succeeded() &&
+              << (observation.pre_publish_reached &&
+                  observation.publish_result_observed &&
+                  !observation.publish_moved &&
+                  observation.publish_error != 0 &&
+                  identity_mismatch_observed && !loser_lock.succeeded() &&
                   !loser_preflight.succeeded())
               << '\n'
               << "convergence_contract_satisfied=" << converged << std::endl;

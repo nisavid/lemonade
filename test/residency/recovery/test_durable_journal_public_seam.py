@@ -6132,6 +6132,21 @@ def require_windows_fixed_namespace_convergence_contract(source: str) -> None:
     )
     if not all(token in compact for token in required):
         raise AssertionError("Windows fixed namespace omits bounded convergence")
+    pre_publish = compact.find("before_publish_attempt(attempt)")
+    move = compact.find(
+        "::MoveFileExW(stage.c_str(),child.c_str(),MOVEFILE_WRITE_THROUGH)"
+    )
+    publish_result = compact.find(
+        "observe_publish_result(attempt,moved,"
+        "static_cast<unsignedlong>(move_error))"
+    )
+    if min(pre_publish, move, publish_result) < 0 or not (
+        pre_publish < move < publish_result
+    ):
+        raise AssertionError(
+            "Windows fixed namespace omits or misorders its test-only "
+            "publication observations"
+        )
     if compact.count("fixed_namespace_stage_error_is_retryable(error)") < 2:
         raise AssertionError(
             "Windows fixed namespace does not classify stage errors narrowly"

@@ -1810,6 +1810,11 @@ std::unique_ptr<DurableFileAdapter> make_windows_fixed_namespace_adapter(
             return reject();
         }
 
+#ifdef LEMONADE_RESIDENCY_DURABLE_TESTING
+        if (probe != nullptr) {
+            probe->before_publish_attempt(attempt);
+        }
+#endif
         const bool moved =
             ::MoveFileExW(stage.c_str(), child.c_str(),
                           MOVEFILE_WRITE_THROUGH) != 0;
