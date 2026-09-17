@@ -980,6 +980,7 @@ set(SOURCES_CORE
     src/cpp/server/residency/profiling_capture_authority.cpp
     src/cpp/server/residency/profiling_common.cpp
     src/cpp/server/residency/profiling_differential_input.cpp
+    src/cpp/server/residency/profiling_differential_evaluator.cpp
     src/cpp/server/residency/profiling_noise.cpp
     src/cpp/server/residency/profiling_provider.cpp
     src/cpp/server/residency/profiling_transaction.cpp
@@ -3698,6 +3699,27 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_DIFFERENTIAL_INPUT_TEST_SRC}
     )
     set_tests_properties(
         ResidencyProfilingDifferentialInput PROPERTIES TIMEOUT 30
+    )
+endif()
+
+set(_RESIDENCY_PROFILING_DIFFERENTIAL_EVALUATOR_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_differential_evaluator.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_DIFFERENTIAL_EVALUATOR_TEST_SRC}")
+    add_executable(
+        test_residency_profiling_differential_evaluator
+        test/cpp/test_residency_profiling_differential_evaluator.cpp
+    )
+    target_link_libraries(test_residency_profiling_differential_evaluator PRIVATE
+        lemonade-server-core
+    )
+    add_cpp_ci_test(
+        ResidencyProfilingDifferentialEvaluator
+        CI ON
+        COMMAND test_residency_profiling_differential_evaluator
+    )
+    set_tests_properties(
+        ResidencyProfilingDifferentialEvaluator PROPERTIES TIMEOUT 30
     )
 endif()
 

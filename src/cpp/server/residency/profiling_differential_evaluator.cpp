@@ -1,0 +1,1748 @@
+#include "lemon/residency/profiling_differential_evaluator.h"
+
+#include "profiling_common.h"
+
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <initializer_list>
+#include <limits>
+#include <map>
+#include <set>
+#include <stdexcept>
+#include <utility>
+
+namespace lemon::residency {
+namespace {
+
+using json = nlohmann::json;
+using profiling_internal::append_string;
+using profiling_internal::append_u64;
+using profiling_internal::bounded_diagnostic;
+using profiling_internal::digest_is_valid;
+using profiling_internal::elapsed_between;
+using profiling_internal::sha256_hex;
+
+constexpr char component_evidence_domain[] =
+    "lemonade.residency.profiling-differential-evidence/v1\0";
+constexpr char repetition_provenance_domain[] =
+    "lemonade.residency.profiling-differential-repetition/v1\0";
+constexpr char noise_bindings_domain[] =
+    "lemonade.residency.profiling-noise-bindings/v1\0";
+
+class ComponentParseFailure final : public std::runtime_error {
+public:
+    ComponentParseFailure(ProfilingDifferentialEvidenceParseStatus status,
+                          std::string diagnostic)
+        : std::runtime_error(std::move(diagnostic)), status_(status) {}
+
+    ProfilingDifferentialEvidenceParseStatus status() const noexcept {
+        return status_;
+    }
+
+private:
+    ProfilingDifferentialEvidenceParseStatus status_;
+};
+
+[[noreturn]] void reject_parse(
+    ProfilingDifferentialEvidenceParseStatus status,
+    std::string diagnostic) {
+    throw ComponentParseFailure(status, std::move(diagnostic));
+}
+
+bool identifier_is_valid(std::string_view value) noexcept {
+    return !value.empty() &&
+           value.size() <= max_local_overlay_identifier_bytes &&
+           std::all_of(value.begin(), value.end(), [](unsigned char character) {
+               return character >= 0x21 && character <= 0x7e;
+           });
+}
+
+bool bindings_equal(const ProfilingNoiseBindings &left,
+                    const ProfilingNoiseBindings &right) noexcept {
+    return left.deployment_id == right.deployment_id &&
+           left.deployment_epoch_sha256 == right.deployment_epoch_sha256 &&
+           left.boot_id_sha256 == right.boot_id_sha256 &&
+           left.device_identity_sha256 == right.device_identity_sha256 &&
+           left.topology_sha256 == right.topology_sha256 &&
+           left.kernel_identity_sha256 == right.kernel_identity_sha256 &&
+           left.driver_identity_sha256 == right.driver_identity_sha256 &&
+           left.counter_source_id == right.counter_source_id &&
+           left.counter_source_revision_sha256 ==
+               right.counter_source_revision_sha256 &&
+           left.counter_continuity_epoch_sha256 ==
+               right.counter_continuity_epoch_sha256 &&
+           left.campaign_contract_sha256 == right.campaign_contract_sha256 &&
+           left.procedure_revision_sha256 == right.procedure_revision_sha256 &&
+           left.background_inventory_sha256 ==
+               right.background_inventory_sha256;
+}
+
+json bindings_document(const ProfilingNoiseBindings &bindings) {
+    return json{
+        {"background_inventory_sha256",
+         bindings.background_inventory_sha256},
+        {"boot_id_sha256", bindings.boot_id_sha256},
+        {"campaign_contract_sha256", bindings.campaign_contract_sha256},
+        {"counter_continuity_epoch_sha256",
+         bindings.counter_continuity_epoch_sha256},
+        {"counter_source_id", bindings.counter_source_id},
+        {"counter_source_revision_sha256",
+         bindings.counter_source_revision_sha256},
+        {"deployment_epoch_sha256", bindings.deployment_epoch_sha256},
+        {"deployment_id", bindings.deployment_id},
+        {"device_identity_sha256", bindings.device_identity_sha256},
+        {"driver_identity_sha256", bindings.driver_identity_sha256},
+        {"kernel_identity_sha256", bindings.kernel_identity_sha256},
+        {"procedure_revision_sha256", bindings.procedure_revision_sha256},
+        {"topology_sha256", bindings.topology_sha256},
+    };
+}
+
+json catalog_selector_document(const RuntimeCatalogSelector &selector) {
+    json constraints = json::array();
+    for (const auto constraint : selector.constraints) {
+        constraints.push_back(wire_name(constraint));
+    }
+    return json{
+        {"backend_channel", selector.backend_channel},
+        {"base_variant", selector.base_variant},
+        {"constraints", std::move(constraints)},
+        {"material_profiles", selector.material_profiles},
+        {"model_type", selector.model_type},
+        {"operation_kind", wire_name(selector.operation_kind)},
+        {"operation_template", wire_name(selector.operation_template)},
+        {"platform", selector.platform},
+        {"recovery", selector.recovery},
+        {"source_support_baseline", selector.source_support_baseline},
+    };
+}
+
+json selector_document(const LocalOverlaySelectorIdentity &selector) {
+    return json{
+        {"backend_build_sha256", selector.backend_build_sha256},
+        {"canonical_model_id", selector.canonical_model_id},
+        {"catalog", catalog_selector_document(selector.catalog_selector)},
+        {"catalog_sha256", selector.catalog_sha256},
+        {"configuration_sha256", selector.configuration_sha256},
+        {"dependency_set_sha256", selector.dependency_set_sha256},
+        {"device_identity_sha256", selector.device_identity_sha256},
+        {"driver_identity_sha256", selector.driver_identity_sha256},
+        {"model_artifact_sha256", selector.model_artifact_sha256},
+        {"operation_contract_sha256", selector.operation_contract_sha256},
+        {"topology_sha256", selector.topology_sha256},
+        {"workload_sha256", selector.workload_sha256},
+    };
+}
+
+std::string_view projection_coverage_wire(
+    ProfilingDifferentialOwnerProjectionCoverage coverage) noexcept {
+    switch (coverage) {
+    case ProfilingDifferentialOwnerProjectionCoverage::Complete:
+        return "complete";
+    case ProfilingDifferentialOwnerProjectionCoverage::Absent:
+        return "absent";
+    }
+    return {};
+}
+
+void append_bindings(std::string &bytes,
+                     const ProfilingNoiseBindings &bindings) {
+    append_string(bytes, bindings_document(bindings).dump());
+}
+
+void append_time(std::string &bytes,
+                 std::chrono::steady_clock::time_point value) {
+    append_u64(bytes, static_cast<std::uint64_t>(
+                          value.time_since_epoch().count()));
+}
+
+void append_marker(
+    std::string &bytes,
+    const std::optional<ProfilingDifferentialPhaseMarker> &marker) {
+    append_u64(bytes, marker.has_value() ? 1 : 0);
+    if (!marker) return;
+    append_u64(bytes, static_cast<std::uint64_t>(marker->kind));
+    append_time(bytes, marker->marked_at);
+    append_u64(bytes, marker->ready ? 1 : 0);
+    append_string(bytes, marker->frozen_input_sha256);
+    append_string(bytes, marker->selector_sha256);
+    append_string(bytes, marker->target_client_identity_sha256);
+    append_string(bytes, marker->target_containment_identity_sha256);
+    append_string(bytes, marker->provenance_sha256);
+}
+
+void append_point(std::string &bytes,
+                  const ProfilingDifferentialGttPoint &point) {
+    append_time(bytes, point.scheduled_at);
+    append_time(bytes, point.read_started_at);
+    append_time(bytes, point.read_finished_at);
+    append_u64(bytes, point.global_gtt_used_bytes.has_value() ? 1 : 0);
+    if (point.global_gtt_used_bytes) {
+        append_u64(bytes, *point.global_gtt_used_bytes);
+    }
+    append_bindings(bytes, point.observed_bindings);
+    append_string(bytes, point.frozen_input_sha256);
+    append_string(bytes, point.selector_sha256);
+    append_string(bytes, point.target_client_identity_sha256);
+    append_string(bytes, point.target_containment_identity_sha256);
+    append_string(bytes, point.provenance_sha256);
+    append_u64(bytes,
+               static_cast<std::uint64_t>(point.owner_projection_status));
+    append_u64(bytes, point.owner_gtt_used_bytes.has_value() ? 1 : 0);
+    if (point.owner_gtt_used_bytes) {
+        append_u64(bytes, *point.owner_gtt_used_bytes);
+    }
+}
+
+void append_plateau(std::string &bytes,
+                    const ProfilingDifferentialPlateauObservation &plateau) {
+    append_marker(bytes, plateau.marker);
+    append_u64(bytes, static_cast<std::uint64_t>(plateau.points.size()));
+    for (const auto &point : plateau.points) append_point(bytes, point);
+}
+
+std::optional<std::string> repetition_provenance(
+    const ProfilingDifferentialRepetition &repetition) {
+    std::string bytes(repetition_provenance_domain,
+                      sizeof(repetition_provenance_domain) - 1);
+    append_u64(bytes, static_cast<std::uint64_t>(repetition.phase));
+    append_u64(bytes, repetition.ordinal);
+    const auto &revalidation = repetition.revalidation;
+    append_time(bytes, revalidation.checked_at);
+    append_bindings(bytes, revalidation.observed_bindings);
+    append_string(bytes,
+                  revalidation.observed_noise_result_checksum_sha256);
+    append_string(bytes,
+                  revalidation.observed_counter_continuity_epoch_sha256);
+    append_u64(bytes, revalidation.observed_non_target_gtt_range_bytes);
+    append_u64(bytes, revalidation.target_activity.has_value() ? 1 : 0);
+    if (revalidation.target_activity) {
+        append_string(bytes,
+                      revalidation.target_activity->client_identity_sha256);
+        append_string(
+            bytes,
+            revalidation.target_activity->containment_identity_sha256);
+    }
+    append_u64(bytes, revalidation.counter_reset_detected ? 1 : 0);
+    append_u64(bytes,
+               revalidation.counter_discontinuity_detected ? 1 : 0);
+    append_u64(bytes,
+               revalidation.unexpected_non_target_client_detected ? 1 : 0);
+    append_plateau(bytes, repetition.baseline);
+    append_plateau(bytes, repetition.loaded);
+    append_plateau(bytes, repetition.release);
+    return sha256_hex(bytes);
+}
+
+struct PlateauSummary {
+    std::uint64_t minimum = 0;
+    std::uint64_t maximum = 0;
+    std::chrono::steady_clock::time_point window_end;
+    std::chrono::steady_clock::time_point completed_at;
+    ProfilingDifferentialOwnerProjectionCoverage projection_coverage =
+        ProfilingDifferentialOwnerProjectionCoverage::Complete;
+};
+
+struct PlateauResult {
+    ProfilingDifferentialEvaluationStatus status =
+        ProfilingDifferentialEvaluationStatus::InvalidWindow;
+    std::string diagnostic;
+    std::optional<PlateauSummary> summary;
+};
+
+ProfilingDifferentialEvaluationResult reject(
+    ProfilingDifferentialEvaluationStatus status,
+    std::string diagnostic) {
+    ProfilingDifferentialEvaluationResult result;
+    result.status = status;
+    result.diagnostic = bounded_diagnostic(std::move(diagnostic));
+    return result;
+}
+
+bool marker_matches(const ProfilingDifferentialPhaseMarker &marker,
+                    ProfilingDifferentialMarkerKind expected_kind,
+                    const FrozenProfilingDifferentialInput &input) noexcept {
+    return marker.kind == expected_kind && marker.ready &&
+           marker.frozen_input_sha256 == input.frozen_input_sha256() &&
+           marker.selector_sha256 ==
+               input.identity().transaction.selector_sha256 &&
+           marker.target_client_identity_sha256 ==
+               input.identity().target_client_identity_sha256 &&
+           marker.target_containment_identity_sha256 ==
+               input.identity().target_containment_identity_sha256 &&
+           digest_is_valid(marker.provenance_sha256);
+}
+
+PlateauResult evaluate_plateau(
+    const ProfilingDifferentialPlateauObservation &plateau,
+    ProfilingDifferentialMarkerKind expected_kind,
+    const FrozenProfilingDifferentialInput &input) {
+    if (!plateau.marker) {
+        return {ProfilingDifferentialEvaluationStatus::MissingMarker,
+                "required phase-ready marker is missing", std::nullopt};
+    }
+    if (!marker_matches(*plateau.marker, expected_kind, input)) {
+        return {ProfilingDifferentialEvaluationStatus::InvalidMarker,
+                "phase-ready marker does not match the frozen input",
+                std::nullopt};
+    }
+    if (plateau.points.empty() ||
+        plateau.points.size() >
+            profiling_differential_maximum_plateau_points) {
+        return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
+                "plateau point count is invalid", std::nullopt};
+    }
+    for (std::size_t index = 1; index < plateau.points.size(); ++index) {
+        if (plateau.points[index].scheduled_at <=
+                plateau.points[index - 1].scheduled_at ||
+            plateau.points[index].read_started_at <=
+                plateau.points[index - 1].read_started_at) {
+            return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
+                    "plateau point schedule is not strictly ordered",
+                    std::nullopt};
+        }
+    }
+
+    const auto first = std::find_if(
+        plateau.points.begin(), plateau.points.end(),
+        [&](const auto &point) {
+            return point.scheduled_at >= plateau.marker->marked_at;
+        });
+    if (first == plateau.points.end()) {
+        return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
+                "plateau has no acquisition on or after its marker",
+                std::nullopt};
+    }
+    const auto window_duration =
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            profiling_differential_window);
+    if (first->scheduled_at >
+        std::chrono::steady_clock::time_point::max() - window_duration) {
+        return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
+                "plateau window boundary overflows", std::nullopt};
+    }
+    const auto window_end = first->scheduled_at + window_duration;
+    const auto max_gap =
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            profiling_differential_max_read_start_gap);
+    const auto marker_gap =
+        elapsed_between(plateau.marker->marked_at, first->scheduled_at);
+    if (!marker_gap || *marker_gap > max_gap) {
+        return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
+                "first plateau acquisition is late", std::nullopt};
+    }
+    PlateauSummary summary;
+    summary.minimum = std::numeric_limits<std::uint64_t>::max();
+    summary.window_end = window_end;
+    summary.completed_at = window_end;
+    bool observed = false;
+    std::size_t point_count = 0;
+    const ProfilingDifferentialGttPoint *previous = nullptr;
+    const ProfilingDifferentialGttPoint *last = nullptr;
+    for (auto point = first;
+         point != plateau.points.end() && point->scheduled_at < window_end;
+         ++point) {
+        if (!point->global_gtt_used_bytes ||
+            point->read_started_at < point->scheduled_at ||
+            point->read_finished_at < point->read_started_at ||
+            !digest_is_valid(point->provenance_sha256)) {
+            return {ProfilingDifferentialEvaluationStatus::InvalidPoint,
+                    "plateau contains an incomplete point", std::nullopt};
+        }
+        if (point->read_started_at >= window_end) {
+            return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
+                    "plateau acquisition starts outside the fixed window",
+                    std::nullopt};
+        }
+        const auto schedule_delay =
+            elapsed_between(point->scheduled_at, point->read_started_at);
+        if (!schedule_delay || *schedule_delay > max_gap) {
+            return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
+                    "plateau acquisition did not start on cadence",
+                    std::nullopt};
+        }
+        if (previous != nullptr) {
+            const auto scheduled_gap = elapsed_between(
+                previous->scheduled_at, point->scheduled_at);
+            const auto read_gap = elapsed_between(
+                previous->read_started_at, point->read_started_at);
+            if (!scheduled_gap ||
+                *scheduled_gap <=
+                    std::chrono::steady_clock::duration::zero() ||
+                *scheduled_gap > max_gap || !read_gap ||
+                *read_gap <= std::chrono::steady_clock::duration::zero() ||
+                *read_gap > max_gap) {
+                return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
+                        "plateau schedule or read-start gap is invalid",
+                        std::nullopt};
+            }
+        }
+        if (point->frozen_input_sha256 != input.frozen_input_sha256() ||
+            point->selector_sha256 !=
+                input.identity().transaction.selector_sha256) {
+            return {ProfilingDifferentialEvaluationStatus::IdentityDrift,
+                    "plateau point identity changed", std::nullopt};
+        }
+        if (point->target_client_identity_sha256 !=
+                input.identity().target_client_identity_sha256 ||
+            point->target_containment_identity_sha256 !=
+                input.identity().target_containment_identity_sha256) {
+            return {ProfilingDifferentialEvaluationStatus::ActorDrift,
+                    "plateau actor or containment changed", std::nullopt};
+        }
+        if (!bindings_equal(point->observed_bindings,
+                            input.noise().bindings())) {
+            return {ProfilingDifferentialEvaluationStatus::SourceDrift,
+                    "plateau source binding changed", std::nullopt};
+        }
+        switch (point->owner_projection_status) {
+        case ProfilingDifferentialOwnerProjectionStatus::Absent:
+            if (point->owner_gtt_used_bytes) {
+                return {
+                    ProfilingDifferentialEvaluationStatus::
+                        ContradictoryOwnerProjection,
+                    "absent owner projection carries a value", std::nullopt};
+            }
+            summary.projection_coverage =
+                ProfilingDifferentialOwnerProjectionCoverage::Absent;
+            break;
+        case ProfilingDifferentialOwnerProjectionStatus::Complete:
+            if (!point->owner_gtt_used_bytes ||
+                *point->owner_gtt_used_bytes >
+                    *point->global_gtt_used_bytes) {
+                return {
+                    ProfilingDifferentialEvaluationStatus::
+                        ContradictoryOwnerProjection,
+                    "complete owner projection is invalid", std::nullopt};
+            }
+            break;
+        case ProfilingDifferentialOwnerProjectionStatus::Contradictory:
+            return {
+                ProfilingDifferentialEvaluationStatus::
+                    ContradictoryOwnerProjection,
+                "owner projection contradicts the global GTT point",
+                std::nullopt};
+        case ProfilingDifferentialOwnerProjectionStatus::SharedBuffer:
+            return {ProfilingDifferentialEvaluationStatus::
+                        SharedBufferEvidence,
+                    "shared-buffer owner evidence is not disjoint",
+                    std::nullopt};
+        default:
+            return {
+                ProfilingDifferentialEvaluationStatus::
+                    ContradictoryOwnerProjection,
+                "owner projection status is invalid", std::nullopt};
+        }
+        observed = true;
+        summary.minimum =
+            std::min(summary.minimum, *point->global_gtt_used_bytes);
+        summary.maximum =
+            std::max(summary.maximum, *point->global_gtt_used_bytes);
+        summary.completed_at =
+            std::max(summary.completed_at, point->read_finished_at);
+        previous = &*point;
+        last = &*point;
+        ++point_count;
+    }
+    if (!observed ||
+        point_count < profiling_differential_minimum_window_points) {
+        return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
+                "plateau fixed window has too few points", std::nullopt};
+    }
+    const auto final_scheduled_gap =
+        elapsed_between(last->scheduled_at, window_end);
+    const auto final_read_gap =
+        elapsed_between(last->read_started_at, window_end);
+    if (!final_scheduled_gap ||
+        *final_scheduled_gap <=
+            std::chrono::steady_clock::duration::zero() ||
+        *final_scheduled_gap > max_gap || !final_read_gap ||
+        *final_read_gap <= std::chrono::steady_clock::duration::zero() ||
+        *final_read_gap > max_gap) {
+        return {ProfilingDifferentialEvaluationStatus::InvalidWindow,
+                "plateau does not reach the fixed window boundary",
+                std::nullopt};
+    }
+    if (summary.maximum - summary.minimum > input.noise().n_gtt_bytes()) {
+        return {ProfilingDifferentialEvaluationStatus::UnstablePlateau,
+                "plateau variation exceeds N_gtt", std::nullopt};
+    }
+    return {ProfilingDifferentialEvaluationStatus::Accepted, {}, summary};
+}
+
+json release_document(const ProfilingDifferentialReleaseEvidence &release) {
+    return json{
+        {"envelope_lower_bytes", release.envelope_lower_bytes},
+        {"envelope_upper_bytes", release.envelope_upper_bytes},
+        {"maximum_bytes", release.maximum_bytes},
+        {"minimum_bytes", release.minimum_bytes},
+        {"verified", release.verified},
+    };
+}
+
+json repetition_evidence_document(
+    const ProfilingDifferentialRepetitionEvidence &repetition) {
+    return json{
+        {"delta_bytes", repetition.delta_bytes},
+        {"ordinal", repetition.ordinal},
+        {"provenance_sha256", repetition.provenance_sha256},
+        {"release", release_document(repetition.release)},
+    };
+}
+
+json repetitions_document(
+    const std::vector<ProfilingDifferentialRepetitionEvidence> &repetitions) {
+    json result = json::array();
+    for (const auto &repetition : repetitions) {
+        result.push_back(repetition_evidence_document(repetition));
+    }
+    return result;
+}
+
+std::optional<std::string> component_checksum(const json &payload) {
+    std::string bytes(component_evidence_domain,
+                      sizeof(component_evidence_domain) - 1);
+    bytes += payload.dump();
+    return sha256_hex(bytes);
+}
+
+void require_exact_keys(const json &object,
+                        std::initializer_list<std::string_view> expected,
+                        std::string_view label) {
+    if (!object.is_object()) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     std::string(label) + " must be an object");
+    }
+    std::set<std::string> expected_keys;
+    for (const auto key : expected) {
+        expected_keys.emplace(key);
+        if (!object.contains(std::string(key))) {
+            reject_parse(
+                ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                std::string(label) + " is incomplete");
+        }
+    }
+    for (const auto &[key, value] : object.items()) {
+        static_cast<void>(value);
+        if (expected_keys.find(key) == expected_keys.end()) {
+            reject_parse(
+                ProfilingDifferentialEvidenceParseStatus::UnknownField,
+                std::string(label) + " has an unknown field");
+        }
+    }
+}
+
+const json &required(const json &object, std::string_view key) {
+    const auto found = object.find(std::string(key));
+    if (found == object.end()) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     "required component evidence field is missing");
+    }
+    return *found;
+}
+
+std::string require_string(const json &value, std::string_view label) {
+    if (!value.is_string()) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     std::string(label) + " must be a string");
+    }
+    return value.get<std::string>();
+}
+
+std::uint64_t require_u64(const json &value, std::string_view label) {
+    if (value.is_number_unsigned()) return value.get<std::uint64_t>();
+    if (value.is_number_integer() && value.get<std::int64_t>() == 0) return 0;
+    reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                 std::string(label) + " must be an unsigned integer");
+}
+
+bool require_bool(const json &value, std::string_view label) {
+    if (!value.is_boolean()) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     std::string(label) + " must be a Boolean");
+    }
+    return value.get<bool>();
+}
+
+void require_digest(std::string_view value, std::string_view label) {
+    if (!digest_is_valid(value)) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     std::string(label) + " is invalid");
+    }
+}
+
+void require_identifier(std::string_view value, std::string_view label) {
+    if (!identifier_is_valid(value)) {
+        reject_parse(
+            ProfilingDifferentialEvidenceParseStatus::InvalidIdentifier,
+            std::string(label) + " is invalid");
+    }
+}
+
+json parse_json(std::string_view bytes) {
+    if (bytes.size() > max_local_overlay_input_bytes) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InputTooLarge,
+                     "component evidence exceeds the input limit");
+    }
+    if (bytes.find('\0') != std::string_view::npos) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::MalformedJson,
+                     "component evidence contains a NUL byte");
+    }
+
+    std::map<int, std::set<std::string>> object_keys;
+    const auto callback = [&object_keys](int depth, json::parse_event_t event,
+                                         json &parsed) {
+        if (event == json::parse_event_t::object_start) {
+            object_keys[depth + 1].clear();
+        } else if (event == json::parse_event_t::key) {
+            auto &keys = object_keys[depth];
+            const auto key = parsed.get<std::string>();
+            if (!keys.insert(key).second) {
+                reject_parse(
+                    ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                    "component evidence has a duplicate key");
+            }
+        } else if (event == json::parse_event_t::object_end) {
+            object_keys.erase(depth + 1);
+        }
+        return true;
+    };
+    try {
+        return json::parse(bytes.begin(), bytes.end(), callback, true, false);
+    } catch (const ComponentParseFailure &) {
+        throw;
+    } catch (const json::exception &) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::MalformedJson,
+                     "component evidence is malformed JSON");
+    }
+}
+
+void parse_schema(const json &value) {
+    require_exact_keys(value, {"major", "minor"}, "component schema");
+    const auto major = require_u64(required(value, "major"), "schema major");
+    const auto minor = require_u64(required(value, "minor"), "schema minor");
+    if (major != 1 || minor != 0) {
+        reject_parse(
+            ProfilingDifferentialEvidenceParseStatus::UnsupportedSchema,
+            "component evidence schema is unsupported");
+    }
+}
+
+ProfilingNoiseBindings parse_bindings(const json &value) {
+    require_exact_keys(
+        value,
+        {"background_inventory_sha256", "boot_id_sha256",
+         "campaign_contract_sha256", "counter_continuity_epoch_sha256",
+         "counter_source_id", "counter_source_revision_sha256",
+         "deployment_epoch_sha256", "deployment_id",
+         "device_identity_sha256", "driver_identity_sha256",
+         "kernel_identity_sha256", "procedure_revision_sha256",
+         "topology_sha256"},
+        "noise bindings");
+    ProfilingNoiseBindings bindings;
+    bindings.background_inventory_sha256 = require_string(
+        required(value, "background_inventory_sha256"),
+        "background inventory digest");
+    bindings.boot_id_sha256 =
+        require_string(required(value, "boot_id_sha256"), "boot ID digest");
+    bindings.campaign_contract_sha256 = require_string(
+        required(value, "campaign_contract_sha256"),
+        "campaign contract digest");
+    bindings.counter_continuity_epoch_sha256 = require_string(
+        required(value, "counter_continuity_epoch_sha256"),
+        "counter continuity epoch digest");
+    bindings.counter_source_id = require_string(
+        required(value, "counter_source_id"), "counter source ID");
+    bindings.counter_source_revision_sha256 = require_string(
+        required(value, "counter_source_revision_sha256"),
+        "counter source revision digest");
+    bindings.deployment_epoch_sha256 = require_string(
+        required(value, "deployment_epoch_sha256"),
+        "deployment epoch digest");
+    bindings.deployment_id =
+        require_string(required(value, "deployment_id"), "deployment ID");
+    bindings.device_identity_sha256 = require_string(
+        required(value, "device_identity_sha256"), "device identity digest");
+    bindings.driver_identity_sha256 = require_string(
+        required(value, "driver_identity_sha256"), "driver identity digest");
+    bindings.kernel_identity_sha256 = require_string(
+        required(value, "kernel_identity_sha256"), "kernel identity digest");
+    bindings.procedure_revision_sha256 = require_string(
+        required(value, "procedure_revision_sha256"),
+        "procedure revision digest");
+    bindings.topology_sha256 =
+        require_string(required(value, "topology_sha256"), "topology digest");
+
+    require_digest(bindings.background_inventory_sha256,
+                   "background inventory digest");
+    require_digest(bindings.boot_id_sha256, "boot ID digest");
+    require_digest(bindings.campaign_contract_sha256,
+                   "campaign contract digest");
+    require_digest(bindings.counter_continuity_epoch_sha256,
+                   "counter continuity epoch digest");
+    require_identifier(bindings.counter_source_id, "counter source ID");
+    require_digest(bindings.counter_source_revision_sha256,
+                   "counter source revision digest");
+    require_digest(bindings.deployment_epoch_sha256,
+                   "deployment epoch digest");
+    require_digest(bindings.deployment_id, "deployment ID");
+    require_digest(bindings.device_identity_sha256, "device identity digest");
+    require_digest(bindings.driver_identity_sha256, "driver identity digest");
+    require_digest(bindings.kernel_identity_sha256, "kernel identity digest");
+    require_digest(bindings.procedure_revision_sha256,
+                   "procedure revision digest");
+    require_digest(bindings.topology_sha256, "topology digest");
+    return bindings;
+}
+
+RuntimeCatalogSelector parse_catalog_selector(const json &value) {
+    require_exact_keys(
+        value,
+        {"backend_channel", "base_variant", "constraints",
+         "material_profiles", "model_type", "operation_kind",
+         "operation_template", "platform", "recovery",
+         "source_support_baseline"},
+        "catalog selector");
+    const auto &constraint_values = required(value, "constraints");
+    if (!constraint_values.is_array() || constraint_values.empty() ||
+        constraint_values.size() > 9) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     "catalog constraints are invalid");
+    }
+    std::vector<ConstraintKind> constraints;
+    constraints.reserve(constraint_values.size());
+    for (const auto &constraint_value : constraint_values) {
+        const auto wire =
+            require_string(constraint_value, "catalog constraint");
+        const auto decoded = decode_constraint_kind(wire);
+        if (!decoded.is_known()) {
+            reject_parse(
+                ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                "catalog constraint is unknown");
+        }
+        constraints.push_back(*decoded.known_value());
+    }
+
+    const auto &profile_values = required(value, "material_profiles");
+    if (!profile_values.is_object() || profile_values.empty() ||
+        profile_values.size() > 32) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     "material profiles are invalid");
+    }
+    std::map<std::string, std::string> material_profiles;
+    for (const auto &[key, profile] : profile_values.items()) {
+        material_profiles.emplace(
+            key, require_string(profile, "material profile value"));
+    }
+
+    const auto operation_template_wire = require_string(
+        required(value, "operation_template"), "operation template");
+    const auto operation_template =
+        decode_operation_template(operation_template_wire);
+    const auto operation_kind_wire = require_string(
+        required(value, "operation_kind"), "operation kind");
+    const auto operation_kind = decode_operation_kind(operation_kind_wire);
+    if (!operation_template.is_known() || !operation_kind.is_known()) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     "catalog operation is unknown");
+    }
+    return RuntimeCatalogSelector{
+        require_string(required(value, "source_support_baseline"),
+                       "source support baseline"),
+        require_string(required(value, "base_variant"), "base variant"),
+        require_string(required(value, "platform"), "platform"),
+        require_string(required(value, "backend_channel"), "backend channel"),
+        require_string(required(value, "model_type"), "model type"),
+        *operation_template.known_value(), *operation_kind.known_value(),
+        std::move(constraints),
+        require_string(required(value, "recovery"), "recovery"),
+        std::move(material_profiles),
+    };
+}
+
+LocalOverlaySelectorIdentity parse_selector(const json &value) {
+    require_exact_keys(
+        value,
+        {"backend_build_sha256", "canonical_model_id", "catalog",
+         "catalog_sha256", "configuration_sha256",
+         "dependency_set_sha256", "device_identity_sha256",
+         "driver_identity_sha256", "model_artifact_sha256",
+         "operation_contract_sha256", "topology_sha256",
+         "workload_sha256"},
+        "exact fingerprint");
+    LocalOverlaySelectorIdentity selector{
+        require_string(required(value, "catalog_sha256"), "catalog digest"),
+        parse_catalog_selector(required(value, "catalog")),
+        require_string(required(value, "canonical_model_id"),
+                       "canonical model ID"),
+        require_string(required(value, "model_artifact_sha256"),
+                       "model artifact digest"),
+        require_string(required(value, "backend_build_sha256"),
+                       "backend build digest"),
+        require_string(required(value, "device_identity_sha256"),
+                       "device identity digest"),
+        require_string(required(value, "topology_sha256"), "topology digest"),
+        require_string(required(value, "dependency_set_sha256"),
+                       "dependency set digest"),
+        require_string(required(value, "driver_identity_sha256"),
+                       "driver identity digest"),
+        require_string(required(value, "configuration_sha256"),
+                       "configuration digest"),
+        require_string(required(value, "workload_sha256"), "workload digest"),
+        require_string(required(value, "operation_contract_sha256"),
+                       "operation contract digest"),
+    };
+    auto canonical = canonicalize_local_overlay_selector(std::move(selector));
+    if (!canonical.accepted() ||
+        selector_document(*canonical.selector) != value) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     "exact fingerprint is not canonical");
+    }
+    return std::move(*canonical.selector);
+}
+
+ProfilingDifferentialMethodBinding parse_method_binding(const json &value) {
+    require_exact_keys(value,
+                       {"constraint_id", "constraint_revision_sha256",
+                        "method_id", "method_revision_sha256"},
+                       "method binding");
+    ProfilingDifferentialMethodBinding binding;
+    binding.constraint_id = require_string(required(value, "constraint_id"),
+                                           "constraint ID");
+    binding.constraint_revision_sha256 = require_string(
+        required(value, "constraint_revision_sha256"),
+        "constraint revision digest");
+    binding.method_id =
+        require_string(required(value, "method_id"), "method ID");
+    binding.method_revision_sha256 = require_string(
+        required(value, "method_revision_sha256"), "method revision digest");
+    binding.covered_effect = std::string(profiling_differential_covered_effect);
+    require_identifier(binding.constraint_id, "constraint ID");
+    require_digest(binding.constraint_revision_sha256,
+                   "constraint revision digest");
+    require_digest(binding.method_revision_sha256, "method revision digest");
+    if (binding.method_id != profiling_differential_method_id) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     "component method is unsupported");
+    }
+    return binding;
+}
+
+ProfilingDifferentialAccountingPartition parse_accounting(
+    const json &value,
+    std::uint64_t &n_gtt_bytes) {
+    require_exact_keys(
+        value,
+        {"m_gtt_bytes", "m_gtt_policy_sha256", "n_gtt_bytes",
+         "partition_contract_sha256", "x_gtt_bytes",
+         "x_gtt_evidence_sha256"},
+        "accounting terms");
+    ProfilingDifferentialAccountingPartition accounting;
+    accounting.m_gtt_bytes =
+        require_u64(required(value, "m_gtt_bytes"), "M_gtt");
+    accounting.m_gtt_policy_sha256 = require_string(
+        required(value, "m_gtt_policy_sha256"), "M_gtt policy digest");
+    n_gtt_bytes = require_u64(required(value, "n_gtt_bytes"), "N_gtt");
+    accounting.partition_contract_sha256 = require_string(
+        required(value, "partition_contract_sha256"),
+        "accounting partition digest");
+    accounting.x_gtt_bytes =
+        require_u64(required(value, "x_gtt_bytes"), "X_gtt");
+    accounting.x_gtt_evidence_sha256 = require_string(
+        required(value, "x_gtt_evidence_sha256"), "X_gtt evidence digest");
+    require_digest(accounting.m_gtt_policy_sha256, "M_gtt policy digest");
+    require_digest(accounting.partition_contract_sha256,
+                   "accounting partition digest");
+    require_digest(accounting.x_gtt_evidence_sha256,
+                   "X_gtt evidence digest");
+    const auto maximum = std::numeric_limits<std::uint64_t>::max();
+    if (accounting.x_gtt_bytes > maximum - n_gtt_bytes ||
+        accounting.m_gtt_bytes >
+            maximum - (n_gtt_bytes + accounting.x_gtt_bytes)) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     "accounting terms overflow");
+    }
+    return accounting;
+}
+
+ProfilingDifferentialReleaseEvidence parse_release(const json &value) {
+    require_exact_keys(value,
+                       {"envelope_lower_bytes", "envelope_upper_bytes",
+                        "maximum_bytes", "minimum_bytes", "verified"},
+                       "release result");
+    ProfilingDifferentialReleaseEvidence release;
+    release.envelope_lower_bytes = require_u64(
+        required(value, "envelope_lower_bytes"), "release lower bound");
+    release.envelope_upper_bytes = require_u64(
+        required(value, "envelope_upper_bytes"), "release upper bound");
+    release.maximum_bytes = require_u64(required(value, "maximum_bytes"),
+                                        "release maximum");
+    release.minimum_bytes = require_u64(required(value, "minimum_bytes"),
+                                        "release minimum");
+    release.verified =
+        require_bool(required(value, "verified"), "release verification");
+    if (!release.verified ||
+        release.envelope_lower_bytes > release.minimum_bytes ||
+        release.minimum_bytes > release.maximum_bytes ||
+        release.maximum_bytes > release.envelope_upper_bytes) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     "release result is not verified inside its envelope");
+    }
+    return release;
+}
+
+std::vector<ProfilingDifferentialRepetitionEvidence>
+parse_repetition_evidence(const json &value, std::string_view label) {
+    if (!value.is_array() || value.empty() ||
+        value.size() > profiling_differential_maximum_repetitions) {
+        reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                     std::string(label) + " count is invalid");
+    }
+    std::vector<ProfilingDifferentialRepetitionEvidence> repetitions;
+    repetitions.reserve(value.size());
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        const auto &record = value.at(index);
+        require_exact_keys(
+            record, {"delta_bytes", "ordinal", "provenance_sha256", "release"},
+            "repetition evidence");
+        const auto ordinal =
+            require_u64(required(record, "ordinal"), "repetition ordinal");
+        const auto provenance = require_string(
+            required(record, "provenance_sha256"),
+            "repetition provenance digest");
+        require_digest(provenance, "repetition provenance digest");
+        const auto delta =
+            require_u64(required(record, "delta_bytes"), "repetition delta");
+        if (ordinal != index ||
+            delta > static_cast<std::uint64_t>(
+                        std::numeric_limits<std::int64_t>::max())) {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                         "repetition evidence is out of order or overflows");
+        }
+        repetitions.push_back(ProfilingDifferentialRepetitionEvidence{
+            static_cast<std::uint32_t>(ordinal), provenance, delta,
+            parse_release(required(record, "release")),
+        });
+    }
+    return repetitions;
+}
+
+} // namespace
+
+ParsedProfilingDifferentialEvidence::ParsedProfilingDifferentialEvidence(
+    std::string frozen_input_sha256,
+    ProfilingDifferentialMethodBinding method_binding,
+    LocalOverlaySelectorIdentity exact_fingerprint,
+    std::string selector_sha256,
+    std::string calibration_revision_sha256,
+    ProfilingDifferentialAccountingPartition accounting,
+    std::uint64_t n_gtt_bytes,
+    std::uint64_t retained_gtt_bound_bytes,
+    std::vector<ProfilingDifferentialRepetitionEvidence>
+        calibration_repetitions,
+    std::vector<ProfilingDifferentialRepetitionEvidence>
+        validation_repetitions,
+    ProfilingDifferentialOwnerProjectionCoverage owner_projection_coverage,
+    std::string checksum_sha256,
+    std::string canonical_bytes)
+    : frozen_input_sha256_(std::move(frozen_input_sha256)),
+      method_binding_(std::move(method_binding)),
+      exact_fingerprint_(std::move(exact_fingerprint)),
+      selector_sha256_(std::move(selector_sha256)),
+      calibration_revision_sha256_(
+          std::move(calibration_revision_sha256)),
+      accounting_(std::move(accounting)),
+      n_gtt_bytes_(n_gtt_bytes),
+      retained_gtt_bound_bytes_(retained_gtt_bound_bytes),
+      calibration_repetitions_(std::move(calibration_repetitions)),
+      validation_repetitions_(std::move(validation_repetitions)),
+      owner_projection_coverage_(owner_projection_coverage),
+      checksum_sha256_(std::move(checksum_sha256)),
+      canonical_bytes_(std::move(canonical_bytes)) {}
+
+std::string_view
+ParsedProfilingDifferentialEvidence::frozen_input_sha256() const noexcept {
+    return frozen_input_sha256_;
+}
+
+const ProfilingDifferentialMethodBinding &
+ParsedProfilingDifferentialEvidence::method_binding() const noexcept {
+    return method_binding_;
+}
+
+const LocalOverlaySelectorIdentity &
+ParsedProfilingDifferentialEvidence::exact_fingerprint() const noexcept {
+    return exact_fingerprint_;
+}
+
+std::string_view
+ParsedProfilingDifferentialEvidence::selector_sha256() const noexcept {
+    return selector_sha256_;
+}
+
+std::string_view ParsedProfilingDifferentialEvidence::
+calibration_revision_sha256() const noexcept {
+    return calibration_revision_sha256_;
+}
+
+const ProfilingDifferentialAccountingPartition &
+ParsedProfilingDifferentialEvidence::accounting() const noexcept {
+    return accounting_;
+}
+
+std::uint64_t
+ParsedProfilingDifferentialEvidence::n_gtt_bytes() const noexcept {
+    return n_gtt_bytes_;
+}
+
+std::uint64_t ParsedProfilingDifferentialEvidence::
+retained_gtt_bound_bytes() const noexcept {
+    return retained_gtt_bound_bytes_;
+}
+
+const std::vector<ProfilingDifferentialRepetitionEvidence> &
+ParsedProfilingDifferentialEvidence::calibration_repetitions() const noexcept {
+    return calibration_repetitions_;
+}
+
+const std::vector<ProfilingDifferentialRepetitionEvidence> &
+ParsedProfilingDifferentialEvidence::validation_repetitions() const noexcept {
+    return validation_repetitions_;
+}
+
+ProfilingDifferentialOwnerProjectionCoverage
+ParsedProfilingDifferentialEvidence::owner_projection_coverage()
+    const noexcept {
+    return owner_projection_coverage_;
+}
+
+std::string_view
+ParsedProfilingDifferentialEvidence::checksum_sha256() const noexcept {
+    return checksum_sha256_;
+}
+
+std::string_view
+ParsedProfilingDifferentialEvidence::canonical_bytes() const noexcept {
+    return canonical_bytes_;
+}
+
+bool ProfilingDifferentialEvaluationResult::accepted() const noexcept {
+    return status == ProfilingDifferentialEvaluationStatus::Accepted &&
+           disposition ==
+               ProfilingDifferentialRevalidationDisposition::Continue &&
+           evidence.has_value();
+}
+
+bool ProfilingDifferentialEvidenceParseResult::accepted() const noexcept {
+    return status == ProfilingDifferentialEvidenceParseStatus::Accepted &&
+           evidence.has_value();
+}
+
+ProfilingDifferentialEvaluationResult
+evaluate_retained_gtt_differential(
+    FrozenProfilingDifferentialInput input,
+    ProfilingDifferentialMethodBinding method_binding,
+    std::vector<ProfilingDifferentialRepetition> repetitions) {
+    try {
+        if (method_binding.method_id != profiling_differential_method_id ||
+            method_binding.covered_effect !=
+                profiling_differential_covered_effect ||
+            !digest_is_valid(method_binding.method_revision_sha256) ||
+            !identifier_is_valid(method_binding.constraint_id) ||
+            !digest_is_valid(method_binding.constraint_revision_sha256)) {
+            return reject(
+                ProfilingDifferentialEvaluationStatus::InvalidMethodBinding,
+                "retained-GTT method binding is invalid");
+        }
+        const auto calibration_count = input.calibration_repetitions();
+        const auto validation_count = input.validation_repetitions();
+        if (calibration_count >
+                profiling_differential_maximum_repetitions ||
+            validation_count >
+                profiling_differential_maximum_repetitions ||
+            repetitions.size() >
+                profiling_differential_maximum_repetitions ||
+            repetitions.size() !=
+                static_cast<std::size_t>(calibration_count) +
+                    static_cast<std::size_t>(validation_count)) {
+            return reject(
+                ProfilingDifferentialEvaluationStatus::InvalidRepetitionCount,
+                "repetition records do not match the frozen counts");
+        }
+        std::vector<ProfilingDifferentialRepetitionEvidence>
+            calibration_evidence;
+        std::vector<ProfilingDifferentialRepetitionEvidence>
+            validation_evidence;
+        calibration_evidence.reserve(calibration_count);
+        validation_evidence.reserve(validation_count);
+        ProfilingDifferentialOwnerProjectionCoverage projection_coverage =
+            ProfilingDifferentialOwnerProjectionCoverage::Complete;
+        std::uint64_t maximum_calibration_delta = 0;
+        std::uint64_t retained_bound = 0;
+        std::optional<std::chrono::steady_clock::time_point>
+            previous_release_completed_at;
+
+        for (std::size_t index = 0; index < repetitions.size(); ++index) {
+            auto &repetition = repetitions[index];
+            const auto revalidation = revalidate_profiling_differential_input(
+                input, repetition.revalidation);
+            if (!revalidation.accepted()) {
+                auto result = reject(
+                    ProfilingDifferentialEvaluationStatus::
+                        RevalidationRejected,
+                    revalidation.diagnostic);
+                result.disposition = revalidation.disposition;
+                result.revalidation_status = revalidation.status;
+                return result;
+            }
+            const auto expected_phase =
+                index < calibration_count
+                    ? ProfilingDifferentialRepetitionPhase::Calibration
+                    : ProfilingDifferentialRepetitionPhase::Validation;
+            const auto expected_ordinal = static_cast<std::uint32_t>(
+                expected_phase ==
+                        ProfilingDifferentialRepetitionPhase::Calibration
+                    ? index
+                    : index - calibration_count);
+            if (repetition.phase != expected_phase ||
+                repetition.ordinal != expected_ordinal) {
+                return reject(
+                    ProfilingDifferentialEvaluationStatus::
+                        InvalidRepetitionOrder,
+                    "calibration and validation records are not disjoint and ordered");
+            }
+            if (previous_release_completed_at &&
+                (repetition.revalidation.checked_at <
+                     *previous_release_completed_at ||
+                 !repetition.baseline.marker ||
+                 repetition.baseline.marker->marked_at <
+                     *previous_release_completed_at)) {
+                return reject(
+                    ProfilingDifferentialEvaluationStatus::
+                        InvalidRepetitionOrder,
+                    "profiling repetitions overlap");
+            }
+
+            const auto baseline = evaluate_plateau(
+                repetition.baseline,
+                ProfilingDifferentialMarkerKind::BaselineReady, input);
+            if (!baseline.summary) {
+                return reject(baseline.status, baseline.diagnostic);
+            }
+            const auto loaded = evaluate_plateau(
+                repetition.loaded,
+                ProfilingDifferentialMarkerKind::LoadedReady, input);
+            if (!loaded.summary) {
+                return reject(loaded.status, loaded.diagnostic);
+            }
+            const auto release = evaluate_plateau(
+                repetition.release,
+                ProfilingDifferentialMarkerKind::ReleaseReady, input);
+            if (!release.summary) {
+                return reject(release.status, release.diagnostic);
+            }
+            if (repetition.revalidation.checked_at >
+                    repetition.baseline.marker->marked_at ||
+                baseline.summary->completed_at >
+                    repetition.loaded.marker->marked_at ||
+                loaded.summary->completed_at >
+                    repetition.release.marker->marked_at) {
+                return reject(
+                    ProfilingDifferentialEvaluationStatus::InvalidWindow,
+                    "revalidation and plateau windows are not ordered");
+            }
+            auto release_completed_at = release.summary->completed_at;
+
+            if (loaded.summary->maximum < baseline.summary->minimum) {
+                return reject(
+                    ProfilingDifferentialEvaluationStatus::NegativeDelta,
+                    "loaded plateau is below its baseline");
+            }
+            const auto delta =
+                loaded.summary->maximum - baseline.summary->minimum;
+            if (delta > static_cast<std::uint64_t>(
+                            std::numeric_limits<std::int64_t>::max())) {
+                return reject(
+                    ProfilingDifferentialEvaluationStatus::
+                        ArithmeticOverflow,
+                    "retained-GTT signed delta overflows");
+            }
+
+            const auto n_gtt = input.noise().n_gtt_bytes();
+            const auto release_lower = baseline.summary->minimum > n_gtt
+                                           ? baseline.summary->minimum - n_gtt
+                                           : 0;
+            if (baseline.summary->maximum >
+                std::numeric_limits<std::uint64_t>::max() - n_gtt) {
+                return reject(
+                    ProfilingDifferentialEvaluationStatus::
+                        ArithmeticOverflow,
+                    "release-envelope upper bound overflows");
+            }
+            const auto release_upper = baseline.summary->maximum + n_gtt;
+            for (const auto &point : repetition.release.points) {
+                if (point.scheduled_at <
+                    repetition.release.marker->marked_at) {
+                    continue;
+                }
+                if (!point.global_gtt_used_bytes ||
+                    point.read_started_at < point.scheduled_at ||
+                    point.read_finished_at < point.read_started_at ||
+                    !digest_is_valid(point.provenance_sha256)) {
+                    return reject(
+                        ProfilingDifferentialEvaluationStatus::InvalidPoint,
+                        "post-release point is incomplete");
+                }
+                release_completed_at =
+                    std::max(release_completed_at, point.read_finished_at);
+                if (point.frozen_input_sha256 !=
+                        input.frozen_input_sha256() ||
+                    point.selector_sha256 !=
+                        input.identity().transaction.selector_sha256) {
+                    return reject(
+                        ProfilingDifferentialEvaluationStatus::IdentityDrift,
+                        "post-release point identity changed");
+                }
+                if (point.target_client_identity_sha256 !=
+                        input.identity().target_client_identity_sha256 ||
+                    point.target_containment_identity_sha256 !=
+                        input.identity()
+                            .target_containment_identity_sha256) {
+                    return reject(
+                        ProfilingDifferentialEvaluationStatus::ActorDrift,
+                        "post-release actor or containment changed");
+                }
+                if (!bindings_equal(point.observed_bindings,
+                                    input.noise().bindings())) {
+                    return reject(
+                        ProfilingDifferentialEvaluationStatus::SourceDrift,
+                        "post-release source binding changed");
+                }
+                switch (point.owner_projection_status) {
+                case ProfilingDifferentialOwnerProjectionStatus::Absent:
+                    if (point.owner_gtt_used_bytes) {
+                        return reject(
+                            ProfilingDifferentialEvaluationStatus::
+                                ContradictoryOwnerProjection,
+                            "absent post-release owner projection carries a value");
+                    }
+                    projection_coverage =
+                        ProfilingDifferentialOwnerProjectionCoverage::Absent;
+                    break;
+                case ProfilingDifferentialOwnerProjectionStatus::Complete:
+                    if (!point.owner_gtt_used_bytes ||
+                        *point.owner_gtt_used_bytes >
+                            *point.global_gtt_used_bytes) {
+                        return reject(
+                            ProfilingDifferentialEvaluationStatus::
+                                ContradictoryOwnerProjection,
+                            "complete post-release owner projection is invalid");
+                    }
+                    break;
+                case ProfilingDifferentialOwnerProjectionStatus::Contradictory:
+                    return reject(
+                        ProfilingDifferentialEvaluationStatus::
+                            ContradictoryOwnerProjection,
+                        "post-release owner projection is contradictory");
+                case ProfilingDifferentialOwnerProjectionStatus::SharedBuffer:
+                    return reject(
+                        ProfilingDifferentialEvaluationStatus::
+                            SharedBufferEvidence,
+                        "post-release owner evidence contains shared GTT");
+                default:
+                    return reject(
+                        ProfilingDifferentialEvaluationStatus::
+                            ContradictoryOwnerProjection,
+                        "post-release owner projection status is invalid");
+                }
+                if (*point.global_gtt_used_bytes < release_lower ||
+                    *point.global_gtt_used_bytes > release_upper) {
+                    return reject(
+                        ProfilingDifferentialEvaluationStatus::
+                            ReleaseEnvelopeBreach,
+                        "post-release point exceeds the baseline envelope");
+                }
+            }
+            if (release.summary->minimum < release_lower ||
+                release.summary->maximum > release_upper) {
+                return reject(
+                    ProfilingDifferentialEvaluationStatus::
+                        ReleaseEnvelopeBreach,
+                    "post-release points exceed the baseline envelope");
+            }
+            previous_release_completed_at = release_completed_at;
+
+            const auto provenance = repetition_provenance(repetition);
+            if (!provenance) {
+                return reject(
+                    ProfilingDifferentialEvaluationStatus::DigestUnavailable,
+                    "repetition provenance SHA-256 is unavailable");
+            }
+            ProfilingDifferentialRepetitionEvidence evidence;
+            evidence.ordinal = repetition.ordinal;
+            evidence.provenance_sha256 = *provenance;
+            evidence.delta_bytes = delta;
+            evidence.release = {
+                release_lower,
+                release_upper,
+                release.summary->minimum,
+                release.summary->maximum,
+                true,
+            };
+
+            if (baseline.summary->projection_coverage ==
+                    ProfilingDifferentialOwnerProjectionCoverage::Absent ||
+                loaded.summary->projection_coverage ==
+                    ProfilingDifferentialOwnerProjectionCoverage::Absent ||
+                release.summary->projection_coverage ==
+                    ProfilingDifferentialOwnerProjectionCoverage::Absent) {
+                projection_coverage =
+                    ProfilingDifferentialOwnerProjectionCoverage::Absent;
+            }
+
+            if (index < calibration_count) {
+                maximum_calibration_delta =
+                    std::max(maximum_calibration_delta, delta);
+                calibration_evidence.push_back(std::move(evidence));
+                if (calibration_evidence.size() == calibration_count) {
+                    const auto maximum =
+                        std::numeric_limits<std::uint64_t>::max();
+                    if (input.accounting().x_gtt_bytes > maximum - n_gtt) {
+                        return reject(
+                            ProfilingDifferentialEvaluationStatus::
+                                ArithmeticOverflow,
+                            "retained allowance overflows");
+                    }
+                    auto allowance = n_gtt + input.accounting().x_gtt_bytes;
+                    if (input.accounting().m_gtt_bytes >
+                        maximum - allowance) {
+                        return reject(
+                            ProfilingDifferentialEvaluationStatus::
+                                ArithmeticOverflow,
+                            "retained allowance overflows");
+                    }
+                    allowance += input.accounting().m_gtt_bytes;
+                    if (maximum_calibration_delta > maximum - allowance) {
+                        return reject(
+                            ProfilingDifferentialEvaluationStatus::
+                                ArithmeticOverflow,
+                            "retained-GTT bound overflows");
+                    }
+                    retained_bound = maximum_calibration_delta + allowance;
+                }
+            } else {
+                if (delta > retained_bound) {
+                    return reject(
+                        ProfilingDifferentialEvaluationStatus::
+                            ValidationExceeded,
+                        "validation delta exceeds the frozen retained bound");
+                }
+                validation_evidence.push_back(std::move(evidence));
+            }
+        }
+
+        const auto &identity = input.identity();
+        json payload{
+            {"accounting_terms",
+             json{{"m_gtt_bytes", input.accounting().m_gtt_bytes},
+                  {"m_gtt_policy_sha256",
+                   input.accounting().m_gtt_policy_sha256},
+                  {"n_gtt_bytes", input.noise().n_gtt_bytes()},
+                  {"partition_contract_sha256",
+                   input.accounting().partition_contract_sha256},
+                  {"x_gtt_bytes", input.accounting().x_gtt_bytes},
+                  {"x_gtt_evidence_sha256",
+                   input.accounting().x_gtt_evidence_sha256}}},
+            {"calibration_repetitions",
+             repetitions_document(calibration_evidence)},
+            {"calibration_revision_sha256",
+             input.revision().calibration_revision_sha256},
+            {"covered_effect", method_binding.covered_effect},
+            {"exact_fingerprint",
+             selector_document(identity.transaction.selector)},
+            {"frozen_identities",
+             json{{"action_lease_closure_sha256",
+                   identity.transaction.action_lease_closure_sha256},
+                  {"attempt_receipt_sha256",
+                   input.revision().attempt_receipt_sha256},
+                  {"counter_continuity_epoch_sha256",
+                   identity.counter_continuity_epoch_sha256},
+                  {"deployment_id", identity.transaction.deployment_id},
+                  {"noise_bindings", bindings_document(input.noise().bindings())},
+                  {"noise_bindings_sha256", input.noise().bindings_sha256()},
+                  {"noise_result_checksum_sha256",
+                   input.noise().checksum_sha256()},
+                  {"noise_trace_provenance_sha256",
+                   input.noise().trace_provenance_sha256()},
+                  {"observation_contract_sha256",
+                   identity.transaction.observation_contract_sha256},
+                  {"ownership_recovery_evidence_sha256",
+                   identity.transaction
+                       .ownership_recovery_evidence_sha256},
+                  {"predictor_contract_sha256",
+                   identity.transaction.predictor_contract_sha256},
+                  {"profiling_sequence", identity.transaction.sequence},
+                  {"profiling_transaction_id",
+                   identity.transaction.profiling_transaction_id},
+                  {"safety_contract_sha256", identity.safety_contract_sha256},
+                  {"selector_sha256", identity.transaction.selector_sha256},
+                  {"source_generations",
+                   json{{"backend", identity.transaction.generations.backend},
+                        {"configuration",
+                         identity.transaction.generations.configuration},
+                        {"device", identity.transaction.generations.device},
+                        {"driver", identity.transaction.generations.driver},
+                        {"model", identity.transaction.generations.model},
+                        {"topology", identity.transaction.generations.topology},
+                        {"workload",
+                         identity.transaction.generations.workload}}},
+                  {"target_client_identity_sha256",
+                   identity.target_client_identity_sha256},
+                  {"target_containment_identity_sha256",
+                   identity.target_containment_identity_sha256}}},
+            {"frozen_input_sha256", input.frozen_input_sha256()},
+            {"method_binding",
+             json{{"constraint_id", method_binding.constraint_id},
+                  {"constraint_revision_sha256",
+                   method_binding.constraint_revision_sha256},
+                  {"method_id", method_binding.method_id},
+                  {"method_revision_sha256",
+                   method_binding.method_revision_sha256}}},
+            {"owner_projection_coverage",
+             projection_coverage_wire(projection_coverage)},
+            {"retained_gtt_bound_bytes", retained_bound},
+            {"retained_gtt_claim",
+             json{{"amount", retained_bound},
+                  {"constraint_id", method_binding.constraint_id},
+                  {"unit", "bytes"}}},
+            {"schema", json{{"major", 1}, {"minor", 0}}},
+            {"validation_repetitions",
+             repetitions_document(validation_evidence)},
+        };
+        const auto checksum = component_checksum(payload);
+        if (!checksum) {
+            return reject(
+                ProfilingDifferentialEvaluationStatus::DigestUnavailable,
+                "component evidence SHA-256 is unavailable");
+        }
+        payload["checksum_sha256"] = *checksum;
+        auto canonical_bytes = payload.dump();
+
+        ProfilingDifferentialEvaluationResult result;
+        result.status = ProfilingDifferentialEvaluationStatus::Accepted;
+        result.disposition =
+            ProfilingDifferentialRevalidationDisposition::Continue;
+        result.diagnostic = "retained-GTT differential evidence accepted";
+        result.evidence = ParsedProfilingDifferentialEvidence(
+            std::string(input.frozen_input_sha256()),
+            std::move(method_binding), identity.transaction.selector,
+            identity.transaction.selector_sha256,
+            input.revision().calibration_revision_sha256,
+            input.accounting(), input.noise().n_gtt_bytes(), retained_bound,
+            std::move(calibration_evidence), std::move(validation_evidence),
+            projection_coverage, *checksum, std::move(canonical_bytes));
+        return result;
+    } catch (...) {
+        return reject(
+            ProfilingDifferentialEvaluationStatus::EvidenceUnavailable,
+            "retained-GTT differential evaluation failed closed");
+    }
+}
+
+ProfilingDifferentialEvidenceParseResult
+parse_profiling_differential_evidence(std::string_view bytes) {
+    try {
+        const auto document = parse_json(bytes);
+        require_exact_keys(
+            document,
+            {"accounting_terms", "calibration_repetitions",
+             "calibration_revision_sha256", "checksum_sha256",
+             "covered_effect", "exact_fingerprint", "frozen_identities",
+             "frozen_input_sha256", "method_binding",
+             "owner_projection_coverage", "retained_gtt_bound_bytes",
+             "retained_gtt_claim", "schema", "validation_repetitions"},
+            "component evidence");
+        parse_schema(required(document, "schema"));
+
+        const auto checksum = require_string(
+            required(document, "checksum_sha256"), "component checksum");
+        require_digest(checksum, "component checksum");
+        const auto covered_effect = require_string(
+            required(document, "covered_effect"), "covered effect");
+        if (covered_effect != profiling_differential_covered_effect) {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                         "component covered effect is unsupported");
+        }
+
+        auto method_binding =
+            parse_method_binding(required(document, "method_binding"));
+        auto exact_fingerprint =
+            parse_selector(required(document, "exact_fingerprint"));
+        auto canonical_fingerprint =
+            canonicalize_local_overlay_selector(exact_fingerprint);
+        if (!canonical_fingerprint.accepted()) {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                         "exact fingerprint is invalid");
+        }
+
+        const auto &frozen_identities =
+            required(document, "frozen_identities");
+        require_exact_keys(
+            frozen_identities,
+            {"action_lease_closure_sha256", "attempt_receipt_sha256",
+             "counter_continuity_epoch_sha256", "deployment_id",
+             "noise_bindings", "noise_bindings_sha256",
+             "noise_result_checksum_sha256", "noise_trace_provenance_sha256",
+             "observation_contract_sha256",
+             "ownership_recovery_evidence_sha256",
+             "predictor_contract_sha256", "profiling_sequence",
+             "profiling_transaction_id", "safety_contract_sha256",
+             "selector_sha256", "source_generations",
+             "target_client_identity_sha256",
+             "target_containment_identity_sha256"},
+            "frozen identities");
+        const auto action_lease_closure = require_string(
+            required(frozen_identities, "action_lease_closure_sha256"),
+            "action lease closure digest");
+        const auto attempt_receipt = require_string(
+            required(frozen_identities, "attempt_receipt_sha256"),
+            "attempt receipt digest");
+        const auto counter_continuity_epoch = require_string(
+            required(frozen_identities,
+                     "counter_continuity_epoch_sha256"),
+            "counter continuity epoch digest");
+        const auto deployment_id = require_string(
+            required(frozen_identities, "deployment_id"), "deployment ID");
+        const auto noise_bindings =
+            parse_bindings(required(frozen_identities, "noise_bindings"));
+        const auto noise_bindings_sha256 = require_string(
+            required(frozen_identities, "noise_bindings_sha256"),
+            "noise bindings digest");
+        const auto noise_result_checksum = require_string(
+            required(frozen_identities, "noise_result_checksum_sha256"),
+            "noise result checksum");
+        const auto noise_trace_provenance = require_string(
+            required(frozen_identities, "noise_trace_provenance_sha256"),
+            "noise trace provenance digest");
+        const auto observation_contract = require_string(
+            required(frozen_identities, "observation_contract_sha256"),
+            "observation contract digest");
+        const auto ownership_recovery_evidence = require_string(
+            required(frozen_identities,
+                     "ownership_recovery_evidence_sha256"),
+            "ownership recovery evidence digest");
+        const auto predictor_contract = require_string(
+            required(frozen_identities, "predictor_contract_sha256"),
+            "predictor contract digest");
+        const auto profiling_sequence = require_u64(
+            required(frozen_identities, "profiling_sequence"),
+            "profiling sequence");
+        const auto profiling_transaction_id = require_string(
+            required(frozen_identities, "profiling_transaction_id"),
+            "profiling transaction ID");
+        const auto safety_contract = require_string(
+            required(frozen_identities, "safety_contract_sha256"),
+            "safety contract digest");
+        const auto selector_sha256 = require_string(
+            required(frozen_identities, "selector_sha256"),
+            "selector digest");
+        const auto target_client = require_string(
+            required(frozen_identities, "target_client_identity_sha256"),
+            "target client identity digest");
+        const auto target_containment = require_string(
+            required(frozen_identities,
+                     "target_containment_identity_sha256"),
+            "target containment identity digest");
+        const auto &source_generations =
+            required(frozen_identities, "source_generations");
+        require_exact_keys(source_generations,
+                           {"backend", "configuration", "device", "driver",
+                            "model", "topology", "workload"},
+                           "source generations");
+        bool generations_valid = true;
+        for (const auto key : {"backend", "configuration", "device", "driver",
+                               "model", "topology", "workload"}) {
+            generations_valid =
+                generations_valid &&
+                require_u64(required(source_generations, key),
+                            "source generation") != 0;
+        }
+        require_digest(action_lease_closure,
+                       "action lease closure digest");
+        require_digest(attempt_receipt, "attempt receipt digest");
+        require_digest(counter_continuity_epoch,
+                       "counter continuity epoch digest");
+        require_digest(deployment_id, "deployment ID");
+        require_digest(noise_bindings_sha256, "noise bindings digest");
+        require_digest(noise_result_checksum, "noise result checksum");
+        require_digest(noise_trace_provenance,
+                       "noise trace provenance digest");
+        require_digest(observation_contract, "observation contract digest");
+        require_digest(ownership_recovery_evidence,
+                       "ownership recovery evidence digest");
+        require_digest(predictor_contract, "predictor contract digest");
+        require_identifier(profiling_transaction_id,
+                           "profiling transaction ID");
+        require_digest(safety_contract, "safety contract digest");
+        require_digest(selector_sha256, "selector digest");
+        require_digest(target_client, "target client identity digest");
+        require_digest(target_containment,
+                       "target containment identity digest");
+        if (profiling_sequence == 0 || !generations_valid ||
+            deployment_id != noise_bindings.deployment_id ||
+            counter_continuity_epoch !=
+                noise_bindings.counter_continuity_epoch_sha256) {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                         "frozen transaction identity is inconsistent");
+        }
+
+        std::string noise_binding_bytes(noise_bindings_domain,
+                                        sizeof(noise_bindings_domain) - 1);
+        noise_binding_bytes += bindings_document(noise_bindings).dump();
+        const auto expected_noise_bindings =
+            sha256_hex(noise_binding_bytes);
+        if (!expected_noise_bindings) {
+            return {ProfilingDifferentialEvidenceParseStatus::
+                        DigestUnavailable,
+                    "noise bindings SHA-256 is unavailable", std::nullopt};
+        }
+        if (noise_bindings_sha256 != *expected_noise_bindings ||
+            selector_sha256 !=
+                canonical_fingerprint.selector_sha256) {
+            reject_parse(
+                ProfilingDifferentialEvidenceParseStatus::DigestMismatch,
+                "frozen identity digest does not match its content");
+        }
+        if (exact_fingerprint.device_identity_sha256 !=
+                noise_bindings.device_identity_sha256 ||
+            exact_fingerprint.topology_sha256 !=
+                noise_bindings.topology_sha256 ||
+            exact_fingerprint.driver_identity_sha256 !=
+                noise_bindings.driver_identity_sha256 ||
+            std::find(exact_fingerprint.catalog_selector.constraints.begin(),
+                      exact_fingerprint.catalog_selector.constraints.end(),
+                      ConstraintKind::GpuSharedResidency) ==
+                exact_fingerprint.catalog_selector.constraints.end()) {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                         "frozen fingerprint and noise identities disagree");
+        }
+
+        const auto frozen_input_sha256 = require_string(
+            required(document, "frozen_input_sha256"),
+            "frozen input digest");
+        const auto calibration_revision_sha256 = require_string(
+            required(document, "calibration_revision_sha256"),
+            "calibration revision digest");
+        require_digest(frozen_input_sha256, "frozen input digest");
+        require_digest(calibration_revision_sha256,
+                       "calibration revision digest");
+
+        std::uint64_t n_gtt_bytes = 0;
+        auto accounting = parse_accounting(
+            required(document, "accounting_terms"), n_gtt_bytes);
+        auto calibration_repetitions = parse_repetition_evidence(
+            required(document, "calibration_repetitions"),
+            "calibration repetition");
+        auto validation_repetitions = parse_repetition_evidence(
+            required(document, "validation_repetitions"),
+            "validation repetition");
+        if (calibration_repetitions.size() +
+                validation_repetitions.size() >
+            profiling_differential_maximum_repetitions) {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                         "component evidence exceeds the repetition limit");
+        }
+        const auto retained_bound = require_u64(
+            required(document, "retained_gtt_bound_bytes"),
+            "retained-GTT bound");
+        const auto &retained_claim = required(document, "retained_gtt_claim");
+        require_exact_keys(retained_claim,
+                           {"amount", "constraint_id", "unit"},
+                           "retained-GTT claim");
+        const auto retained_claim_amount = require_u64(
+            required(retained_claim, "amount"), "retained claim amount");
+        const auto retained_claim_constraint = require_string(
+            required(retained_claim, "constraint_id"),
+            "retained claim constraint ID");
+        const auto retained_claim_unit = require_string(
+            required(retained_claim, "unit"), "retained claim unit");
+        if (retained_claim_amount != retained_bound ||
+            retained_claim_constraint != method_binding.constraint_id ||
+            retained_claim_unit != "bytes") {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                         "retained-GTT claim does not match its method and bound");
+        }
+        const auto maximum_calibration = std::max_element(
+            calibration_repetitions.begin(), calibration_repetitions.end(),
+            [](const auto &left, const auto &right) {
+                return left.delta_bytes < right.delta_bytes;
+            })->delta_bytes;
+        const auto maximum = std::numeric_limits<std::uint64_t>::max();
+        auto allowance = n_gtt_bytes + accounting.x_gtt_bytes;
+        allowance += accounting.m_gtt_bytes;
+        if (maximum_calibration > maximum - allowance ||
+            retained_bound != maximum_calibration + allowance ||
+            std::any_of(validation_repetitions.begin(),
+                        validation_repetitions.end(),
+                        [&](const auto &repetition) {
+                            return repetition.delta_bytes > retained_bound;
+                        })) {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                         "retained-GTT bound or validation result is invalid");
+        }
+
+        const auto coverage_wire = require_string(
+            required(document, "owner_projection_coverage"),
+            "owner projection coverage");
+        ProfilingDifferentialOwnerProjectionCoverage coverage;
+        if (coverage_wire == "complete") {
+            coverage =
+                ProfilingDifferentialOwnerProjectionCoverage::Complete;
+        } else if (coverage_wire == "absent") {
+            coverage = ProfilingDifferentialOwnerProjectionCoverage::Absent;
+        } else {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                         "owner projection coverage is unknown");
+        }
+
+        auto payload = document;
+        payload.erase("checksum_sha256");
+        const auto expected_checksum = component_checksum(payload);
+        if (!expected_checksum) {
+            return {ProfilingDifferentialEvidenceParseStatus::
+                        DigestUnavailable,
+                    "component evidence SHA-256 is unavailable", std::nullopt};
+        }
+        if (checksum != *expected_checksum) {
+            reject_parse(
+                ProfilingDifferentialEvidenceParseStatus::DigestMismatch,
+                "component evidence checksum does not match");
+        }
+        payload["checksum_sha256"] = checksum;
+        auto canonical_bytes = payload.dump();
+        if (bytes != canonical_bytes) {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::NonCanonical,
+                         "component evidence is not canonical JSON");
+        }
+
+        ProfilingDifferentialEvidenceParseResult result;
+        result.status = ProfilingDifferentialEvidenceParseStatus::Accepted;
+        result.evidence = ParsedProfilingDifferentialEvidence(
+            frozen_input_sha256, std::move(method_binding),
+            std::move(exact_fingerprint), selector_sha256,
+            calibration_revision_sha256, std::move(accounting), n_gtt_bytes,
+            retained_bound, std::move(calibration_repetitions),
+            std::move(validation_repetitions), coverage, checksum,
+            std::move(canonical_bytes));
+        return result;
+    } catch (const ComponentParseFailure &failure) {
+        return {failure.status(), bounded_diagnostic(failure.what()),
+                std::nullopt};
+    } catch (...) {
+        return {ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                "component evidence validation failed closed", std::nullopt};
+    }
+}
+
+} // namespace lemon::residency
