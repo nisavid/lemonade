@@ -1126,6 +1126,33 @@ target_include_directories(lemonade-server-core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/residency
 )
 
+set(_RESIDENCY_PROFILING_DIFFERENTIAL_PROCEDURE
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/agents/profiling-retained-gtt-differential.md"
+)
+set(_RESIDENCY_PROFILING_NO_TARGET_PROCEDURE
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/agents/profiling-no-target-gtt-noise.md"
+)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${_RESIDENCY_PROFILING_DIFFERENTIAL_PROCEDURE}"
+    "${_RESIDENCY_PROFILING_NO_TARGET_PROCEDURE}"
+)
+file(SHA256 "${_RESIDENCY_PROFILING_DIFFERENTIAL_PROCEDURE}"
+    _RESIDENCY_PROFILING_DIFFERENTIAL_METHOD_REVISION_SHA256
+)
+file(SHA256 "${_RESIDENCY_PROFILING_NO_TARGET_PROCEDURE}"
+    _RESIDENCY_PROFILING_NO_TARGET_PROCEDURE_SHA256
+)
+if(NOT _RESIDENCY_PROFILING_NO_TARGET_PROCEDURE_SHA256 STREQUAL
+        "53154e34cf8387b0f7805accade0e431fec603470b48db5324d963b4b8b659ed")
+    message(FATAL_ERROR
+        "The retained-GTT evaluator requires the reviewed no-target procedure revision")
+endif()
+set_source_files_properties(
+    src/cpp/server/residency/profiling_differential_evaluator.cpp
+    PROPERTIES COMPILE_DEFINITIONS
+        "LEMONADE_PROFILING_DIFFERENTIAL_METHOD_REVISION_SHA256=\"${_RESIDENCY_PROFILING_DIFFERENTIAL_METHOD_REVISION_SHA256}\""
+)
+
 # ============================================================
 # lemond executable
 # ============================================================

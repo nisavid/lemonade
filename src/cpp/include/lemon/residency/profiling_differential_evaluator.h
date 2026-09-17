@@ -23,6 +23,9 @@ inline constexpr std::string_view profiling_differential_method_id =
     "differential_retained_gtt";
 inline constexpr std::string_view profiling_differential_covered_effect =
     "retained_gtt";
+inline constexpr std::string_view
+    profiling_no_target_gtt_noise_procedure_revision_sha256 =
+        "53154e34cf8387b0f7805accade0e431fec603470b48db5324d963b4b8b659ed";
 
 struct ProfilingDifferentialMethodBinding {
     std::string method_id;
@@ -31,6 +34,33 @@ struct ProfilingDifferentialMethodBinding {
     std::string constraint_revision_sha256;
     std::string covered_effect;
 };
+
+std::optional<ProfilingDifferentialMethodBinding>
+resolve_retained_gtt_differential_method_binding(
+    const ProfilingTransactionContext &transaction,
+    std::string constraint_id);
+
+enum class ProfilingDifferentialPreflightStatus {
+    Accepted,
+    EvidenceUnavailable,
+    InvalidProcedureBinding,
+    InvalidMethodBinding,
+    InvalidRepetitionCount,
+};
+
+struct ProfilingDifferentialPreflightResult {
+    ProfilingDifferentialPreflightStatus status =
+        ProfilingDifferentialPreflightStatus::EvidenceUnavailable;
+    std::string diagnostic;
+
+    bool accepted() const noexcept;
+};
+
+ProfilingDifferentialPreflightResult
+preflight_retained_gtt_differential(
+    const ParsedProfilingNoiseResult &noise,
+    const ProfilingDifferentialInputDraft &draft,
+    const ProfilingDifferentialMethodBinding &method_binding);
 
 enum class ProfilingDifferentialMarkerKind {
     BaselineReady,
@@ -235,6 +265,7 @@ struct ProfilingDifferentialEvaluationResult {
         ProfilingDifferentialRevalidationDisposition::RejectRevision;
     std::optional<ProfilingDifferentialRevalidationStatus>
         revalidation_status;
+    std::optional<std::string> noise_result_checksum_sha256;
     std::string diagnostic;
     std::optional<ParsedProfilingDifferentialEvidence> evidence;
 

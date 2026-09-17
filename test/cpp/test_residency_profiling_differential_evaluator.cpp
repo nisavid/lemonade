@@ -1,8 +1,10 @@
 #include "lemon/residency/profiling_capture_authority.h"
 #include "lemon/residency/profiling_differential_evaluator.h"
 
+#include <mbedtls/md.h>
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <chrono>
 #include <iostream>
 #include <limits>
@@ -52,6 +54,50 @@ std::string digest(char value) {
     return std::string(64, value);
 }
 
+std::string raw_sha256(std::string_view bytes) {
+    const auto *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (info == nullptr) throw std::runtime_error("SHA-256 is unavailable");
+
+    mbedtls_md_context_t context;
+    mbedtls_md_init(&context);
+    std::array<unsigned char, 32> output{};
+    const bool failed =
+        mbedtls_md_setup(&context, info, 0) != 0 ||
+        mbedtls_md_starts(&context) != 0 ||
+        mbedtls_md_update(
+            &context,
+            reinterpret_cast<const unsigned char *>(bytes.data()),
+            bytes.size()) != 0 ||
+        mbedtls_md_finish(&context, output.data()) != 0;
+    mbedtls_md_free(&context);
+    if (failed) throw std::runtime_error("SHA-256 failed");
+
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(64);
+    for (const auto byte : output) {
+        result.push_back(hex[(byte >> 4) & 0x0f]);
+        result.push_back(hex[byte & 0x0f]);
+    }
+    return result;
+}
+
+std::string domain_sha256(std::string_view domain,
+                          const nlohmann::json &payload) {
+    std::string bytes(domain);
+    bytes += payload.dump();
+    return raw_sha256(bytes);
+}
+
+std::string checksummed_component(nlohmann::json document) {
+    document.erase("checksum_sha256");
+    constexpr char domain[] =
+        "lemonade.residency.profiling-differential-evidence/v1\0";
+    document["checksum_sha256"] = domain_sha256(
+        std::string_view(domain, sizeof(domain) - 1), document);
+    return document.dump();
+}
+
 ProfilingNoiseBindings noise_bindings() {
     ProfilingNoiseBindings bindings;
     bindings.deployment_id = digest('f');
@@ -70,11 +116,12 @@ ProfilingNoiseBindings noise_bindings() {
     return bindings;
 }
 
-ParsedProfilingNoiseResult parsed_noise_result() {
+ParsedProfilingNoiseResult parsed_noise_result(
+    ProfilingNoiseBindings bindings = noise_bindings()) {
     ProfilingNoTargetGttTrace trace;
     trace.started_at = std::chrono::steady_clock::time_point{1h};
     trace.exact_end = trace.started_at + profiling_noise_trace_duration;
-    trace.bindings = noise_bindings();
+    trace.bindings = std::move(bindings);
     trace.read_skew_uncertainty_bytes = 8;
 
     std::uint64_t index = 0;
@@ -152,7 +199,7 @@ ProfilingTransactionContext transaction_context(
     return context;
 }
 
-FrozenProfilingDifferentialInput frozen_input(
+ProfilingDifferentialInputDraft differential_input_draft(
     const ParsedProfilingNoiseResult &noise,
     std::uint32_t calibration_repetitions = 2,
     std::uint32_t validation_repetitions = 1,
@@ -180,6 +227,25 @@ FrozenProfilingDifferentialInput frozen_input(
     draft.accounting.partition_contract_sha256 = digest('c');
     draft.calibration_repetitions = calibration_repetitions;
     draft.validation_repetitions = validation_repetitions;
+    return draft;
+}
+
+FrozenProfilingDifferentialInput frozen_input(
+    const ParsedProfilingNoiseResult &noise,
+    std::uint32_t calibration_repetitions = 2,
+    std::uint32_t validation_repetitions = 1,
+    std::uint64_t x_gtt_bytes = 16,
+    std::uint64_t m_gtt_bytes = 32) {
+    auto draft = differential_input_draft(
+        noise, calibration_repetitions, validation_repetitions,
+        x_gtt_bytes, m_gtt_bytes);
+    auto binding = resolve_retained_gtt_differential_method_binding(
+        draft.identity.transaction, "amd.shared_gtt.retained_bytes");
+    require(binding.has_value(),
+            "fixture method and constraint binding did not resolve");
+    auto preflight =
+        preflight_retained_gtt_differential(noise, draft, *binding);
+    require(preflight.accepted(), "fixture evaluator preflight failed");
 
     auto frozen =
         freeze_profiling_differential_input(noise, std::move(draft));
@@ -188,13 +254,12 @@ FrozenProfilingDifferentialInput frozen_input(
 }
 
 ProfilingDifferentialMethodBinding method_binding() {
-    ProfilingDifferentialMethodBinding binding;
-    binding.method_id = "differential_retained_gtt";
-    binding.method_revision_sha256 = digest('d');
-    binding.constraint_id = "amd.shared_gtt.retained_bytes";
-    binding.constraint_revision_sha256 = digest('e');
-    binding.covered_effect = "retained_gtt";
-    return binding;
+    auto binding = resolve_retained_gtt_differential_method_binding(
+        transaction_context(noise_bindings()),
+        "amd.shared_gtt.retained_bytes");
+    require(binding.has_value(),
+            "fixture method and constraint binding did not resolve");
+    return std::move(*binding);
 }
 
 ProfilingDifferentialPhaseMarker phase_marker(
@@ -612,6 +677,58 @@ void require_canonical_component_evidence_round_trips() {
             "noncanonical component bytes were accepted");
 }
 
+void require_parser_rejects_unreviewed_bindings() {
+    auto noise = parsed_noise_result();
+    auto input = frozen_input(noise, 1, 1);
+    const auto first = std::chrono::steady_clock::time_point{55h};
+    std::vector<ProfilingDifferentialRepetition> repetitions;
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, first, 9200,
+        input));
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Validation, 0, first + 20s,
+        9200, input));
+    auto evaluated = evaluate_retained_gtt_differential(
+        std::move(input), method_binding(), std::move(repetitions));
+    require(evaluated.accepted(),
+            "parser binding fixture did not produce component evidence");
+    const auto canonical = nlohmann::json::parse(
+        evaluated.evidence->canonical_bytes().begin(),
+        evaluated.evidence->canonical_bytes().end());
+
+    for (std::size_t mismatch = 0; mismatch < 4; ++mismatch) {
+        auto document = canonical;
+        if (mismatch == 0) {
+            document["method_binding"]["method_revision_sha256"] =
+                digest('0');
+        } else if (mismatch == 1) {
+            document["method_binding"]["constraint_id"] =
+                "amd.shared_gtt.other_bytes";
+            document["retained_gtt_claim"]["constraint_id"] =
+                "amd.shared_gtt.other_bytes";
+        } else if (mismatch == 2) {
+            document["method_binding"]["constraint_revision_sha256"] =
+                digest('0');
+        } else {
+            auto &identities = document["frozen_identities"];
+            identities["noise_bindings"]["procedure_revision_sha256"] =
+                digest('0');
+            constexpr char domain[] =
+                "lemonade.residency.profiling-noise-bindings/v1\0";
+            identities["noise_bindings_sha256"] = domain_sha256(
+                std::string_view(domain, sizeof(domain) - 1),
+                identities["noise_bindings"]);
+        }
+        auto parsed = parse_profiling_differential_evidence(
+            checksummed_component(std::move(document)));
+        require(!parsed.accepted() &&
+                    parsed.status ==
+                        ProfilingDifferentialEvidenceParseStatus::InvalidValue &&
+                    !parsed.evidence.has_value(),
+                "canonical evidence with an unreviewed binding was parsed");
+    }
+}
+
 void require_checked_bound_validation_and_release_failures() {
     auto noise = parsed_noise_result();
     const auto first = std::chrono::steady_clock::time_point{60h};
@@ -854,6 +971,126 @@ void require_frozen_identity_actor_and_source_bindings() {
     }
 }
 
+void require_noise_invalidating_drift_preserves_disposition() {
+    auto noise = parsed_noise_result();
+    const auto first = std::chrono::steady_clock::time_point{75h};
+
+    for (std::size_t phase = 0; phase < 4; ++phase) {
+        auto input = frozen_input(noise, 1, 1);
+        const auto noise_checksum =
+            std::string(input.noise().checksum_sha256());
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            first + phase * 1h, 9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + phase * 1h + 20s, 9200, input));
+
+        if (phase == 0) {
+            repetitions.front().baseline.points.at(4)
+                .observed_bindings.boot_id_sha256 = digest('0');
+        } else if (phase == 1) {
+            repetitions.front().loaded.points.at(4)
+                .observed_bindings.background_inventory_sha256 = digest('0');
+        } else if (phase == 2) {
+            repetitions.front().release.points.at(4)
+                .observed_bindings.counter_source_revision_sha256 =
+                digest('0');
+        } else {
+            auto trailing = repetitions.front().release.points.back();
+            trailing.scheduled_at =
+                repetitions.front().release.marker->marked_at + 5s;
+            trailing.read_started_at = trailing.scheduled_at;
+            trailing.read_finished_at = trailing.read_started_at + 1ms;
+            trailing.observed_bindings.procedure_revision_sha256 =
+                digest('0');
+            repetitions.front().release.points.push_back(std::move(trailing));
+        }
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), std::move(repetitions));
+        require(!result.accepted() &&
+                    result.status ==
+                        ProfilingDifferentialEvaluationStatus::SourceDrift &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            InvalidateNoiseResult &&
+                    result.noise_result_checksum_sha256 == noise_checksum &&
+                    !result.evidence.has_value(),
+                "noise-invalidating point drift was reduced to revision "
+                "rejection");
+    }
+}
+
+void require_reviewed_noise_procedure_revision() {
+    auto bindings = noise_bindings();
+    bindings.procedure_revision_sha256 = digest('a');
+    auto noise = parsed_noise_result(std::move(bindings));
+    auto draft = differential_input_draft(noise, 1, 1);
+    auto frozen =
+        freeze_profiling_differential_input(noise, std::move(draft));
+    require(frozen.accepted(),
+            "unsupported-procedure fixture did not freeze");
+    auto input = std::move(*frozen.input);
+    const auto first = std::chrono::steady_clock::time_point{79h};
+    std::vector<ProfilingDifferentialRepetition> repetitions;
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, first, 9200,
+        input));
+    repetitions.push_back(repetition(
+        ProfilingDifferentialRepetitionPhase::Validation, 0, first + 20s,
+        9200, input));
+
+    auto result = evaluate_retained_gtt_differential(
+        std::move(input), method_binding(), std::move(repetitions));
+    require(!result.accepted() &&
+                result.status == ProfilingDifferentialEvaluationStatus::
+                                     InvalidMethodBinding &&
+                result.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision &&
+                !result.noise_result_checksum_sha256.has_value() &&
+                !result.evidence.has_value(),
+            "a noise result from an unsupported producer procedure was "
+            "accepted");
+}
+
+void require_exact_method_and_constraint_binding() {
+    auto noise = parsed_noise_result();
+    const auto first = std::chrono::steady_clock::time_point{79h + 30min};
+
+    for (std::size_t mismatch = 0; mismatch < 3; ++mismatch) {
+        auto input = frozen_input(noise, 1, 1);
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            first + mismatch * 1h, 9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + mismatch * 1h + 20s, 9200, input));
+        auto binding = method_binding();
+        if (mismatch == 0) {
+            binding.method_revision_sha256 = digest('0');
+        } else if (mismatch == 1) {
+            binding.constraint_id = "amd.shared_gtt.other_bytes";
+        } else {
+            binding.constraint_revision_sha256 = digest('0');
+        }
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), std::move(binding), std::move(repetitions));
+        require(!result.accepted() &&
+                    result.status == ProfilingDifferentialEvaluationStatus::
+                                         InvalidMethodBinding &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            RejectRevision &&
+                    !result.evidence.has_value(),
+                "an unreviewed method or constraint binding was accepted");
+    }
+}
+
 void require_explicit_owner_projection_coverage() {
     auto noise = parsed_noise_result();
     const auto first = std::chrono::steady_clock::time_point{80h};
@@ -982,6 +1219,8 @@ void require_fresh_revalidation_and_preserved_dispositions() {
 
     {
         auto input = frozen_input(noise, 1, 1);
+        const auto noise_checksum =
+            std::string(input.noise().checksum_sha256());
         std::vector<ProfilingDifferentialRepetition> repetitions;
         repetitions.push_back(repetition(
             ProfilingDifferentialRepetitionPhase::Calibration, 0, first,
@@ -999,7 +1238,8 @@ void require_fresh_revalidation_and_preserved_dispositions() {
                         ProfilingDifferentialRevalidationStatus::CounterReset &&
                     result.disposition ==
                         ProfilingDifferentialRevalidationDisposition::
-                            InvalidateNoiseResult,
+                            InvalidateNoiseResult &&
+                    result.noise_result_checksum_sha256 == noise_checksum,
                 "counter reset invalidation was reduced to revision rejection");
     }
 
@@ -1099,7 +1339,12 @@ void require_bounded_repetitions_and_retained_bound_arithmetic() {
     auto noise = parsed_noise_result();
 
     {
-        auto input = frozen_input(noise, 65, 64);
+        auto draft = differential_input_draft(noise, 65, 64);
+        auto frozen =
+            freeze_profiling_differential_input(noise, std::move(draft));
+        require(frozen.accepted(),
+                "over-limit defense fixture did not freeze");
+        auto input = std::move(*frozen.input);
         std::vector<ProfilingDifferentialRepetition> repetitions(129);
         auto result = evaluate_retained_gtt_differential(
             std::move(input), method_binding(), std::move(repetitions));
@@ -1132,6 +1377,23 @@ void require_bounded_repetitions_and_retained_bound_arithmetic() {
     }
 }
 
+void require_preflight_rejects_uncollectable_repetition_count() {
+    auto noise = parsed_noise_result();
+    auto draft = differential_input_draft(noise, 65, 64);
+    auto binding = resolve_retained_gtt_differential_method_binding(
+        draft.identity.transaction, "amd.shared_gtt.retained_bytes");
+    require(binding.has_value(),
+            "preflight fixture method binding did not resolve");
+
+    auto preflight = preflight_retained_gtt_differential(
+        noise, draft, *binding);
+    require(!preflight.accepted() &&
+                preflight.status == ProfilingDifferentialPreflightStatus::
+                                        InvalidRepetitionCount,
+            "preflight allowed collection for an input the evaluator must "
+            "reject");
+}
+
 } // namespace
 
 int main() {
@@ -1140,13 +1402,18 @@ int main() {
         require_fixed_window_boundaries_and_cadence();
         require_first_window_and_disjoint_repetition_order();
         require_canonical_component_evidence_round_trips();
+        require_parser_rejects_unreviewed_bindings();
         require_checked_bound_validation_and_release_failures();
         require_frozen_identity_actor_and_source_bindings();
+        require_noise_invalidating_drift_preserves_disposition();
+        require_reviewed_noise_procedure_revision();
+        require_exact_method_and_constraint_binding();
         require_explicit_owner_projection_coverage();
         require_complete_ordered_point_schedule();
         require_fresh_revalidation_and_preserved_dispositions();
         require_phase_markers_follow_completed_reads();
         require_bounded_repetitions_and_retained_bound_arithmetic();
+        require_preflight_rejects_uncollectable_repetition_count();
         std::cout
             << "PASS: residency profiling differential evaluator tests\n";
         return 0;

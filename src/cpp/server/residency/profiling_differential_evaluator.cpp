@@ -29,6 +29,15 @@ constexpr char repetition_provenance_domain[] =
     "lemonade.residency.profiling-differential-repetition/v1\0";
 constexpr char noise_bindings_domain[] =
     "lemonade.residency.profiling-noise-bindings/v1\0";
+constexpr char constraint_binding_domain[] =
+    "lemonade.residency.profiling-differential-constraint/v1\0";
+
+#ifndef LEMONADE_PROFILING_DIFFERENTIAL_METHOD_REVISION_SHA256
+#error "The retained-GTT procedure revision must be supplied by CMake"
+#endif
+
+constexpr std::string_view supported_method_revision_sha256 =
+    LEMONADE_PROFILING_DIFFERENTIAL_METHOD_REVISION_SHA256;
 
 class ComponentParseFailure final : public std::runtime_error {
 public:
@@ -76,6 +85,50 @@ bool bindings_equal(const ProfilingNoiseBindings &left,
            left.procedure_revision_sha256 == right.procedure_revision_sha256 &&
            left.background_inventory_sha256 ==
                right.background_inventory_sha256;
+}
+
+bool method_bindings_equal(
+    const ProfilingDifferentialMethodBinding &left,
+    const ProfilingDifferentialMethodBinding &right) noexcept {
+    return left.method_id == right.method_id &&
+           left.method_revision_sha256 == right.method_revision_sha256 &&
+           left.constraint_id == right.constraint_id &&
+           left.constraint_revision_sha256 ==
+               right.constraint_revision_sha256 &&
+           left.covered_effect == right.covered_effect;
+}
+
+std::optional<ProfilingDifferentialMethodBinding> resolved_method_binding(
+    std::string_view selector_sha256,
+    std::string_view observation_contract_sha256,
+    const std::vector<ConstraintKind> &constraints,
+    std::string constraint_id) {
+    if (!digest_is_valid(supported_method_revision_sha256) ||
+        !digest_is_valid(selector_sha256) ||
+        !digest_is_valid(observation_contract_sha256) ||
+        !identifier_is_valid(constraint_id) ||
+        std::find(constraints.begin(), constraints.end(),
+                  ConstraintKind::GpuSharedResidency) == constraints.end()) {
+        return std::nullopt;
+    }
+
+    std::string bytes(constraint_binding_domain,
+                      sizeof(constraint_binding_domain) - 1);
+    append_string(bytes, constraint_id);
+    append_string(bytes, wire_name(ConstraintKind::GpuSharedResidency));
+    append_string(bytes, "bytes");
+    append_string(bytes, selector_sha256);
+    append_string(bytes, observation_contract_sha256);
+    const auto constraint_revision_sha256 = sha256_hex(bytes);
+    if (!constraint_revision_sha256) return std::nullopt;
+
+    return ProfilingDifferentialMethodBinding{
+        std::string(profiling_differential_method_id),
+        std::string(supported_method_revision_sha256),
+        std::move(constraint_id),
+        *constraint_revision_sha256,
+        std::string(profiling_differential_covered_effect),
+    };
 }
 
 json bindings_document(const ProfilingNoiseBindings &bindings) {
@@ -257,6 +310,26 @@ ProfilingDifferentialEvaluationResult reject(
     ProfilingDifferentialEvaluationResult result;
     result.status = status;
     result.diagnostic = bounded_diagnostic(std::move(diagnostic));
+    return result;
+}
+
+ProfilingDifferentialEvaluationResult reject_observation(
+    const FrozenProfilingDifferentialInput &input,
+    ProfilingDifferentialEvaluationStatus status,
+    std::string diagnostic,
+    ProfilingDifferentialRevalidationDisposition disposition =
+        ProfilingDifferentialRevalidationDisposition::RejectRevision) {
+    auto result = reject(status, std::move(diagnostic));
+    if (status == ProfilingDifferentialEvaluationStatus::SourceDrift) {
+        disposition = ProfilingDifferentialRevalidationDisposition::
+            InvalidateNoiseResult;
+    }
+    result.disposition = disposition;
+    if (disposition == ProfilingDifferentialRevalidationDisposition::
+                           InvalidateNoiseResult) {
+        result.noise_result_checksum_sha256 =
+            std::string(input.noise().checksum_sha256());
+    }
     return result;
 }
 
@@ -930,6 +1003,80 @@ parse_repetition_evidence(const json &value, std::string_view label) {
 
 } // namespace
 
+std::optional<ProfilingDifferentialMethodBinding>
+resolve_retained_gtt_differential_method_binding(
+    const ProfilingTransactionContext &transaction,
+    std::string constraint_id) {
+    try {
+        const auto canonical =
+            canonicalize_local_overlay_selector(transaction.selector);
+        if (!canonical.accepted() ||
+            canonical.selector_sha256 != transaction.selector_sha256) {
+            return std::nullopt;
+        }
+        return resolved_method_binding(
+            transaction.selector_sha256,
+            transaction.observation_contract_sha256,
+            transaction.selector.catalog_selector.constraints,
+            std::move(constraint_id));
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+bool ProfilingDifferentialPreflightResult::accepted() const noexcept {
+    return status == ProfilingDifferentialPreflightStatus::Accepted;
+}
+
+ProfilingDifferentialPreflightResult
+preflight_retained_gtt_differential(
+    const ParsedProfilingNoiseResult &noise,
+    const ProfilingDifferentialInputDraft &draft,
+    const ProfilingDifferentialMethodBinding &method_binding) {
+    try {
+        if (noise.bindings().procedure_revision_sha256 !=
+            profiling_no_target_gtt_noise_procedure_revision_sha256) {
+            return {
+                ProfilingDifferentialPreflightStatus::InvalidProcedureBinding,
+                "no-target noise procedure revision is unsupported",
+            };
+        }
+        const auto supported_method =
+            resolve_retained_gtt_differential_method_binding(
+                draft.identity.transaction, method_binding.constraint_id);
+        if (!supported_method ||
+            !method_bindings_equal(method_binding, *supported_method)) {
+            return {
+                ProfilingDifferentialPreflightStatus::InvalidMethodBinding,
+                "retained-GTT method binding is invalid",
+            };
+        }
+        const auto calibration_count =
+            static_cast<std::uint64_t>(draft.calibration_repetitions);
+        const auto validation_count =
+            static_cast<std::uint64_t>(draft.validation_repetitions);
+        if (calibration_count == 0 || validation_count == 0 ||
+            calibration_count > profiling_differential_maximum_repetitions ||
+            validation_count > profiling_differential_maximum_repetitions ||
+            calibration_count + validation_count >
+                profiling_differential_maximum_repetitions) {
+            return {
+                ProfilingDifferentialPreflightStatus::InvalidRepetitionCount,
+                "repetition count exceeds the evaluator limit",
+            };
+        }
+        return {
+            ProfilingDifferentialPreflightStatus::Accepted,
+            "retained-GTT evaluator preflight accepted",
+        };
+    } catch (...) {
+        return {
+            ProfilingDifferentialPreflightStatus::EvidenceUnavailable,
+            "retained-GTT evaluator preflight failed closed",
+        };
+    }
+}
+
 ParsedProfilingDifferentialEvidence::ParsedProfilingDifferentialEvidence(
     std::string frozen_input_sha256,
     ProfilingDifferentialMethodBinding method_binding,
@@ -1045,12 +1192,17 @@ evaluate_retained_gtt_differential(
     ProfilingDifferentialMethodBinding method_binding,
     std::vector<ProfilingDifferentialRepetition> repetitions) {
     try {
-        if (method_binding.method_id != profiling_differential_method_id ||
-            method_binding.covered_effect !=
-                profiling_differential_covered_effect ||
-            !digest_is_valid(method_binding.method_revision_sha256) ||
-            !identifier_is_valid(method_binding.constraint_id) ||
-            !digest_is_valid(method_binding.constraint_revision_sha256)) {
+        if (input.noise().bindings().procedure_revision_sha256 !=
+            profiling_no_target_gtt_noise_procedure_revision_sha256) {
+            return reject(
+                ProfilingDifferentialEvaluationStatus::InvalidMethodBinding,
+                "no-target noise procedure revision is unsupported");
+        }
+        const auto supported_method =
+            resolve_retained_gtt_differential_method_binding(
+                input.identity().transaction, method_binding.constraint_id);
+        if (!supported_method ||
+            !method_bindings_equal(method_binding, *supported_method)) {
             return reject(
                 ProfilingDifferentialEvaluationStatus::InvalidMethodBinding,
                 "retained-GTT method binding is invalid");
@@ -1088,11 +1240,11 @@ evaluate_retained_gtt_differential(
             const auto revalidation = revalidate_profiling_differential_input(
                 input, repetition.revalidation);
             if (!revalidation.accepted()) {
-                auto result = reject(
+                auto result = reject_observation(
+                    input,
                     ProfilingDifferentialEvaluationStatus::
                         RevalidationRejected,
-                    revalidation.diagnostic);
-                result.disposition = revalidation.disposition;
+                    revalidation.diagnostic, revalidation.disposition);
                 result.revalidation_status = revalidation.status;
                 return result;
             }
@@ -1128,19 +1280,22 @@ evaluate_retained_gtt_differential(
                 repetition.baseline,
                 ProfilingDifferentialMarkerKind::BaselineReady, input);
             if (!baseline.summary) {
-                return reject(baseline.status, baseline.diagnostic);
+                return reject_observation(
+                    input, baseline.status, baseline.diagnostic);
             }
             const auto loaded = evaluate_plateau(
                 repetition.loaded,
                 ProfilingDifferentialMarkerKind::LoadedReady, input);
             if (!loaded.summary) {
-                return reject(loaded.status, loaded.diagnostic);
+                return reject_observation(
+                    input, loaded.status, loaded.diagnostic);
             }
             const auto release = evaluate_plateau(
                 repetition.release,
                 ProfilingDifferentialMarkerKind::ReleaseReady, input);
             if (!release.summary) {
-                return reject(release.status, release.diagnostic);
+                return reject_observation(
+                    input, release.status, release.diagnostic);
             }
             if (repetition.revalidation.checked_at >
                     repetition.baseline.marker->marked_at ||
@@ -1215,7 +1370,8 @@ evaluate_retained_gtt_differential(
                 }
                 if (!bindings_equal(point.observed_bindings,
                                     input.noise().bindings())) {
-                    return reject(
+                    return reject_observation(
+                        input,
                         ProfilingDifferentialEvaluationStatus::SourceDrift,
                         "post-release source binding changed");
                 }
@@ -1626,6 +1782,20 @@ parse_profiling_differential_evidence(std::string_view bytes) {
                 exact_fingerprint.catalog_selector.constraints.end()) {
             reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
                          "frozen fingerprint and noise identities disagree");
+        }
+        if (noise_bindings.procedure_revision_sha256 !=
+            profiling_no_target_gtt_noise_procedure_revision_sha256) {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                         "no-target noise procedure revision is unsupported");
+        }
+        const auto supported_method = resolved_method_binding(
+            selector_sha256, observation_contract,
+            exact_fingerprint.catalog_selector.constraints,
+            method_binding.constraint_id);
+        if (!supported_method ||
+            !method_bindings_equal(method_binding, *supported_method)) {
+            reject_parse(ProfilingDifferentialEvidenceParseStatus::InvalidValue,
+                         "component method binding is unsupported");
         }
 
         const auto frozen_input_sha256 = require_string(

@@ -1,11 +1,11 @@
 # Retained-GTT differential evaluator procedure
 
-Use this procedure when an exclusive Server profiling transaction has frozen a
-boot-scoped differential input and collected complete baseline, loaded, and
-release point records for an exact fingerprint. The procedure produces one
-canonical retained-GTT component result. It does not collect observations,
-authenticate records, persist journal decisions, complete a transient
-lifecycle envelope, or authorize admission.
+Use this procedure when an exclusive `lemond` profiling transaction has
+frozen a boot-scoped differential input and collected complete baseline,
+loaded, and release point records for an exact fingerprint. The procedure
+produces one canonical retained-GTT component result. It does not collect
+observations, authenticate records, persist journal decisions, complete a
+transient lifecycle envelope, or authorize admission.
 
 ## Required upstream procedure
 
@@ -27,21 +27,22 @@ frozen-input seam remains in
 
 ## Entry conditions and accepted records
 
-The Server caller must still hold the exclusive deployment profiling gate and
+The `lemond` caller must still hold the exclusive deployment profiling gate and
 the journal lease for the frozen calibration revision. Before calling the
 evaluator, it must authenticate and assemble:
 
 1. One `FrozenProfilingDifferentialInput` with a fresh revision, a currently
    valid noise-result checksum, exact target and containment identities, and
    disjoint `N_gtt`, `X_gtt`, and `M_gtt` terms.
-2. One exact `ProfilingDifferentialMethodBinding` for method
-   `differential_retained_gtt`, covered effect `retained_gtt`, and the bound
-   byte constraint and method revisions.
+2. One exact `ProfilingDifferentialMethodBinding` returned by
+   `resolve_retained_gtt_differential_method_binding` for method
+   `differential_retained_gtt`, covered effect `retained_gtt`, and the
+   transaction's retained byte-constraint instance.
 3. Exactly the frozen calibration repetition count followed by exactly the
    frozen validation repetition count. Phase-local ordinals start at zero,
    and repetitions do not overlap.
 4. For every repetition, a new authenticated
-   `ProfilingDifferentialRevalidationObservation`, followed by Server-issued
+   `ProfilingDifferentialRevalidationObservation`, followed by `lemond`-issued
    baseline-ready, loaded-ready, and release-ready markers.
 5. Complete ordered point records for each plateau. Every point carries its
    schedule, read start and finish, authoritative global GTT byte value,
@@ -51,20 +52,66 @@ evaluator, it must authenticate and assemble:
    supplies a value no greater than the global point. Contradictory or shared
    GTT evidence is not an accepted record.
 
-The component accepts values as supplied records. Only the Server caller can
+The component accepts values as supplied records. Only the `lemond` caller can
 prove that markers and observations came from the live transaction, that the
 gate excluded competing work, and that the attempt receipt and journal state
 are authentic.
 
+## Resolve revisions and preflight before freezing
+
+The method revision is the lowercase SHA-256 of the exact raw bytes of this
+file. CMake computes it with `file(SHA256 ...)` and compiles it into
+`lemonade-server-core`; the resolver returns that compiled revision. The
+review receipt for an invocation must name one immutable commit whose clean
+review covers this procedure and its evaluator, and the `lemond` caller must
+independently hash this file's raw bytes at that commit. Do not put that digest
+inside this file, hash rendered Markdown, or treat a matching source digest as
+runtime authentication.
+
+Resolve `constraint_id` from the exact `gpu_shared_residency` byte-constraint
+instance selected by `lemond` for the same transaction and later manifest.
+`resolve_retained_gtt_differential_method_binding` derives
+`constraint_revision_sha256` from these bytes, in order:
+
+1. the ASCII domain `lemonade.residency.profiling-differential-constraint/v1`
+   followed by one NUL byte; and
+2. `constraint_id`, `gpu_shared_residency`, `bytes`, the canonical selector
+   SHA-256, and the observation-contract SHA-256, each encoded as an unsigned
+   64-bit big-endian byte length followed by its raw bytes.
+
+Before calling `freeze_profiling_differential_input`, call
+`preflight_retained_gtt_differential` with the parsed noise result, draft, and
+resolved method binding. Continue only on `Accepted`. Preflight requires the
+reviewed no-target procedure revision, the exact method and constraint
+binding, positive calibration and validation counts, and at most 128 total
+repetitions. Evaluation and parsing repeat the applicable checks, but that
+terminal defense does not authorize collecting an input that preflight has
+rejected. Constraint resolution, review-receipt verification, and record
+authentication remain `lemond` obligations.
+
 ## Evaluate the fixed repetitions
 
-Call `evaluate_retained_gtt_differential` once, moving the frozen input into
-the call. The move makes the in-process attempt one-shot; the durable journal
-remains the authority that prevents another freeze of a rejected revision.
+Pass the frozen input by value to `evaluate_retained_gtt_differential`. A
+moved-from `FrozenProfilingDifferentialInput` remains valid but has
+unspecified state; do not inspect or reuse it as attempt authority. The
+durable journal, not C++ move behavior, prevents another freeze of a rejected
+revision.
 
-For each repetition, the evaluator first calls
+Immediately before each repetition, the `lemond` caller authenticates a fresh
+revalidation observation and then issues the baseline-ready marker without an
+intervening gate, lease, identity, counter, background, or journal-state
+change. This is an ordering and authority fence, not a numeric clock-expiry
+rule. Elapsed time alone does not expire matching evidence during the same
+boot. If the caller cannot preserve that fence, it obtains and authenticates a
+new observation or stops the attempt.
+
+For each repetition, the evaluator calls
 `revalidate_profiling_differential_input`. It continues only for disposition
-`Continue`. It then applies the same rule independently to baseline, loaded,
+`Continue`, requires the accepted `checked_at` not to follow the baseline
+marker, requires later repetitions to carry increasing observations, and
+prevents overlap with completed release reads. Authentication of the
+observation and the no-intervening-change fence remain `lemond` obligations.
+The evaluator then applies the same rule independently to baseline, loaded,
 and release:
 
 1. Select the first scheduled acquisition on or after the matching marker.
@@ -126,7 +173,7 @@ component to complete another claim family.
 ## Rejection, invalidation, and persistence
 
 Every failed evaluation rejects the calibration revision and returns no
-evidence. The Server caller must persist that rejection through the existing
+evidence. The `lemond` caller must persist that rejection through the existing
 journal and must not refit or retry the same revision.
 
 When pre-repetition revalidation returns `InvalidateNoiseResult`, preserve that
@@ -135,8 +182,35 @@ and require a newly accepted no-target trace. A fresh calibration revision
 cannot revive the invalidated result. `TargetMismatch`,
 `NonIncreasingObservation`, plateau failures, validation exceedance, and
 release failures reject only the revision unless an independent
-noise-invalidating condition is also established. Authentication and both
-durable mutations remain Server-owned.
+noise-invalidating condition is also established.
+
+A mismatch in any no-target source binding on a baseline, loaded, release, or
+trailing checked release point is `SourceDrift` with disposition
+`InvalidateNoiseResult`. The evaluation result carries the immutable
+`noise_result_checksum_sha256` required for checksum-keyed persistence.
+Identity, actor, marker, ordering, method, constraint, arithmetic, validation,
+and release failures remain `RejectRevision` unless a separate
+noise-invalidating condition is established. A parser rejection produces no
+trusted component and does not by itself establish a new noise invalidation.
+Authentication and both durable mutations remain `lemond`-owned.
+
+## Outcome branches
+
+**Success:** preflight accepts before freeze, every frozen repetition passes
+fresh revalidation and fixed-window evaluation, and the canonical parser
+round-trips the retained-only component checksum and bindings.
+
+**Failure after freeze or collection begins:** stop the attempt, return no
+component, persist the calibration-revision rejection, and do not refit it.
+Also persist checksum-keyed noise invalidation when the returned disposition
+is `InvalidateNoiseResult`. Cleanup and release remain `lemond`-owned.
+
+**No-op before an attempt:** when `lemond` cannot prove the exclusive gate,
+journal lease and validity state, reviewed revision receipt, authenticated
+source, exact constraint resolution, or any required identity, do not freeze,
+collect, or evaluate. Keep the prior method or conservative fallback and do
+not create a rejection or invalidation merely because authority was absent.
+Loss of authority after freeze is failure, not this no-op branch.
 
 ## Validation
 
@@ -144,7 +218,7 @@ Build with no more than four jobs and run the evaluator test plus the focused
 profiling and local-overlay tests:
 
 ```bash
-cmake --build build --parallel 4 --target \
+cmake --build --preset default --parallel 4 --target \
   test_residency_profiling_differential_evaluator \
   test_residency_profiling_differential_input \
   test_residency_profiling_noise \
@@ -163,9 +237,9 @@ live source or qualify a host, driver, backend, model, workload, or release.
 The optional mutation-complete interval remains the unchanged stronger path in
 `src/cpp/include/lemon/residency/profiling_capture_authority.h`.
 
-## Later Server composition
+## Later `lemond` composition
 
-Before this component can contribute to an admission candidate, later Server
+Before this component can contribute to an admission candidate, later `lemond`
 work must establish the exclusive gate and queued-client behavior, live point
 collection and authentication, workload and containment ownership, actor
 continuity, durable rejection and noise invalidation, verified cleanup, and
