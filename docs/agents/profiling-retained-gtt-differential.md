@@ -18,6 +18,13 @@ Its exact raw file bytes have SHA-256
 Do not substitute rendered Markdown, a moving branch, or a procedure from a
 different implementation revision.
 
+`.gitattributes` declares both this consumer and the upstream producer as
+`text eol=lf`. A conversion-enabled checkout must therefore reproduce the
+reviewed producer digest and preserve this consumer's reviewed raw bytes.
+CMake hashes those checkout bytes without normalization: the LF contract
+makes the binding portable, while any content change still changes the
+revision or fails the fixed producer check.
+
 The upstream procedure supplies the immutable noise result, frozen input,
 same-boot validity rules, and revalidation dispositions used here. The public
 evaluator seam is declared in
@@ -105,6 +112,38 @@ rule. Elapsed time alone does not expire matching evidence during the same
 boot. If the caller cannot preserve that fence, it obtains and authenticates a
 new observation or stops the attempt.
 
+### Establish the strongest observation disposition
+
+Method, procedure, and bounded repetition-count checks first establish that
+the supplied records belong to this evaluator attempt. Within each
+repetition, an accepted fresh revalidation establishes the authority boundary
+for that repetition. Records for a later repetition are not observation
+evidence until its revalidation is accepted.
+
+After that acceptance and before any repetition-order, window, identity,
+actor, timing, projection, arithmetic, validation, or serialization failure
+can return, the evaluator audits all structurally usable source facts in the
+current repetition. An expected-kind ready marker with structurally valid
+digest fields defines an authenticated time scope even when a separate marker
+identity check will reject it. A point establishes a source fact only when it
+has an authoritative global value, coherent scheduled/read times, a valid
+provenance digest, and structurally valid no-target binding fields. Empty or
+oversized plateaus, unusable markers, incomplete points, and malformed binding
+bytes do not establish source drift.
+
+The audit covers the selected five-second baseline and loaded scopes and every
+release point scheduled at or after the release marker, including trailing
+release records. It completes across those eligible scopes before ordinary
+classification. Any mismatch with the immutable no-target bindings is
+therefore the strongest result: `SourceDrift` with
+`InvalidateNoiseResult` and the immutable noise-result checksum, even when an
+independent revision-only defect is also present or appears earlier. Without
+an established mismatch, the ordinary defect remains `RejectRevision`.
+Pre-repetition revalidation already applies the same severity ordering to its
+authenticated fields. Terminal hashing and serialization run only after all
+accepted repetitions have passed this audit, so they cannot downgrade an
+observed invalidator.
+
 For each repetition, the evaluator calls
 `revalidate_profiling_differential_input`. It continues only for disposition
 `Continue`, requires the accepted `checked_at` not to follow the baseline
@@ -118,10 +157,13 @@ and release:
 2. Hold the exact five-second window that begins at that acquisition. Include
    every scheduled acquisition before the exact end and exclude an acquisition
    scheduled exactly at the end.
-3. Require a strictly ordered schedule, at least 50 complete points, no
-   schedule or read-start gap above 100 ms, unchanged frozen, actor,
-   containment, and source bindings, and a global range no greater than the
-   frozen `N_gtt`.
+3. Before collection, the `lemond` caller configures a 50 ms nominal
+   acquisition cadence. The evaluator requires a strictly ordered schedule,
+   at least 50 complete points, no schedule or read-start gap above 100 ms,
+   unchanged frozen, actor, containment, and source bindings, and a global
+   range no greater than the frozen `N_gtt`. The 100 ms observed-gap limit is
+   tolerance, not an alternate nominal cadence; evaluator acceptance alone
+   does not prove the caller's scheduler configuration.
 4. Reject the repetition rather than selecting a quieter later window.
 
 After the three plateaus, the evaluator computes the nonnegative checked
@@ -184,15 +226,16 @@ cannot revive the invalidated result. `TargetMismatch`,
 release failures reject only the revision unless an independent
 noise-invalidating condition is also established.
 
-A mismatch in any no-target source binding on a baseline, loaded, release, or
-trailing checked release point is `SourceDrift` with disposition
-`InvalidateNoiseResult`. The evaluation result carries the immutable
-`noise_result_checksum_sha256` required for checksum-keyed persistence.
-Identity, actor, marker, ordering, method, constraint, arithmetic, validation,
-and release failures remain `RejectRevision` unless a separate
-noise-invalidating condition is established. A parser rejection produces no
-trusted component and does not by itself establish a new noise invalidation.
-Authentication and both durable mutations remain `lemond`-owned.
+An established mismatch in any no-target source binding on a selected
+baseline or loaded point, or any checked release point, is `SourceDrift` with
+disposition `InvalidateNoiseResult`. The evaluation result carries the
+immutable `noise_result_checksum_sha256` required for checksum-keyed
+persistence. Identity, actor, marker, ordering, method, constraint,
+arithmetic, validation, and release failures remain `RejectRevision` only
+when the source-fact audit establishes no separate noise invalidator. A parser
+rejection produces no trusted component and does not by itself establish a
+new noise invalidation. Authentication and both durable mutations remain
+`lemond`-owned.
 
 ## Outcome branches
 

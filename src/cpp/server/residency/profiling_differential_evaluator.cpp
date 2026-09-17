@@ -67,6 +67,22 @@ bool identifier_is_valid(std::string_view value) noexcept {
            });
 }
 
+bool bindings_are_valid(const ProfilingNoiseBindings &bindings) noexcept {
+    return digest_is_valid(bindings.deployment_id) &&
+           digest_is_valid(bindings.deployment_epoch_sha256) &&
+           digest_is_valid(bindings.boot_id_sha256) &&
+           digest_is_valid(bindings.device_identity_sha256) &&
+           digest_is_valid(bindings.topology_sha256) &&
+           digest_is_valid(bindings.kernel_identity_sha256) &&
+           digest_is_valid(bindings.driver_identity_sha256) &&
+           identifier_is_valid(bindings.counter_source_id) &&
+           digest_is_valid(bindings.counter_source_revision_sha256) &&
+           digest_is_valid(bindings.counter_continuity_epoch_sha256) &&
+           digest_is_valid(bindings.campaign_contract_sha256) &&
+           digest_is_valid(bindings.procedure_revision_sha256) &&
+           digest_is_valid(bindings.background_inventory_sha256);
+}
+
 bool bindings_equal(const ProfilingNoiseBindings &left,
                     const ProfilingNoiseBindings &right) noexcept {
     return left.deployment_id == right.deployment_id &&
@@ -347,6 +363,96 @@ bool marker_matches(const ProfilingDifferentialPhaseMarker &marker,
            digest_is_valid(marker.provenance_sha256);
 }
 
+bool marker_defines_source_audit_scope(
+    const ProfilingDifferentialPhaseMarker &marker,
+    ProfilingDifferentialMarkerKind expected_kind) noexcept {
+    return marker.kind == expected_kind && marker.ready &&
+           digest_is_valid(marker.frozen_input_sha256) &&
+           digest_is_valid(marker.selector_sha256) &&
+           digest_is_valid(marker.target_client_identity_sha256) &&
+           digest_is_valid(marker.target_containment_identity_sha256) &&
+           digest_is_valid(marker.provenance_sha256);
+}
+
+bool point_has_usable_source_fact(
+    const ProfilingDifferentialGttPoint &point) noexcept {
+    return point.global_gtt_used_bytes.has_value() &&
+           point.read_started_at >= point.scheduled_at &&
+           point.read_finished_at >= point.read_started_at &&
+           digest_is_valid(point.provenance_sha256) &&
+           bindings_are_valid(point.observed_bindings);
+}
+
+enum class SourceAuditScope {
+    FixedWindow,
+    FromMarker,
+};
+
+bool establishes_source_drift(
+    const ProfilingDifferentialPlateauObservation &plateau,
+    ProfilingDifferentialMarkerKind expected_kind,
+    SourceAuditScope scope,
+    const FrozenProfilingDifferentialInput &input) noexcept {
+    if (!plateau.marker ||
+        !marker_defines_source_audit_scope(*plateau.marker, expected_kind) ||
+        plateau.points.empty() ||
+        plateau.points.size() >
+            profiling_differential_maximum_plateau_points) {
+        return false;
+    }
+
+    auto scope_start = plateau.marker->marked_at;
+    auto scope_end = std::chrono::steady_clock::time_point::max();
+    if (scope == SourceAuditScope::FixedWindow) {
+        const ProfilingDifferentialGttPoint *first = nullptr;
+        for (const auto &point : plateau.points) {
+            if (point.scheduled_at >= plateau.marker->marked_at &&
+                (first == nullptr ||
+                 point.scheduled_at < first->scheduled_at)) {
+                first = &point;
+            }
+        }
+        if (first == nullptr) return false;
+
+        const auto window_duration =
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                profiling_differential_window);
+        if (first->scheduled_at >
+            std::chrono::steady_clock::time_point::max() - window_duration) {
+            return false;
+        }
+        scope_start = first->scheduled_at;
+        scope_end = scope_start + window_duration;
+    }
+
+    return std::any_of(
+        plateau.points.begin(), plateau.points.end(), [&](const auto &point) {
+            return point.scheduled_at >= scope_start &&
+                   (scope == SourceAuditScope::FromMarker ||
+                    point.scheduled_at < scope_end) &&
+                   point_has_usable_source_fact(point) &&
+                   !bindings_equal(point.observed_bindings,
+                                   input.noise().bindings());
+        });
+}
+
+bool repetition_establishes_source_drift(
+    const ProfilingDifferentialRepetition &repetition,
+    const FrozenProfilingDifferentialInput &input) noexcept {
+    return establishes_source_drift(
+               repetition.baseline,
+               ProfilingDifferentialMarkerKind::BaselineReady,
+               SourceAuditScope::FixedWindow, input) ||
+           establishes_source_drift(
+               repetition.loaded,
+               ProfilingDifferentialMarkerKind::LoadedReady,
+               SourceAuditScope::FixedWindow, input) ||
+           establishes_source_drift(
+               repetition.release,
+               ProfilingDifferentialMarkerKind::ReleaseReady,
+               SourceAuditScope::FromMarker, input);
+}
+
 PlateauResult evaluate_plateau(
     const ProfilingDifferentialPlateauObservation &plateau,
     ProfilingDifferentialMarkerKind expected_kind,
@@ -419,7 +525,8 @@ PlateauResult evaluate_plateau(
         if (!point->global_gtt_used_bytes ||
             point->read_started_at < point->scheduled_at ||
             point->read_finished_at < point->read_started_at ||
-            !digest_is_valid(point->provenance_sha256)) {
+            !digest_is_valid(point->provenance_sha256) ||
+            !bindings_are_valid(point->observed_bindings)) {
             return {ProfilingDifferentialEvaluationStatus::InvalidPoint,
                     "plateau contains an incomplete point", std::nullopt};
         }
@@ -1248,6 +1355,14 @@ evaluate_retained_gtt_differential(
                 result.revalidation_status = revalidation.status;
                 return result;
             }
+            // Source invalidation is a repetition-level disposition, not the
+            // outcome of whichever point check happens to return first.
+            if (repetition_establishes_source_drift(repetition, input)) {
+                return reject_observation(
+                    input,
+                    ProfilingDifferentialEvaluationStatus::SourceDrift,
+                    "authenticated repetition source binding changed");
+            }
             const auto expected_phase =
                 index < calibration_count
                     ? ProfilingDifferentialRepetitionPhase::Calibration
@@ -1344,7 +1459,8 @@ evaluate_retained_gtt_differential(
                 if (!point.global_gtt_used_bytes ||
                     point.read_started_at < point.scheduled_at ||
                     point.read_finished_at < point.read_started_at ||
-                    !digest_is_valid(point.provenance_sha256)) {
+                    !digest_is_valid(point.provenance_sha256) ||
+                    !bindings_are_valid(point.observed_bindings)) {
                     return reject(
                         ProfilingDifferentialEvaluationStatus::InvalidPoint,
                         "post-release point is incomplete");

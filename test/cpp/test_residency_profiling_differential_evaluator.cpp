@@ -1023,6 +1023,122 @@ void require_noise_invalidating_drift_preserves_disposition() {
     }
 }
 
+void require_strongest_disposition_for_compound_observation_failures() {
+    auto noise = parsed_noise_result();
+    const auto first = std::chrono::steady_clock::time_point{78h};
+
+    constexpr std::array<std::string_view, 4> scenarios{
+        "fixed-window identity drift",
+        "marker identity drift",
+        "fixed-window timing failure",
+        "trailing release actor drift",
+    };
+    for (std::size_t scenario = 0; scenario < scenarios.size(); ++scenario) {
+        auto input = frozen_input(noise, 1, 1);
+        const auto noise_checksum =
+            std::string(input.noise().checksum_sha256());
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0,
+            first + scenario * 1h, 9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + scenario * 1h + 20s, 9200, input));
+
+        if (scenario == 3) {
+            auto compound = repetitions.front().release.points.back();
+            compound.scheduled_at =
+                repetitions.front().release.marker->marked_at + 5s;
+            compound.read_started_at = compound.scheduled_at;
+            compound.read_finished_at = compound.read_started_at + 1ms;
+            compound.target_containment_identity_sha256 = digest('0');
+            compound.observed_bindings.counter_source_revision_sha256 =
+                digest('0');
+            repetitions.front().release.points.push_back(
+                std::move(compound));
+        } else {
+            auto &compound = repetitions.front().baseline.points.at(4);
+            compound.observed_bindings.boot_id_sha256 = digest('0');
+            if (scenario == 0) {
+                compound.frozen_input_sha256 = digest('0');
+            } else if (scenario == 1) {
+                repetitions.front().baseline.marker->selector_sha256 =
+                    digest('0');
+            } else {
+                compound.read_started_at = compound.scheduled_at + 101ms;
+                compound.read_finished_at =
+                    compound.read_started_at + 1ms;
+            }
+        }
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), std::move(repetitions));
+        require(!result.accepted() &&
+                    result.status ==
+                        ProfilingDifferentialEvaluationStatus::SourceDrift &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            InvalidateNoiseResult &&
+                    result.noise_result_checksum_sha256 == noise_checksum &&
+                    !result.evidence.has_value(),
+                std::string(scenarios.at(scenario)) +
+                    " masked a simultaneous source drift");
+    }
+
+    {
+        auto input = frozen_input(noise, 1, 1);
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0, first + 4h,
+            9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + 4h + 20s, 9200, input));
+        repetitions.front().baseline.points.at(4)
+            .observed_bindings.counter_source_id.clear();
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), std::move(repetitions));
+        require(!result.accepted() &&
+                    result.status ==
+                        ProfilingDifferentialEvaluationStatus::InvalidPoint &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            RejectRevision &&
+                    !result.noise_result_checksum_sha256.has_value() &&
+                    !result.evidence.has_value(),
+                "structurally invalid source bytes were promoted to a noise "
+                "invalidation");
+    }
+
+    {
+        auto input = frozen_input(noise, 1, 1);
+        std::vector<ProfilingDifferentialRepetition> repetitions;
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Calibration, 0, first + 5h,
+            9200, input));
+        repetitions.push_back(repetition(
+            ProfilingDifferentialRepetitionPhase::Validation, 0,
+            first + 5h + 20s, 9200, input));
+        repetitions.front().baseline.marker->provenance_sha256.clear();
+        repetitions.front().baseline.points.at(4)
+            .observed_bindings.boot_id_sha256 = digest('0');
+
+        auto result = evaluate_retained_gtt_differential(
+            std::move(input), method_binding(), std::move(repetitions));
+        require(!result.accepted() &&
+                    result.status ==
+                        ProfilingDifferentialEvaluationStatus::InvalidMarker &&
+                    result.disposition ==
+                        ProfilingDifferentialRevalidationDisposition::
+                            RejectRevision &&
+                    !result.noise_result_checksum_sha256.has_value() &&
+                    !result.evidence.has_value(),
+                "an unusable marker promoted unauditable point bytes to a "
+                "noise invalidation");
+    }
+}
+
 void require_reviewed_noise_procedure_revision() {
     auto bindings = noise_bindings();
     bindings.procedure_revision_sha256 = digest('a');
@@ -1406,6 +1522,7 @@ int main() {
         require_checked_bound_validation_and_release_failures();
         require_frozen_identity_actor_and_source_bindings();
         require_noise_invalidating_drift_preserves_disposition();
+        require_strongest_disposition_for_compound_observation_failures();
         require_reviewed_noise_procedure_revision();
         require_exact_method_and_constraint_binding();
         require_explicit_owner_projection_coverage();
