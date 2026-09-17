@@ -1143,7 +1143,7 @@ file(SHA256 "${_RESIDENCY_PROFILING_NO_TARGET_PROCEDURE}"
     _RESIDENCY_PROFILING_NO_TARGET_PROCEDURE_SHA256
 )
 if(NOT _RESIDENCY_PROFILING_NO_TARGET_PROCEDURE_SHA256 STREQUAL
-        "53154e34cf8387b0f7805accade0e431fec603470b48db5324d963b4b8b659ed")
+        "3c5a0b66d6317cc4dd96211cd68887a7cd0949d44cf748a61d9fdc35f4df6e3c")
     message(FATAL_ERROR
         "The retained-GTT evaluator requires the reviewed no-target procedure revision")
 endif()

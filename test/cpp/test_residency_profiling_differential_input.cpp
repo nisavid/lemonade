@@ -260,12 +260,15 @@ void require_revalidation_rejected(
     ProfilingDifferentialRevalidationStatus expected,
     ProfilingDifferentialRevalidationDisposition expected_disposition,
     const std::string &message) {
-    auto rejected =
-        revalidate_profiling_differential_input(input, observation);
+    ProfilingDifferentialAttemptState attempt(input);
+    auto rejected = revalidate_profiling_differential_input(
+        input, attempt, ProfilingDifferentialRepetitionPhase::Calibration, 0,
+        observation);
     require(!rejected.accepted() && rejected.status == expected &&
                 rejected.disposition == expected_disposition &&
-                input.revision_rejected() &&
-                input.noise_result_invalidated() ==
+                rejected.receipt.has_value() &&
+                attempt.revision_rejected() &&
+                attempt.noise_result_invalidated() ==
                     (expected_disposition ==
                      ProfilingDifferentialRevalidationDisposition::
                          InvalidateNoiseResult),
@@ -339,6 +342,7 @@ void require_input_freezes_and_revalidates_before_repetitions() {
             "a valid differential input freezes before target observation");
 
     auto input = std::move(*frozen.input);
+    ProfilingDifferentialAttemptState attempt(input);
     require(input.noise().n_gtt_bytes() == 72 &&
                 input.noise().checksum_sha256() ==
                     expected_noise_checksum &&
@@ -360,8 +364,9 @@ void require_input_freezes_and_revalidates_before_repetitions() {
 
     auto baseline =
         observation_for(input, trace.exact_end + 1h);
-    auto baseline_check =
-        revalidate_profiling_differential_input(input, baseline);
+    auto baseline_check = revalidate_profiling_differential_input(
+        input, attempt, ProfilingDifferentialRepetitionPhase::Calibration, 0,
+        baseline);
     require(
         baseline_check.accepted() &&
             baseline_check.disposition ==
@@ -373,8 +378,9 @@ void require_input_freezes_and_revalidates_before_repetitions() {
     loaded.target_activity = ProfilingDifferentialTargetActivity{
         input.identity().target_client_identity_sha256,
         input.identity().target_containment_identity_sha256};
-    auto loaded_check =
-        revalidate_profiling_differential_input(input, loaded);
+    auto loaded_check = revalidate_profiling_differential_input(
+        input, attempt, ProfilingDifferentialRepetitionPhase::Calibration, 1,
+        loaded);
     require(loaded_check.accepted() &&
                 loaded_check.disposition ==
                     ProfilingDifferentialRevalidationDisposition::Continue,
@@ -383,20 +389,22 @@ void require_input_freezes_and_revalidates_before_repetitions() {
 
     auto mismatched_target = loaded;
     mismatched_target.target_activity->client_identity_sha256 = digest('1');
-    auto target_check =
-        revalidate_profiling_differential_input(input, mismatched_target);
+    auto target_check = revalidate_profiling_differential_input(
+        input, attempt, ProfilingDifferentialRepetitionPhase::Validation, 0,
+        mismatched_target);
     require(!target_check.accepted() &&
                 target_check.status ==
                     ProfilingDifferentialRevalidationStatus::TargetMismatch &&
                 target_check.disposition ==
                     ProfilingDifferentialRevalidationDisposition::
                         RejectRevision &&
-                input.revision_rejected() &&
-                !input.noise_result_invalidated(),
+                attempt.revision_rejected() &&
+                !attempt.noise_result_invalidated(),
             "mismatched declared target did not reject the revision");
 
-    auto same_revision_retry =
-        revalidate_profiling_differential_input(input, loaded);
+    auto same_revision_retry = revalidate_profiling_differential_input(
+        input, attempt, ProfilingDifferentialRepetitionPhase::Validation, 0,
+        loaded);
     require(!same_revision_retry.accepted() &&
                 same_revision_retry.status ==
                     ProfilingDifferentialRevalidationStatus::RevisionRejected &&
@@ -416,6 +424,118 @@ void require_input_freezes_and_revalidates_before_repetitions() {
                     ProfilingDifferentialInputFreezeStatus::
                         RevisionAlreadyRejected,
             "a journal-rejected calibration revision froze again");
+}
+
+void require_live_revalidation_issues_once_only_receipts() {
+    auto trace = stable_noise_trace();
+    auto produced = produce_no_target_gtt_noise(trace);
+    require(produced.accepted(),
+            "receipt fixture did not produce canonical noise");
+    auto input = freeze_valid_input(*produced.result, trace.bindings);
+    ProfilingDifferentialAttemptState attempt(input);
+
+    auto first_observation = observation_for(input, trace.exact_end + 1h);
+    auto first = revalidate_profiling_differential_input(
+        input, attempt, ProfilingDifferentialRepetitionPhase::Calibration, 0,
+        first_observation);
+    require(first.accepted() && first.receipt.has_value() &&
+                first.receipt->accepted() &&
+                first.receipt->phase() ==
+                    ProfilingDifferentialRepetitionPhase::Calibration &&
+                first.receipt->ordinal() == 0 &&
+                first.receipt->frozen_input_sha256() ==
+                    input.frozen_input_sha256() &&
+                first.receipt->noise_result_checksum_sha256() ==
+                    input.noise().checksum_sha256() &&
+                first.receipt->previous_receipt_sha256() ==
+                    input.revision().attempt_receipt_sha256 &&
+                first.receipt->observation_sha256().size() == 64 &&
+                first.receipt->receipt_sha256().size() == 64,
+            "first live revalidation did not issue a bound receipt");
+
+    auto second_observation = observation_for(input, trace.exact_end + 2h);
+    auto second = revalidate_profiling_differential_input(
+        input, attempt, ProfilingDifferentialRepetitionPhase::Calibration, 1,
+        second_observation);
+    require(second.accepted() && second.receipt.has_value() &&
+                second.receipt->previous_receipt_sha256() ==
+                    first.receipt->receipt_sha256() &&
+                second.receipt->receipt_sha256() !=
+                    first.receipt->receipt_sha256() &&
+                attempt.receipts_issued() == 2 &&
+                !attempt.revision_rejected() &&
+                !attempt.noise_result_invalidated(),
+            "attempt state did not advance the receipt chain once");
+
+    auto replay = revalidate_profiling_differential_input(
+        input, attempt, ProfilingDifferentialRepetitionPhase::Calibration, 1,
+        second_observation);
+    require(!replay.accepted() && !replay.receipt.has_value() &&
+                replay.status ==
+                    ProfilingDifferentialRevalidationStatus::RevisionRejected &&
+                attempt.revision_rejected(),
+            "one repetition received more than one authority receipt");
+}
+
+void require_invalidation_precedence_and_terminal_authority_boundary() {
+    auto trace = stable_noise_trace();
+    auto produced = produce_no_target_gtt_noise(trace);
+    require(produced.accepted(),
+            "authority fixture did not produce canonical noise");
+
+    auto compound_input =
+        freeze_valid_input(*produced.result, trace.bindings);
+    ProfilingDifferentialAttemptState compound_attempt(compound_input);
+    auto compound = observation_for(compound_input, trace.exact_end + 3h);
+    compound.counter_reset_detected = true;
+    compound.target_activity = ProfilingDifferentialTargetActivity{
+        digest('0'),
+        compound_input.identity().target_containment_identity_sha256};
+    auto compound_result = revalidate_profiling_differential_input(
+        compound_input, compound_attempt,
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, compound);
+    require(!compound_result.accepted() &&
+                compound_result.receipt.has_value() &&
+                compound_result.status ==
+                    ProfilingDifferentialRevalidationStatus::CounterReset &&
+                compound_result.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        InvalidateNoiseResult &&
+                compound_attempt.revision_rejected() &&
+                compound_attempt.noise_result_invalidated(),
+            "same-observation target mismatch masked counter invalidation");
+
+    auto rejected_input =
+        freeze_valid_input(*produced.result, trace.bindings);
+    ProfilingDifferentialAttemptState rejected_attempt(rejected_input);
+    auto mismatch = observation_for(rejected_input, trace.exact_end + 4h);
+    mismatch.target_activity = ProfilingDifferentialTargetActivity{
+        digest('0'),
+        rejected_input.identity().target_containment_identity_sha256};
+    auto rejected = revalidate_profiling_differential_input(
+        rejected_input, rejected_attempt,
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, mismatch);
+    require(!rejected.accepted() && rejected.receipt.has_value() &&
+                rejected.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision &&
+                !rejected_attempt.noise_result_invalidated(),
+            "target mismatch did not terminally reject its revision");
+
+    auto later_reset = observation_for(rejected_input, trace.exact_end + 5h);
+    later_reset.counter_reset_detected = true;
+    auto after_terminal = revalidate_profiling_differential_input(
+        rejected_input, rejected_attempt,
+        ProfilingDifferentialRepetitionPhase::Calibration, 1, later_reset);
+    require(!after_terminal.accepted() &&
+                !after_terminal.receipt.has_value() &&
+                after_terminal.status ==
+                    ProfilingDifferentialRevalidationStatus::RevisionRejected &&
+                after_terminal.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision &&
+                !rejected_attempt.noise_result_invalidated(),
+            "bytes after terminal target rejection gained authority");
 }
 
 void require_consumer_failure_contract() {
@@ -561,32 +681,54 @@ void require_consumer_failure_contract() {
         "input");
 
     auto repeated_input = freeze_valid_input(noise, trace.bindings);
+    ProfilingDifferentialAttemptState repeated_attempt(repeated_input);
     auto repeated_observation =
         observation_for(repeated_input, trace.exact_end + 7h);
     auto first_revalidation = revalidate_profiling_differential_input(
-        repeated_input, repeated_observation);
+        repeated_input, repeated_attempt,
+        ProfilingDifferentialRepetitionPhase::Calibration, 0,
+        repeated_observation);
     require(first_revalidation.accepted(),
             "the first fresh revalidation observation was rejected");
-    require_revalidation_rejected(
-        repeated_input, repeated_observation,
-        ProfilingDifferentialRevalidationStatus::NonIncreasingObservation,
-        ProfilingDifferentialRevalidationDisposition::RejectRevision,
-        "a repeated revalidation observation was accepted");
+    auto repeated_rejection = revalidate_profiling_differential_input(
+        repeated_input, repeated_attempt,
+        ProfilingDifferentialRepetitionPhase::Calibration, 1,
+        repeated_observation);
+    require(!repeated_rejection.accepted() &&
+                repeated_rejection.status ==
+                    ProfilingDifferentialRevalidationStatus::
+                        NonIncreasingObservation &&
+                repeated_rejection.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision &&
+                repeated_attempt.revision_rejected(),
+            "a repeated revalidation observation was accepted");
 
     auto decreasing_input = freeze_valid_input(noise, trace.bindings);
+    ProfilingDifferentialAttemptState decreasing_attempt(decreasing_input);
     auto newer_observation =
         observation_for(decreasing_input, trace.exact_end + 8h);
     auto newer_revalidation = revalidate_profiling_differential_input(
-        decreasing_input, newer_observation);
+        decreasing_input, decreasing_attempt,
+        ProfilingDifferentialRepetitionPhase::Calibration, 0,
+        newer_observation);
     require(newer_revalidation.accepted(),
             "the first ordered revalidation observation was rejected");
     auto older_observation =
         observation_for(decreasing_input, trace.exact_end + 7h);
-    require_revalidation_rejected(
-        decreasing_input, std::move(older_observation),
-        ProfilingDifferentialRevalidationStatus::NonIncreasingObservation,
-        ProfilingDifferentialRevalidationDisposition::RejectRevision,
-        "an older revalidation observation was accepted");
+    auto older_rejection = revalidate_profiling_differential_input(
+        decreasing_input, decreasing_attempt,
+        ProfilingDifferentialRepetitionPhase::Calibration, 1,
+        older_observation);
+    require(!older_rejection.accepted() &&
+                older_rejection.status ==
+                    ProfilingDifferentialRevalidationStatus::
+                        NonIncreasingObservation &&
+                older_rejection.disposition ==
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision &&
+                decreasing_attempt.revision_rejected(),
+            "an older revalidation observation was accepted");
 }
 
 void require_noise_validity_across_calibration_revisions() {
@@ -597,10 +739,12 @@ void require_noise_validity_across_calibration_revisions() {
     const auto &noise = *produced.result;
 
     auto reset_input = freeze_valid_input(noise, trace.bindings);
+    ProfilingDifferentialAttemptState reset_attempt(reset_input);
     auto reset = observation_for(reset_input, trace.exact_end + 9h);
     reset.counter_reset_detected = true;
-    auto reset_result =
-        revalidate_profiling_differential_input(reset_input, reset);
+    auto reset_result = revalidate_profiling_differential_input(
+        reset_input, reset_attempt,
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, reset);
     require(!reset_result.accepted() &&
                 reset_result.disposition ==
                     ProfilingDifferentialRevalidationDisposition::
@@ -619,12 +763,14 @@ void require_noise_validity_across_calibration_revisions() {
         "a fresh calibration revision revived reset-invalidated noise");
 
     auto variation_input = freeze_valid_input(noise, trace.bindings);
+    ProfilingDifferentialAttemptState variation_attempt(variation_input);
     auto variation =
         observation_for(variation_input, trace.exact_end + 10h);
     variation.observed_non_target_gtt_range_bytes =
         noise.n_gtt_bytes() + 1;
     auto variation_result = revalidate_profiling_differential_input(
-        variation_input, variation);
+        variation_input, variation_attempt,
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, variation);
     require(!variation_result.accepted() &&
                 variation_result.disposition ==
                     ProfilingDifferentialRevalidationDisposition::
@@ -666,9 +812,11 @@ void require_noise_validity_across_calibration_revisions() {
             "fresh noise from the new counter epoch did not freeze");
 
     auto uninterrupted = freeze_valid_input(noise, trace.bindings);
+    ProfilingDifferentialAttemptState uninterrupted_attempt(uninterrupted);
     auto matching = observation_for(uninterrupted, trace.exact_end + 11h);
     auto matching_result = revalidate_profiling_differential_input(
-        uninterrupted, matching);
+        uninterrupted, uninterrupted_attempt,
+        ProfilingDifferentialRepetitionPhase::Calibration, 0, matching);
     require(matching_result.accepted(),
             "matching same-boot observation invalidated noise");
     auto later_revision = input_draft(trace.bindings, noise);
@@ -686,6 +834,8 @@ int main() {
     try {
         require_parser_rejects_bound_below_uncertainty();
         require_input_freezes_and_revalidates_before_repetitions();
+        require_live_revalidation_issues_once_only_receipts();
+        require_invalidation_precedence_and_terminal_authority_boundary();
         require_consumer_failure_contract();
         require_noise_validity_across_calibration_revisions();
         std::cout << "PASS: residency profiling differential input tests\n";

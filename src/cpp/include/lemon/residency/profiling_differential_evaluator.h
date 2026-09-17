@@ -19,13 +19,27 @@ inline constexpr std::size_t profiling_differential_minimum_window_points = 50;
 inline constexpr std::size_t profiling_differential_maximum_plateau_points =
     4096;
 inline constexpr std::size_t profiling_differential_maximum_repetitions = 128;
+// Canonical JSON with maximum-width scalar fields uses at most 327 bytes per
+// repetition and 24,709 bytes for the envelope, array separators, selector,
+// identities, method binding, accounting, claim, schema, and checksum.
+inline constexpr std::size_t
+    profiling_differential_maximum_repetition_evidence_bytes = 327;
+inline constexpr std::size_t
+    profiling_differential_maximum_canonical_fixed_bytes = 24709;
+inline constexpr std::size_t
+    profiling_differential_maximum_canonical_evidence_bytes =
+        profiling_differential_maximum_canonical_fixed_bytes +
+        profiling_differential_maximum_repetitions *
+            profiling_differential_maximum_repetition_evidence_bytes;
+static_assert(profiling_differential_maximum_canonical_evidence_bytes ==
+              66565);
 inline constexpr std::string_view profiling_differential_method_id =
     "differential_retained_gtt";
 inline constexpr std::string_view profiling_differential_covered_effect =
     "retained_gtt";
 inline constexpr std::string_view
     profiling_no_target_gtt_noise_procedure_revision_sha256 =
-        "53154e34cf8387b0f7805accade0e431fec603470b48db5324d963b4b8b659ed";
+        "3c5a0b66d6317cc4dd96211cd68887a7cd0949d44cf748a61d9fdc35f4df6e3c";
 
 struct ProfilingDifferentialMethodBinding {
     std::string method_id;
@@ -82,6 +96,7 @@ struct ProfilingDifferentialPhaseMarker {
 
 enum class ProfilingDifferentialOwnerProjectionStatus {
     Absent,
+    Incomplete,
     Complete,
     Contradictory,
     SharedBuffer,
@@ -108,16 +123,12 @@ struct ProfilingDifferentialPlateauObservation {
     std::vector<ProfilingDifferentialGttPoint> points;
 };
 
-enum class ProfilingDifferentialRepetitionPhase {
-    Calibration,
-    Validation,
-};
-
 struct ProfilingDifferentialRepetition {
     ProfilingDifferentialRepetitionPhase phase =
         ProfilingDifferentialRepetitionPhase::Calibration;
     std::uint32_t ordinal = 0;
-    ProfilingDifferentialRevalidationObservation revalidation;
+    std::optional<ProfilingDifferentialRevalidationReceipt>
+        revalidation_receipt;
     ProfilingDifferentialPlateauObservation baseline;
     ProfilingDifferentialPlateauObservation loaded;
     ProfilingDifferentialPlateauObservation release;
@@ -125,6 +136,7 @@ struct ProfilingDifferentialRepetition {
 
 enum class ProfilingDifferentialOwnerProjectionCoverage {
     Complete,
+    Incomplete,
     Absent,
 };
 
@@ -251,7 +263,7 @@ private:
     friend struct ProfilingDifferentialEvidenceParseResult;
     friend ProfilingDifferentialEvaluationResult
     evaluate_retained_gtt_differential(
-        FrozenProfilingDifferentialInput input,
+        const FrozenProfilingDifferentialInput &input,
         ProfilingDifferentialMethodBinding method_binding,
         const std::vector<ProfilingDifferentialRepetition> &repetitions);
     friend ProfilingDifferentialEvidenceParseResult
@@ -283,7 +295,7 @@ struct ProfilingDifferentialEvidenceParseResult {
 
 ProfilingDifferentialEvaluationResult
 evaluate_retained_gtt_differential(
-    FrozenProfilingDifferentialInput input,
+    const FrozenProfilingDifferentialInput &input,
     ProfilingDifferentialMethodBinding method_binding,
     const std::vector<ProfilingDifferentialRepetition> &repetitions);
 

@@ -16,6 +16,7 @@ namespace lemon::residency {
 namespace {
 
 using json = nlohmann::json;
+using profiling_internal::BoundedSha256;
 using profiling_internal::append_string;
 using profiling_internal::append_u64;
 using profiling_internal::bounded_diagnostic;
@@ -26,7 +27,7 @@ using profiling_internal::sha256_hex;
 constexpr char component_evidence_domain[] =
     "lemonade.residency.profiling-differential-evidence/v1\0";
 constexpr char repetition_provenance_domain[] =
-    "lemonade.residency.profiling-differential-repetition/v1\0";
+    "lemonade.residency.profiling-differential-repetition/v2\0";
 constexpr char noise_bindings_domain[] =
     "lemonade.residency.profiling-noise-bindings/v1\0";
 constexpr char constraint_binding_domain[] =
@@ -209,104 +210,166 @@ std::string_view projection_coverage_wire(
     switch (coverage) {
     case ProfilingDifferentialOwnerProjectionCoverage::Complete:
         return "complete";
+    case ProfilingDifferentialOwnerProjectionCoverage::Incomplete:
+        return "incomplete";
     case ProfilingDifferentialOwnerProjectionCoverage::Absent:
         return "absent";
     }
     return {};
 }
 
-void append_bindings(std::string &bytes,
-                     const ProfilingNoiseBindings &bindings) {
-    append_string(bytes, bindings_document(bindings).dump());
-}
-
-void append_time(std::string &bytes,
-                 std::chrono::steady_clock::time_point value) {
-    append_u64(bytes, static_cast<std::uint64_t>(
-                          value.time_since_epoch().count()));
-}
-
-void append_marker(
-    std::string &bytes,
-    const std::optional<ProfilingDifferentialPhaseMarker> &marker) {
-    append_u64(bytes, marker.has_value() ? 1 : 0);
-    if (!marker) return;
-    append_u64(bytes, static_cast<std::uint64_t>(marker->kind));
-    append_time(bytes, marker->marked_at);
-    append_u64(bytes, marker->ready ? 1 : 0);
-    append_string(bytes, marker->frozen_input_sha256);
-    append_string(bytes, marker->selector_sha256);
-    append_string(bytes, marker->target_client_identity_sha256);
-    append_string(bytes, marker->target_containment_identity_sha256);
-    append_string(bytes, marker->provenance_sha256);
-}
-
-void append_point(std::string &bytes,
-                  const ProfilingDifferentialGttPoint &point) {
-    append_time(bytes, point.scheduled_at);
-    append_time(bytes, point.read_started_at);
-    append_time(bytes, point.read_finished_at);
-    append_u64(bytes, point.global_gtt_used_bytes.has_value() ? 1 : 0);
-    if (point.global_gtt_used_bytes) {
-        append_u64(bytes, *point.global_gtt_used_bytes);
+ProfilingDifferentialOwnerProjectionCoverage weakest_coverage(
+    ProfilingDifferentialOwnerProjectionCoverage left,
+    ProfilingDifferentialOwnerProjectionCoverage right) noexcept {
+    if (left == ProfilingDifferentialOwnerProjectionCoverage::Absent ||
+        right == ProfilingDifferentialOwnerProjectionCoverage::Absent) {
+        return ProfilingDifferentialOwnerProjectionCoverage::Absent;
     }
-    append_bindings(bytes, point.observed_bindings);
-    append_string(bytes, point.frozen_input_sha256);
-    append_string(bytes, point.selector_sha256);
-    append_string(bytes, point.target_client_identity_sha256);
-    append_string(bytes, point.target_containment_identity_sha256);
-    append_string(bytes, point.provenance_sha256);
-    append_u64(bytes,
-               static_cast<std::uint64_t>(point.owner_projection_status));
-    append_u64(bytes, point.owner_gtt_used_bytes.has_value() ? 1 : 0);
-    if (point.owner_gtt_used_bytes) {
-        append_u64(bytes, *point.owner_gtt_used_bytes);
+    if (left == ProfilingDifferentialOwnerProjectionCoverage::Incomplete ||
+        right == ProfilingDifferentialOwnerProjectionCoverage::Incomplete) {
+        return ProfilingDifferentialOwnerProjectionCoverage::Incomplete;
     }
+    return ProfilingDifferentialOwnerProjectionCoverage::Complete;
 }
 
-void append_plateau(std::string &bytes,
-                    const ProfilingDifferentialPlateauObservation &plateau) {
-    append_marker(bytes, plateau.marker);
-    append_u64(bytes, static_cast<std::uint64_t>(plateau.points.size()));
+constexpr std::uint64_t maximum_encoded_point_bytes = 1424;
+constexpr std::uint64_t maximum_encoded_marker_bytes = 392;
+constexpr std::uint64_t maximum_encoded_receipt_bytes = 400;
+constexpr std::uint64_t maximum_encoded_plateau_bytes =
+    maximum_encoded_marker_bytes + 8 +
+    profiling_differential_maximum_plateau_points *
+        maximum_encoded_point_bytes;
+constexpr std::uint64_t maximum_repetition_provenance_bytes =
+    sizeof(repetition_provenance_domain) - 1 + 16 +
+    maximum_encoded_receipt_bytes + 3 * maximum_encoded_plateau_bytes;
+constexpr std::uint64_t maximum_component_provenance_bytes =
+    profiling_differential_maximum_repetitions *
+    maximum_repetition_provenance_bytes;
+static_assert(maximum_component_provenance_bytes /
+                  profiling_differential_maximum_repetitions ==
+              maximum_repetition_provenance_bytes);
+
+bool append_time(BoundedSha256 &hash,
+                 std::chrono::steady_clock::time_point value) noexcept {
+    return hash.append_u64(static_cast<std::uint64_t>(
+        value.time_since_epoch().count()));
+}
+
+bool append_bindings(BoundedSha256 &hash,
+                     const ProfilingNoiseBindings &bindings) noexcept {
+    return hash.append_string(bindings.deployment_id) &&
+           hash.append_string(bindings.deployment_epoch_sha256) &&
+           hash.append_string(bindings.boot_id_sha256) &&
+           hash.append_string(bindings.device_identity_sha256) &&
+           hash.append_string(bindings.topology_sha256) &&
+           hash.append_string(bindings.kernel_identity_sha256) &&
+           hash.append_string(bindings.driver_identity_sha256) &&
+           hash.append_string(bindings.counter_source_id) &&
+           hash.append_string(bindings.counter_source_revision_sha256) &&
+           hash.append_string(bindings.counter_continuity_epoch_sha256) &&
+           hash.append_string(bindings.campaign_contract_sha256) &&
+           hash.append_string(bindings.procedure_revision_sha256) &&
+           hash.append_string(bindings.background_inventory_sha256);
+}
+
+bool append_receipt(
+    BoundedSha256 &hash,
+    const ProfilingDifferentialRevalidationReceipt &receipt) noexcept {
+    return hash.append_u64(static_cast<std::uint64_t>(receipt.phase())) &&
+           hash.append_u64(receipt.ordinal()) &&
+           append_time(hash, receipt.checked_at()) &&
+           hash.append_string(receipt.frozen_input_sha256()) &&
+           hash.append_string(receipt.noise_result_checksum_sha256()) &&
+           hash.append_string(receipt.observation_sha256()) &&
+           hash.append_string(receipt.previous_receipt_sha256()) &&
+           hash.append_u64(static_cast<std::uint64_t>(receipt.status())) &&
+           hash.append_u64(
+               static_cast<std::uint64_t>(receipt.disposition())) &&
+           hash.append_string(receipt.receipt_sha256());
+}
+
+bool append_marker(
+    BoundedSha256 &hash,
+    const std::optional<ProfilingDifferentialPhaseMarker> &marker) noexcept {
+    if (!hash.append_u64(marker.has_value() ? 1 : 0)) return false;
+    if (!marker) return true;
+    return hash.append_u64(static_cast<std::uint64_t>(marker->kind)) &&
+           append_time(hash, marker->marked_at) &&
+           hash.append_u64(marker->ready ? 1 : 0) &&
+           hash.append_string(marker->frozen_input_sha256) &&
+           hash.append_string(marker->selector_sha256) &&
+           hash.append_string(marker->target_client_identity_sha256) &&
+           hash.append_string(marker->target_containment_identity_sha256) &&
+           hash.append_string(marker->provenance_sha256);
+}
+
+bool append_point(BoundedSha256 &hash,
+                  const ProfilingDifferentialGttPoint &point) noexcept {
+    if (!append_time(hash, point.scheduled_at) ||
+        !append_time(hash, point.read_started_at) ||
+        !append_time(hash, point.read_finished_at) ||
+        !hash.append_u64(point.global_gtt_used_bytes.has_value() ? 1 : 0)) {
+        return false;
+    }
+    if (point.global_gtt_used_bytes &&
+        !hash.append_u64(*point.global_gtt_used_bytes)) {
+        return false;
+    }
+    if (!append_bindings(hash, point.observed_bindings) ||
+        !hash.append_string(point.frozen_input_sha256) ||
+        !hash.append_string(point.selector_sha256) ||
+        !hash.append_string(point.target_client_identity_sha256) ||
+        !hash.append_string(point.target_containment_identity_sha256) ||
+        !hash.append_string(point.provenance_sha256) ||
+        !hash.append_u64(
+            static_cast<std::uint64_t>(point.owner_projection_status)) ||
+        !hash.append_u64(point.owner_gtt_used_bytes.has_value() ? 1 : 0)) {
+        return false;
+    }
+    return !point.owner_gtt_used_bytes ||
+           hash.append_u64(*point.owner_gtt_used_bytes);
+}
+
+bool append_plateau(
+    BoundedSha256 &hash,
+    const ProfilingDifferentialPlateauObservation &plateau) noexcept {
+    if (!append_marker(hash, plateau.marker) ||
+        !hash.append_u64(static_cast<std::uint64_t>(plateau.points.size()))) {
+        return false;
+    }
     const auto retained_point_count = std::min(
         plateau.points.size(),
         profiling_differential_maximum_plateau_points);
     for (std::size_t index = 0; index < retained_point_count; ++index) {
-        append_point(bytes, plateau.points[index]);
+        if (!append_point(hash, plateau.points[index])) return false;
     }
+    return true;
 }
 
-std::optional<std::string> repetition_provenance(
-    const ProfilingDifferentialRepetition &repetition) {
-    std::string bytes(repetition_provenance_domain,
-                      sizeof(repetition_provenance_domain) - 1);
-    append_u64(bytes, static_cast<std::uint64_t>(repetition.phase));
-    append_u64(bytes, repetition.ordinal);
-    const auto &revalidation = repetition.revalidation;
-    append_time(bytes, revalidation.checked_at);
-    append_bindings(bytes, revalidation.observed_bindings);
-    append_string(bytes,
-                  revalidation.observed_noise_result_checksum_sha256);
-    append_string(bytes,
-                  revalidation.observed_counter_continuity_epoch_sha256);
-    append_u64(bytes, revalidation.observed_non_target_gtt_range_bytes);
-    append_u64(bytes, revalidation.target_activity.has_value() ? 1 : 0);
-    if (revalidation.target_activity) {
-        append_string(bytes,
-                      revalidation.target_activity->client_identity_sha256);
-        append_string(
-            bytes,
-            revalidation.target_activity->containment_identity_sha256);
+struct RepetitionProvenance {
+    std::string sha256;
+    std::uint64_t encoded_bytes = 0;
+};
+
+std::optional<RepetitionProvenance> repetition_provenance(
+    const ProfilingDifferentialRepetition &repetition,
+    const ProfilingDifferentialRevalidationReceipt &receipt) {
+    BoundedSha256 hash(maximum_repetition_provenance_bytes);
+    if (!hash.append(std::string_view(
+            repetition_provenance_domain,
+            sizeof(repetition_provenance_domain) - 1)) ||
+        !hash.append_u64(static_cast<std::uint64_t>(repetition.phase)) ||
+        !hash.append_u64(repetition.ordinal) ||
+        !append_receipt(hash, receipt) ||
+        !append_plateau(hash, repetition.baseline) ||
+        !append_plateau(hash, repetition.loaded) ||
+        !append_plateau(hash, repetition.release)) {
+        return std::nullopt;
     }
-    append_u64(bytes, revalidation.counter_reset_detected ? 1 : 0);
-    append_u64(bytes,
-               revalidation.counter_discontinuity_detected ? 1 : 0);
-    append_u64(bytes,
-               revalidation.unexpected_non_target_client_detected ? 1 : 0);
-    append_plateau(bytes, repetition.baseline);
-    append_plateau(bytes, repetition.loaded);
-    append_plateau(bytes, repetition.release);
-    return sha256_hex(bytes);
+    const auto encoded_bytes = hash.bytes_hashed();
+    auto sha256 = hash.finish();
+    if (!sha256) return std::nullopt;
+    return RepetitionProvenance{std::move(*sha256), encoded_bytes};
 }
 
 struct PlateauSummary {
@@ -388,6 +451,16 @@ bool point_has_usable_source_fact(
            bindings_are_valid(point.observed_bindings);
 }
 
+bool retained_point_fields_are_bounded(
+    const ProfilingDifferentialGttPoint &point) noexcept {
+    return bindings_are_valid(point.observed_bindings) &&
+           digest_is_valid(point.frozen_input_sha256) &&
+           digest_is_valid(point.selector_sha256) &&
+           digest_is_valid(point.target_client_identity_sha256) &&
+           digest_is_valid(point.target_containment_identity_sha256) &&
+           digest_is_valid(point.provenance_sha256);
+}
+
 enum class SourceAuditScope {
     FixedWindow,
     FromMarker,
@@ -415,6 +488,16 @@ struct BoundedRepetitionIngestion {
     BoundedPlateauIngestion baseline;
     BoundedPlateauIngestion loaded;
     BoundedPlateauIngestion release;
+};
+
+struct RevalidationAuthority {
+    std::chrono::steady_clock::time_point checked_at;
+    ProfilingDifferentialRevalidationStatus status =
+        ProfilingDifferentialRevalidationStatus::RevisionRejected;
+    ProfilingDifferentialRevalidationDisposition disposition =
+        ProfilingDifferentialRevalidationDisposition::RejectRevision;
+    std::string diagnostic;
+    std::optional<ProfilingDifferentialRevalidationReceipt> receipt;
 };
 
 BoundedSourceFact bounded_source_fact(
@@ -685,6 +768,20 @@ PlateauResult evaluate_plateau(
             summary.projection_coverage =
                 ProfilingDifferentialOwnerProjectionCoverage::Absent;
             break;
+        case ProfilingDifferentialOwnerProjectionStatus::Incomplete:
+            if (point->owner_gtt_used_bytes &&
+                *point->owner_gtt_used_bytes >
+                    *point->global_gtt_used_bytes) {
+                return {
+                    ProfilingDifferentialEvaluationStatus::
+                        ContradictoryOwnerProjection,
+                    "incomplete owner projection exceeds the global point",
+                    std::nullopt};
+            }
+            summary.projection_coverage = weakest_coverage(
+                summary.projection_coverage,
+                ProfilingDifferentialOwnerProjectionCoverage::Incomplete);
+            break;
         case ProfilingDifferentialOwnerProjectionStatus::Complete:
             if (!point->owner_gtt_used_bytes ||
                 *point->owner_gtt_used_bytes >
@@ -859,7 +956,8 @@ void require_identifier(std::string_view value, std::string_view label) {
 }
 
 json parse_json(std::string_view bytes) {
-    if (bytes.size() > max_local_overlay_input_bytes) {
+    if (bytes.size() >
+        profiling_differential_maximum_canonical_evidence_bytes) {
         reject_parse(ProfilingDifferentialEvidenceParseStatus::InputTooLarge,
                      "component evidence exceeds the input limit");
     }
@@ -1393,7 +1491,7 @@ bool ProfilingDifferentialEvidenceParseResult::accepted() const noexcept {
 
 ProfilingDifferentialEvaluationResult
 evaluate_retained_gtt_differential(
-    FrozenProfilingDifferentialInput input,
+    const FrozenProfilingDifferentialInput &input,
     ProfilingDifferentialMethodBinding method_binding,
     const std::vector<ProfilingDifferentialRepetition> &repetitions) {
     try {
@@ -1427,6 +1525,123 @@ evaluate_retained_gtt_differential(
                 ProfilingDifferentialEvaluationStatus::InvalidRepetitionCount,
                 "repetition records do not match the frozen counts");
         }
+
+        std::vector<RevalidationAuthority> authorities;
+        authorities.reserve(repetitions.size());
+        std::string previous_receipt_sha256 =
+            input.revision().attempt_receipt_sha256;
+        std::optional<ProfilingDifferentialRevalidationResult>
+            terminal_revalidation;
+        for (std::size_t index = 0; index < repetitions.size(); ++index) {
+            if (terminal_revalidation) break;
+            const auto &repetition = repetitions[index];
+            const auto expected_phase =
+                index < calibration_count
+                    ? ProfilingDifferentialRepetitionPhase::Calibration
+                    : ProfilingDifferentialRepetitionPhase::Validation;
+            const auto expected_ordinal = static_cast<std::uint32_t>(
+                index < calibration_count ? index
+                                          : index - calibration_count);
+
+            ProfilingDifferentialRevalidationResult revalidation;
+            auto checked_at = std::chrono::steady_clock::time_point{};
+            if (repetition.revalidation_receipt) {
+                const auto &receipt = *repetition.revalidation_receipt;
+                if (!validate_profiling_differential_revalidation_receipt(
+                        input, receipt, expected_phase, expected_ordinal,
+                        previous_receipt_sha256)) {
+                    revalidation.status =
+                        ProfilingDifferentialRevalidationStatus::
+                            RevisionRejected;
+                    revalidation.disposition =
+                        ProfilingDifferentialRevalidationDisposition::
+                            RejectRevision;
+                    revalidation.diagnostic =
+                        "revalidation receipt chain is invalid";
+                } else {
+                    revalidation.status = receipt.status();
+                    revalidation.disposition = receipt.disposition();
+                    revalidation.diagnostic =
+                        "retained revalidation receipt was consumed";
+                    revalidation.receipt = receipt;
+                    checked_at = receipt.checked_at();
+                    previous_receipt_sha256 = receipt.receipt_sha256();
+                }
+            } else {
+                revalidation.status =
+                    ProfilingDifferentialRevalidationStatus::RevisionRejected;
+                revalidation.disposition =
+                    ProfilingDifferentialRevalidationDisposition::
+                        RejectRevision;
+                revalidation.diagnostic =
+                    "revalidation receipt is missing";
+            }
+            authorities.push_back({
+                checked_at, revalidation.status, revalidation.disposition,
+                revalidation.diagnostic, revalidation.receipt});
+            if (!revalidation.accepted()) {
+                terminal_revalidation = std::move(revalidation);
+            }
+        }
+
+        if (terminal_revalidation &&
+            terminal_revalidation->disposition ==
+                ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult) {
+            auto result = reject_observation(
+                input,
+                ProfilingDifferentialEvaluationStatus::RevalidationRejected,
+                terminal_revalidation->diagnostic,
+                terminal_revalidation->disposition);
+            result.revalidation_status = terminal_revalidation->status;
+            return result;
+        }
+
+        std::vector<BoundedRepetitionIngestion> ingestions;
+        ingestions.reserve(authorities.size());
+        for (std::size_t index = 0; index < authorities.size(); ++index) {
+            if (authorities[index].disposition !=
+                ProfilingDifferentialRevalidationDisposition::Continue) {
+                break;
+            }
+            ingestions.push_back(ingest_repetition(repetitions[index], input));
+        }
+        for (const auto &ingestion : ingestions) {
+            if (audit_repetition_source_facts(ingestion, input) ==
+                MonotoneNoiseValidity::Invalidated) {
+                return reject_observation(
+                    input,
+                    ProfilingDifferentialEvaluationStatus::SourceDrift,
+                    "authenticated repetition source binding changed");
+            }
+        }
+        if (terminal_revalidation) {
+            auto result = reject_observation(
+                input,
+                ProfilingDifferentialEvaluationStatus::RevalidationRejected,
+                terminal_revalidation->diagnostic,
+                terminal_revalidation->disposition);
+            result.revalidation_status = terminal_revalidation->status;
+            return result;
+        }
+
+        for (const auto &ingestion : ingestions) {
+            for (const auto *plateau : {&ingestion.baseline,
+                                        &ingestion.loaded,
+                                        &ingestion.release}) {
+                for (std::size_t index = 0;
+                     index < plateau->retained_point_count; ++index) {
+                    if (!retained_point_fields_are_bounded(
+                            plateau->plateau->points[index])) {
+                        return reject_observation(
+                            input,
+                            ProfilingDifferentialEvaluationStatus::InvalidPoint,
+                            "retained point fields exceed their bounds");
+                    }
+                }
+            }
+        }
+
         std::vector<ProfilingDifferentialRepetitionEvidence>
             calibration_evidence;
         std::vector<ProfilingDifferentialRepetitionEvidence>
@@ -1437,30 +1652,12 @@ evaluate_retained_gtt_differential(
             ProfilingDifferentialOwnerProjectionCoverage::Complete;
         std::uint64_t maximum_calibration_delta = 0;
         std::uint64_t retained_bound = 0;
+        std::uint64_t component_provenance_bytes = 0;
         std::optional<std::chrono::steady_clock::time_point>
             previous_release_completed_at;
 
         for (std::size_t index = 0; index < repetitions.size(); ++index) {
             const auto &repetition = repetitions[index];
-            const auto revalidation = revalidate_profiling_differential_input(
-                input, repetition.revalidation);
-            if (!revalidation.accepted()) {
-                auto result = reject_observation(
-                    input,
-                    ProfilingDifferentialEvaluationStatus::
-                        RevalidationRejected,
-                    revalidation.diagnostic, revalidation.disposition);
-                result.revalidation_status = revalidation.status;
-                return result;
-            }
-            const auto ingestion = ingest_repetition(repetition, input);
-            if (audit_repetition_source_facts(ingestion, input) ==
-                MonotoneNoiseValidity::Invalidated) {
-                return reject_observation(
-                    input,
-                    ProfilingDifferentialEvaluationStatus::SourceDrift,
-                    "authenticated repetition source binding changed");
-            }
             const auto expected_phase =
                 index < calibration_count
                     ? ProfilingDifferentialRepetitionPhase::Calibration
@@ -1470,6 +1667,8 @@ evaluate_retained_gtt_differential(
                         ProfilingDifferentialRepetitionPhase::Calibration
                     ? index
                     : index - calibration_count);
+            const auto revalidation_checked_at = authorities[index].checked_at;
+            const auto &ingestion = ingestions[index];
             if (repetition.phase != expected_phase ||
                 repetition.ordinal != expected_ordinal) {
                 return reject(
@@ -1478,7 +1677,7 @@ evaluate_retained_gtt_differential(
                     "calibration and validation records are not disjoint and ordered");
             }
             if (previous_release_completed_at &&
-                (repetition.revalidation.checked_at <
+                (revalidation_checked_at <
                      *previous_release_completed_at ||
                  !repetition.baseline.marker ||
                  repetition.baseline.marker->marked_at <
@@ -1510,7 +1709,7 @@ evaluate_retained_gtt_differential(
                 return reject_observation(
                     input, release.status, release.diagnostic);
             }
-            if (repetition.revalidation.checked_at >
+            if (revalidation_checked_at >
                     repetition.baseline.marker->marked_at ||
                 baseline.summary->completed_at >
                     repetition.loaded.marker->marked_at ||
@@ -1604,6 +1803,20 @@ evaluate_retained_gtt_differential(
                     projection_coverage =
                         ProfilingDifferentialOwnerProjectionCoverage::Absent;
                     break;
+                case ProfilingDifferentialOwnerProjectionStatus::Incomplete:
+                    if (point.owner_gtt_used_bytes &&
+                        *point.owner_gtt_used_bytes >
+                            *point.global_gtt_used_bytes) {
+                        return reject(
+                            ProfilingDifferentialEvaluationStatus::
+                                ContradictoryOwnerProjection,
+                            "incomplete post-release owner projection exceeds the global point");
+                    }
+                    projection_coverage = weakest_coverage(
+                        projection_coverage,
+                        ProfilingDifferentialOwnerProjectionCoverage::
+                            Incomplete);
+                    break;
                 case ProfilingDifferentialOwnerProjectionStatus::Complete:
                     if (!point.owner_gtt_used_bytes ||
                         *point.owner_gtt_used_bytes >
@@ -1647,15 +1860,26 @@ evaluate_retained_gtt_differential(
             }
             previous_release_completed_at = release_completed_at;
 
-            const auto provenance = repetition_provenance(repetition);
-            if (!provenance) {
+            if (!authorities[index].receipt) {
+                return reject(
+                    ProfilingDifferentialEvaluationStatus::
+                        RevalidationRejected,
+                    "accepted repetition has no revalidation receipt");
+            }
+            const auto provenance = repetition_provenance(
+                repetition, *authorities[index].receipt);
+            if (!provenance ||
+                provenance->encoded_bytes >
+                    maximum_component_provenance_bytes -
+                        component_provenance_bytes) {
                 return reject(
                     ProfilingDifferentialEvaluationStatus::DigestUnavailable,
                     "repetition provenance SHA-256 is unavailable");
             }
+            component_provenance_bytes += provenance->encoded_bytes;
             ProfilingDifferentialRepetitionEvidence evidence;
             evidence.ordinal = repetition.ordinal;
-            evidence.provenance_sha256 = *provenance;
+            evidence.provenance_sha256 = std::move(provenance->sha256);
             evidence.delta_bytes = delta;
             evidence.release = {
                 release_lower,
@@ -1665,15 +1889,13 @@ evaluate_retained_gtt_differential(
                 true,
             };
 
-            if (baseline.summary->projection_coverage ==
-                    ProfilingDifferentialOwnerProjectionCoverage::Absent ||
-                loaded.summary->projection_coverage ==
-                    ProfilingDifferentialOwnerProjectionCoverage::Absent ||
-                release.summary->projection_coverage ==
-                    ProfilingDifferentialOwnerProjectionCoverage::Absent) {
-                projection_coverage =
-                    ProfilingDifferentialOwnerProjectionCoverage::Absent;
-            }
+            projection_coverage = weakest_coverage(
+                projection_coverage,
+                weakest_coverage(
+                    baseline.summary->projection_coverage,
+                    weakest_coverage(
+                        loaded.summary->projection_coverage,
+                        release.summary->projection_coverage)));
 
             if (index < calibration_count) {
                 maximum_calibration_delta =
@@ -1803,19 +2025,26 @@ evaluate_retained_gtt_differential(
         payload["checksum_sha256"] = *checksum;
         auto canonical_bytes = payload.dump();
 
+        if (canonical_bytes.size() >
+            profiling_differential_maximum_canonical_evidence_bytes) {
+            return reject(
+                ProfilingDifferentialEvaluationStatus::EvidenceUnavailable,
+                "canonical component evidence exceeds its proven ceiling");
+        }
+        auto parsed = parse_profiling_differential_evidence(canonical_bytes);
+        if (!parsed.accepted() ||
+            parsed.evidence->canonical_bytes() != canonical_bytes) {
+            return reject(
+                ProfilingDifferentialEvaluationStatus::EvidenceUnavailable,
+                "canonical component evidence did not round-trip");
+        }
+
         ProfilingDifferentialEvaluationResult result;
         result.status = ProfilingDifferentialEvaluationStatus::Accepted;
         result.disposition =
             ProfilingDifferentialRevalidationDisposition::Continue;
         result.diagnostic = "retained-GTT differential evidence accepted";
-        result.evidence = ParsedProfilingDifferentialEvidence(
-            std::string(input.frozen_input_sha256()),
-            std::move(method_binding), identity.transaction.selector,
-            identity.transaction.selector_sha256,
-            input.revision().calibration_revision_sha256,
-            input.accounting(), input.noise().n_gtt_bytes(), retained_bound,
-            std::move(calibration_evidence), std::move(validation_evidence),
-            projection_coverage, *checksum, std::move(canonical_bytes));
+        result.evidence = std::move(parsed.evidence);
         return result;
     } catch (...) {
         return reject(
@@ -2087,6 +2316,9 @@ parse_profiling_differential_evidence(std::string_view bytes) {
         if (coverage_wire == "complete") {
             coverage =
                 ProfilingDifferentialOwnerProjectionCoverage::Complete;
+        } else if (coverage_wire == "incomplete") {
+            coverage =
+                ProfilingDifferentialOwnerProjectionCoverage::Incomplete;
         } else if (coverage_wire == "absent") {
             coverage = ProfilingDifferentialOwnerProjectionCoverage::Absent;
         } else {
