@@ -141,8 +141,9 @@ receipt with that repetition, and then issues the baseline-ready marker without
 an intervening gate, lease, identity, counter, background, or journal-state
 change. This is an ordering and authority fence, not a numeric clock-expiry
 rule. Elapsed time alone does not expire matching evidence during the same
-boot. If the caller cannot preserve that fence, it obtains and authenticates a
-new observation or stops the attempt.
+boot. Receipt issuance consumes that repetition's phase and ordinal. If the
+caller loses the fence after receipt issuance, it stops the attempt and follows
+the rejection and cleanup path below.
 
 ### Establish the strongest observation disposition
 
