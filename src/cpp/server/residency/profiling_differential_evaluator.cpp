@@ -1,6 +1,8 @@
 #include "lemon/residency/profiling_differential_evaluator.h"
 
+#include "local_overlay_codec.h"
 #include "profiling_common.h"
+#include "profiling_noise_codec.h"
 
 #include <nlohmann/json.hpp>
 
@@ -16,9 +18,11 @@ namespace lemon::residency {
 namespace {
 
 using json = nlohmann::json;
+using local_overlay_internal::selector_document;
 using profiling_internal::BoundedSha256;
 using profiling_internal::append_string;
 using profiling_internal::append_u64;
+using profiling_internal::bindings_document;
 using profiling_internal::bounded_diagnostic;
 using profiling_internal::digest_is_valid;
 using profiling_internal::elapsed_between;
@@ -148,63 +152,6 @@ std::optional<ProfilingDifferentialMethodBinding> resolved_method_binding(
     };
 }
 
-json bindings_document(const ProfilingNoiseBindings &bindings) {
-    return json{
-        {"background_inventory_sha256",
-         bindings.background_inventory_sha256},
-        {"boot_id_sha256", bindings.boot_id_sha256},
-        {"campaign_contract_sha256", bindings.campaign_contract_sha256},
-        {"counter_continuity_epoch_sha256",
-         bindings.counter_continuity_epoch_sha256},
-        {"counter_source_id", bindings.counter_source_id},
-        {"counter_source_revision_sha256",
-         bindings.counter_source_revision_sha256},
-        {"deployment_epoch_sha256", bindings.deployment_epoch_sha256},
-        {"deployment_id", bindings.deployment_id},
-        {"device_identity_sha256", bindings.device_identity_sha256},
-        {"driver_identity_sha256", bindings.driver_identity_sha256},
-        {"kernel_identity_sha256", bindings.kernel_identity_sha256},
-        {"procedure_revision_sha256", bindings.procedure_revision_sha256},
-        {"topology_sha256", bindings.topology_sha256},
-    };
-}
-
-json catalog_selector_document(const RuntimeCatalogSelector &selector) {
-    json constraints = json::array();
-    for (const auto constraint : selector.constraints) {
-        constraints.push_back(wire_name(constraint));
-    }
-    return json{
-        {"backend_channel", selector.backend_channel},
-        {"base_variant", selector.base_variant},
-        {"constraints", std::move(constraints)},
-        {"material_profiles", selector.material_profiles},
-        {"model_type", selector.model_type},
-        {"operation_kind", wire_name(selector.operation_kind)},
-        {"operation_template", wire_name(selector.operation_template)},
-        {"platform", selector.platform},
-        {"recovery", selector.recovery},
-        {"source_support_baseline", selector.source_support_baseline},
-    };
-}
-
-json selector_document(const LocalOverlaySelectorIdentity &selector) {
-    return json{
-        {"backend_build_sha256", selector.backend_build_sha256},
-        {"canonical_model_id", selector.canonical_model_id},
-        {"catalog", catalog_selector_document(selector.catalog_selector)},
-        {"catalog_sha256", selector.catalog_sha256},
-        {"configuration_sha256", selector.configuration_sha256},
-        {"dependency_set_sha256", selector.dependency_set_sha256},
-        {"device_identity_sha256", selector.device_identity_sha256},
-        {"driver_identity_sha256", selector.driver_identity_sha256},
-        {"model_artifact_sha256", selector.model_artifact_sha256},
-        {"operation_contract_sha256", selector.operation_contract_sha256},
-        {"topology_sha256", selector.topology_sha256},
-        {"workload_sha256", selector.workload_sha256},
-    };
-}
-
 std::string_view projection_coverage_wire(
     ProfilingDifferentialOwnerProjectionCoverage coverage) noexcept {
     switch (coverage) {
@@ -230,6 +177,82 @@ ProfilingDifferentialOwnerProjectionCoverage weakest_coverage(
         return ProfilingDifferentialOwnerProjectionCoverage::Incomplete;
     }
     return ProfilingDifferentialOwnerProjectionCoverage::Complete;
+}
+
+enum class OwnerProjectionContext {
+    Plateau,
+    PostRelease,
+};
+
+struct OwnerProjectionResult {
+    std::optional<ProfilingDifferentialOwnerProjectionCoverage> coverage;
+    ProfilingDifferentialEvaluationStatus status =
+        ProfilingDifferentialEvaluationStatus::Accepted;
+    std::string_view diagnostic;
+};
+
+OwnerProjectionResult classify_owner_projection(
+    const ProfilingDifferentialGttPoint &point,
+    OwnerProjectionContext context) noexcept {
+    const bool post_release = context == OwnerProjectionContext::PostRelease;
+    switch (point.owner_projection_status) {
+    case ProfilingDifferentialOwnerProjectionStatus::Absent:
+        if (point.owner_gtt_used_bytes) {
+            return {
+                std::nullopt,
+                ProfilingDifferentialEvaluationStatus::
+                    ContradictoryOwnerProjection,
+                post_release
+                    ? "absent post-release owner projection carries a value"
+                    : "absent owner projection carries a value"};
+        }
+        return {ProfilingDifferentialOwnerProjectionCoverage::Absent};
+    case ProfilingDifferentialOwnerProjectionStatus::Incomplete:
+        if (point.owner_gtt_used_bytes &&
+            *point.owner_gtt_used_bytes > *point.global_gtt_used_bytes) {
+            return {
+                std::nullopt,
+                ProfilingDifferentialEvaluationStatus::
+                    ContradictoryOwnerProjection,
+                post_release
+                    ? "incomplete post-release owner projection exceeds the global point"
+                    : "incomplete owner projection exceeds the global point"};
+        }
+        return {ProfilingDifferentialOwnerProjectionCoverage::Incomplete};
+    case ProfilingDifferentialOwnerProjectionStatus::Complete:
+        if (!point.owner_gtt_used_bytes ||
+            *point.owner_gtt_used_bytes > *point.global_gtt_used_bytes) {
+            return {
+                std::nullopt,
+                ProfilingDifferentialEvaluationStatus::
+                    ContradictoryOwnerProjection,
+                post_release
+                    ? "complete post-release owner projection is invalid"
+                    : "complete owner projection is invalid"};
+        }
+        return {ProfilingDifferentialOwnerProjectionCoverage::Complete};
+    case ProfilingDifferentialOwnerProjectionStatus::Contradictory:
+        return {
+            std::nullopt,
+            ProfilingDifferentialEvaluationStatus::ContradictoryOwnerProjection,
+            post_release
+                ? "post-release owner projection is contradictory"
+                : "owner projection contradicts the global GTT point"};
+    case ProfilingDifferentialOwnerProjectionStatus::SharedBuffer:
+        return {
+            std::nullopt,
+            ProfilingDifferentialEvaluationStatus::SharedBufferEvidence,
+            post_release
+                ? "post-release owner evidence contains shared GTT"
+                : "shared-buffer owner evidence is not disjoint"};
+    default:
+        return {
+            std::nullopt,
+            ProfilingDifferentialEvaluationStatus::ContradictoryOwnerProjection,
+            post_release
+                ? "post-release owner projection status is invalid"
+                : "owner projection status is invalid"};
+    }
 }
 
 constexpr std::uint64_t maximum_encoded_point_bytes = 1424;
@@ -760,58 +783,14 @@ PlateauResult evaluate_plateau(
             return {ProfilingDifferentialEvaluationStatus::SourceDrift,
                     "plateau source binding changed", std::nullopt};
         }
-        switch (point->owner_projection_status) {
-        case ProfilingDifferentialOwnerProjectionStatus::Absent:
-            if (point->owner_gtt_used_bytes) {
-                return {
-                    ProfilingDifferentialEvaluationStatus::
-                        ContradictoryOwnerProjection,
-                    "absent owner projection carries a value", std::nullopt};
-            }
-            summary.projection_coverage =
-                ProfilingDifferentialOwnerProjectionCoverage::Absent;
-            break;
-        case ProfilingDifferentialOwnerProjectionStatus::Incomplete:
-            if (point->owner_gtt_used_bytes &&
-                *point->owner_gtt_used_bytes >
-                    *point->global_gtt_used_bytes) {
-                return {
-                    ProfilingDifferentialEvaluationStatus::
-                        ContradictoryOwnerProjection,
-                    "incomplete owner projection exceeds the global point",
+        const auto projection = classify_owner_projection(
+            *point, OwnerProjectionContext::Plateau);
+        if (!projection.coverage) {
+            return {projection.status, std::string(projection.diagnostic),
                     std::nullopt};
-            }
-            summary.projection_coverage = weakest_coverage(
-                summary.projection_coverage,
-                ProfilingDifferentialOwnerProjectionCoverage::Incomplete);
-            break;
-        case ProfilingDifferentialOwnerProjectionStatus::Complete:
-            if (!point->owner_gtt_used_bytes ||
-                *point->owner_gtt_used_bytes >
-                    *point->global_gtt_used_bytes) {
-                return {
-                    ProfilingDifferentialEvaluationStatus::
-                        ContradictoryOwnerProjection,
-                    "complete owner projection is invalid", std::nullopt};
-            }
-            break;
-        case ProfilingDifferentialOwnerProjectionStatus::Contradictory:
-            return {
-                ProfilingDifferentialEvaluationStatus::
-                    ContradictoryOwnerProjection,
-                "owner projection contradicts the global GTT point",
-                std::nullopt};
-        case ProfilingDifferentialOwnerProjectionStatus::SharedBuffer:
-            return {ProfilingDifferentialEvaluationStatus::
-                        SharedBufferEvidence,
-                    "shared-buffer owner evidence is not disjoint",
-                    std::nullopt};
-        default:
-            return {
-                ProfilingDifferentialEvaluationStatus::
-                    ContradictoryOwnerProjection,
-                "owner projection status is invalid", std::nullopt};
         }
+        summary.projection_coverage = weakest_coverage(
+            summary.projection_coverage, *projection.coverage);
         observed = true;
         summary.minimum =
             std::min(summary.minimum, *point->global_gtt_used_bytes);
@@ -1841,57 +1820,14 @@ evaluate_retained_gtt_differential(
                         ProfilingDifferentialEvaluationStatus::SourceDrift,
                         "post-release source binding changed");
                 }
-                switch (point.owner_projection_status) {
-                case ProfilingDifferentialOwnerProjectionStatus::Absent:
-                    if (point.owner_gtt_used_bytes) {
-                        return reject(
-                            ProfilingDifferentialEvaluationStatus::
-                                ContradictoryOwnerProjection,
-                            "absent post-release owner projection carries a value");
-                    }
-                    projection_coverage =
-                        ProfilingDifferentialOwnerProjectionCoverage::Absent;
-                    break;
-                case ProfilingDifferentialOwnerProjectionStatus::Incomplete:
-                    if (point.owner_gtt_used_bytes &&
-                        *point.owner_gtt_used_bytes >
-                            *point.global_gtt_used_bytes) {
-                        return reject(
-                            ProfilingDifferentialEvaluationStatus::
-                                ContradictoryOwnerProjection,
-                            "incomplete post-release owner projection exceeds the global point");
-                    }
-                    projection_coverage = weakest_coverage(
-                        projection_coverage,
-                        ProfilingDifferentialOwnerProjectionCoverage::
-                            Incomplete);
-                    break;
-                case ProfilingDifferentialOwnerProjectionStatus::Complete:
-                    if (!point.owner_gtt_used_bytes ||
-                        *point.owner_gtt_used_bytes >
-                            *point.global_gtt_used_bytes) {
-                        return reject(
-                            ProfilingDifferentialEvaluationStatus::
-                                ContradictoryOwnerProjection,
-                            "complete post-release owner projection is invalid");
-                    }
-                    break;
-                case ProfilingDifferentialOwnerProjectionStatus::Contradictory:
-                    return reject(
-                        ProfilingDifferentialEvaluationStatus::
-                            ContradictoryOwnerProjection,
-                        "post-release owner projection is contradictory");
-                case ProfilingDifferentialOwnerProjectionStatus::SharedBuffer:
-                    return reject(
-                        ProfilingDifferentialEvaluationStatus::
-                            SharedBufferEvidence,
-                        "post-release owner evidence contains shared GTT");
-                default:
-                    return reject(
-                        ProfilingDifferentialEvaluationStatus::
-                            ContradictoryOwnerProjection,
-                        "post-release owner projection status is invalid");
+                const auto projection = classify_owner_projection(
+                    point, OwnerProjectionContext::PostRelease);
+                if (!projection.coverage) {
+                    return reject(projection.status,
+                                  std::string(projection.diagnostic));
                 }
+                projection_coverage = weakest_coverage(
+                    projection_coverage, *projection.coverage);
                 if (*point.global_gtt_used_bytes < release_lower ||
                     *point.global_gtt_used_bytes > release_upper) {
                     return reject(

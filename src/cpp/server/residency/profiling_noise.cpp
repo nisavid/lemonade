@@ -1,6 +1,7 @@
 #include "lemon/residency/profiling_noise.h"
 
 #include "profiling_common.h"
+#include "profiling_noise_codec.h"
 
 #include <nlohmann/json.hpp>
 
@@ -21,6 +22,7 @@ namespace {
 using json = nlohmann::json;
 using profiling_internal::append_string;
 using profiling_internal::append_u64;
+using profiling_internal::bindings_document;
 using profiling_internal::bounded_diagnostic;
 using profiling_internal::digest_is_valid;
 using profiling_internal::elapsed_between;
@@ -131,27 +133,6 @@ bool bindings_equal(const ProfilingNoiseBindings &left,
            left.procedure_revision_sha256 == right.procedure_revision_sha256 &&
            left.background_inventory_sha256 ==
                right.background_inventory_sha256;
-}
-
-json bindings_document(const ProfilingNoiseBindings &bindings) {
-    return json{
-        {"background_inventory_sha256",
-         bindings.background_inventory_sha256},
-        {"boot_id_sha256", bindings.boot_id_sha256},
-        {"campaign_contract_sha256", bindings.campaign_contract_sha256},
-        {"counter_continuity_epoch_sha256",
-         bindings.counter_continuity_epoch_sha256},
-        {"counter_source_id", bindings.counter_source_id},
-        {"counter_source_revision_sha256",
-         bindings.counter_source_revision_sha256},
-        {"deployment_epoch_sha256", bindings.deployment_epoch_sha256},
-        {"deployment_id", bindings.deployment_id},
-        {"device_identity_sha256", bindings.device_identity_sha256},
-        {"driver_identity_sha256", bindings.driver_identity_sha256},
-        {"kernel_identity_sha256", bindings.kernel_identity_sha256},
-        {"procedure_revision_sha256", bindings.procedure_revision_sha256},
-        {"topology_sha256", bindings.topology_sha256},
-    };
 }
 
 template <std::size_t Size>
