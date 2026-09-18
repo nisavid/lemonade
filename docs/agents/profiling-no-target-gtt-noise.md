@@ -46,19 +46,21 @@ Malformed JSON, duplicate or unknown fields, an unsupported schema, invalid iden
 ## Freeze differential input before target observation
 
 1. Before starting the target, prepare one `ProfilingDifferentialInputDraft` under the Server-owned gate and existing journal.
-2. Bind the exact transaction, selector, target client and containment identities, counter continuity epoch, safety contract, calibration revision, attempt receipt, and accounting partition. The draft epoch must equal the epoch bound into the immutable noise result.
-3. Load the Server journal's current validity for the immutable noise-result checksum. Set `noise_validity.noise_result_checksum_sha256` to that exact checksum and set its state to `Valid` only when the journal has not invalidated it. A `Fresh` calibration revision does not make an invalidated noise result valid.
-4. Copy `noise_trace_provenance_sha256` from the parsed immutable result. An arbitrary well-formed digest is not equivalent; `freeze_profiling_differential_input` requires exact equality.
-5. Keep `N_gtt`, nonnegative disjoint `X_gtt`, nonnegative `M_gtt`, their evidence and policy digests, and the exact partition contract separate. Checked `N_gtt + X_gtt + M_gtt` must not overflow.
-6. Set positive calibration and validation repetition counts.
-7. Require a fresh calibration revision. A revision already rejected by the journal must not freeze again.
-8. Call `freeze_profiling_differential_input(noise, draft)` before any target observation. Continue only when it returns `Accepted` with a `FrozenProfilingDifferentialInput`. Retain its `frozen_input_sha256`. A mismatched epoch, mismatched validity key, or `Invalidated` state fails closed.
+2. Populate `draft.method_binding` with the exact complete binding already resolved under the selected downstream method's maintained procedure. This procedure does not select or revise that method. Use the same binding for downstream preflight and evaluation; a separately resolved binding is not interchangeable after the draft freezes.
+3. Bind the exact transaction, selector, target client and containment identities, counter continuity epoch, safety contract, calibration revision, attempt receipt, and accounting partition. Set the transaction's observation-contract digest to the reviewed contract that covers once-only receipt sequencing and explicit complete, incomplete, or absent owner attribution; do not reuse a digest for the earlier raw-observation evaluator input. The draft epoch must equal the epoch bound into the immutable noise result.
+4. Load the Server journal's current validity for the immutable noise-result checksum. Set `noise_validity.noise_result_checksum_sha256` to that exact checksum and set its state to `Valid` only when the journal has not invalidated it. A `Fresh` calibration revision does not make an invalidated noise result valid.
+5. Copy `noise_trace_provenance_sha256` from the parsed immutable result. An arbitrary well-formed digest is not equivalent; `freeze_profiling_differential_input` requires exact equality.
+6. Keep `N_gtt`, nonnegative disjoint `X_gtt`, nonnegative `M_gtt`, their evidence and policy digests, and the exact partition contract separate. Checked `N_gtt + X_gtt + M_gtt` must not overflow.
+7. Set positive calibration and validation repetition counts.
+8. Require a fresh calibration revision. A revision already rejected by the journal must not freeze again.
+9. Call `freeze_profiling_differential_input(noise, draft)` before any target observation. Continue only when it returns `Accepted` with a `FrozenProfilingDifferentialInput`. Retain its `frozen_input_sha256`, which binds the complete method and constraint binding into every later revalidation receipt. A mismatched epoch, mismatched validity key, invalid method field, or `Invalidated` state fails closed.
+10. Construct one `ProfilingDifferentialAttemptState` from that frozen input. The frozen input is immutable; the attempt state is the sole in-process owner of repetition order, the receipt-chain head, the last accepted observation time, terminal revision rejection, and monotone noise invalidation. Do not reuse the state with another frozen input.
 
-This in-process freeze does not authenticate an attempt receipt, attest the supplied validity state, or persist rejection or invalidation. The Server caller must verify those values against the existing durable journal. Before every freeze, including after Server restart, it must reload the checksum-keyed noise validity and pass that state through `ProfilingNoiseValidityBinding`. The implementation and deterministic fixtures are in `src/cpp/server/residency/profiling_differential_input.cpp` and `test/cpp/test_residency_profiling_differential_input.cpp`.
+This in-process freeze and attempt state do not authenticate an attempt receipt, attest the supplied validity state, or persist rejection, receipt progress, or invalidation. The Server caller must verify and durably record those values through the existing journal. Before every freeze, including after Server restart, it must reload the checksum-keyed noise validity and pass that state through `ProfilingNoiseValidityBinding`; it must not reconstruct an in-progress attempt from unauthenticated records. The implementation and deterministic fixtures are in `src/cpp/server/residency/profiling_differential_input.cpp`, `test/cpp/test_residency_profiling_differential_input.cpp`, and `test/cpp/test_residency_profiling_differential_hash_failures.cpp`.
 
 ## Revalidate before every repetition
 
-Immediately before every calibration or validation repetition, call `revalidate_profiling_differential_input(input, observation)` with a fresh Server-authenticated observation. Recheck:
+Immediately before every calibration or validation repetition, call `revalidate_profiling_differential_input(input, attempt, phase, ordinal, observation)` exactly once with the next frozen phase and ordinal and a fresh Server-authenticated observation. Recheck:
 
 - the immutable noise-result checksum;
 - deployment, boot, device, topology, kernel, driver, counter-source, campaign, procedure, and background bindings;
@@ -67,15 +69,17 @@ Immediately before every calibration or validation repetition, call `revalidate_
 - a non-target GTT range no greater than frozen `N_gtt`; and
 - when target activity is expected, the exact frozen target client and containment identities.
 
-Elapsed time alone does not expire a result within the same boot. Declared target activity inside its frozen containment is allowed. An unexpected non-target client, reboot, binding change, counter reset or discontinuity, checksum change, background drift, or variation above `N_gtt` rejects the revision and invalidates its noise result. A mismatch in the declared target or its containment rejects the revision without invalidating otherwise continuous noise.
+Elapsed time alone does not expire a result within the same boot. Declared target activity inside its frozen containment is allowed. An unexpected non-target client, reboot, binding change, counter reset or discontinuity, checksum change, background drift, or variation above `N_gtt` rejects the revision and invalidates its noise result. A mismatch in the declared target or its containment rejects the revision without invalidating otherwise continuous noise. When one authenticated observation contains both a noise invalidator and a target mismatch or time-order defect, the invalidator wins.
 
-An accepted revalidation with disposition `Continue` authorizes only the caller's next repetition under the still-held Server gate and journal lease. Any rejection is terminal for that calibration revision: stop, produce no differential result, persist rejection through the existing journal, and do not refit the same revision.
+Every in-order revalidation with a structurally valid observation returns an immutable `ProfilingDifferentialRevalidationReceipt` bound to the frozen-input checksum, noise-result checksum, phase, ordinal, observation digest, checked time, prior receipt digest, status, and disposition. Retain the receipt with that repetition. An accepted receipt with disposition `Continue` authorizes only that caller-owned repetition under the still-held Server gate and journal lease. Issue its baseline-ready marker immediately after revalidation without an intervening gate, lease, identity, counter, background, or journal-state change. The evaluator consumes the retained receipt and never replays the observation.
+
+The attempt state accepts each frozen phase and ordinal once and in order. An out-of-order call, replay, malformed observation, or disposition other than `Continue` terminally rejects the attempt. A rejecting receipt authorizes no plateau bytes for its repetition, and no call or supplied record after terminal rejection has observation authority. Stop, produce no differential result, persist rejection through the existing journal, and do not refit the same revision.
 
 `CounterReset`, `CounterDiscontinuity`, `NoiseResultMismatch`, `BindingMismatch`, `BackgroundDrift`, and `ExcessVariation` return disposition `InvalidateNoiseResult`. The Server caller must also persist invalidation keyed to the immutable noise-result checksum. It must reload that invalidation before a later freeze; only a newly accepted no-target result produced from a fresh trace is eligible as a replacement. A new calibration revision alone cannot revive the old result. `TargetMismatch` and `NonIncreasingObservation` return `RejectRevision` without invalidating otherwise continuous noise evidence. Authentication and both durable mutations remain Server-owned.
 
 ## Outcome branches
 
-**Success:** production returns one canonical immutable noise result; parsing reproduces its identities, trace-era counter continuity epoch, bound, uncertainty, provenance, and checksum; freezing consumes a matching `Valid` checksum-keyed journal state and returns one immutable differential input before target observation; and every repetition begins with an accepted revalidation.
+**Success:** production returns one canonical immutable noise result; parsing reproduces its identities, trace-era counter continuity epoch, bound, uncertainty, provenance, and checksum; freezing consumes a matching `Valid` checksum-keyed journal state and returns one immutable differential input before target observation; and one attempt state issues an ordered `Continue` receipt immediately before each repetition.
 
 **Failure:** return or retain no result from the failing stage. Preserve the previous method or conservative fallback. Cleanup and release remain Server-owned. A revalidation failure terminally rejects the revision and cannot select a later window, restart within the same trace, or refit the same revision. A noise-invalidating disposition also prevents every later revision from consuming that result and requires a fresh no-target trace.
 
@@ -86,16 +90,16 @@ An accepted revalidation with disposition `Continue` authorizes only the caller'
 For this bounded component, observable completion evidence is:
 
 - an accepted producer result whose canonical parser round-trips the same checksum, bindings, counter continuity epoch, trace provenance, `N_gtt`, and `U`, with both documented exact-cap clustered traces accepted by the linear window traversal;
-- an accepted freeze whose epoch, provenance, and `Valid` checksum-keyed noise state match the producer result and whose digest covers the frozen accounting, identities, validity state, revision, and repetition counts;
-- an accepted fresh revalidation before each caller-owned repetition;
+- an accepted freeze whose epoch, provenance, and `Valid` checksum-keyed noise state match the producer result and whose digest covers the complete method binding, accounting, identities, validity state, revision, and repetition counts;
+- one ordered, once-only, checksum-bound `Continue` receipt issued immediately before each caller-owned repetition and consumed without replay;
 - deterministic rejection of old-result/new-revision reuse after reset or excess background variation, acceptance of a newly produced result for the new epoch, and acceptance of uninterrupted same-boot reuse; and
-- passing `ResidencyProfilingNoise`, `ResidencyProfilingNoiseTrend`, `ResidencyProfilingNoiseProvenance`, and `ResidencyProfilingDifferentialInput` CTests linked through `lemonade-server-core`.
+- passing `ResidencyProfilingNoise`, `ResidencyProfilingNoiseTrend`, `ResidencyProfilingNoiseProvenance`, `ResidencyProfilingDifferentialInput`, and the isolated `ResidencyProfilingDifferentialHashFailures` CTest. The isolated executable injects returned and thrown SHA-256 failures; it is intentionally not linked through `lemonade-server-core`.
 
 These tests use deterministic fixtures. They do not qualify a live host or campaign.
 
 The authoritative global GTT point and owner-projection completeness remain independent. Missing or incomplete fdinfo owner attribution never turns a valid global point into an owner zero. This point-based procedure also remains separate from the optional mutation-complete interval authority in `src/cpp/include/lemon/residency/profiling_capture_authority.h`; never advance an interval watermark from polls or observed value changes.
 
-This component does not establish the Server gate, live collection, authenticated observation provenance, durable journal persistence, target plateau evaluation, retained differential calibration, verified release, actor continuity, the separate mutation-complete path, a complete transient lifecycle envelope, non-footprint claims, candidate persistence, activation, signing, publication, or release authority.
+This component does not establish the Server gate, live collection, authenticated observation provenance, durable journal persistence or restart recovery, target plateau evaluation, retained differential calibration, verified release, actor continuity, the separate mutation-complete path, a complete transient lifecycle envelope, non-footprint claims, candidate persistence, activation, signing, publication, or release authority.
 
 ## Accepted policy
 

@@ -44,7 +44,22 @@ This file captures implementation landmarks that are useful before changing Lemo
 - This accepted fork target is recorded in `docs/adr/0001-adopt-protected-memory-capacity-driven-model-residency.md`.
 - Agents producing or consuming boot-scoped no-target GTT noise evidence must
   follow the [no-target GTT noise procedure](profiling-no-target-gtt-noise.md)
-  and preserve its Server-owned authentication and lifecycle preconditions.
+  and preserve its immutable frozen input, `lemond`-owned once-only attempt
+  state and receipt chain, authentication, journal, and lifecycle
+  preconditions.
+- Agents evaluating exact-fingerprint retained-GTT repetitions must follow the
+  [retained-GTT differential procedure](profiling-retained-gtt-differential.md),
+  loading it before implementation or collection. They must preserve its
+  checkout-bound reviewed method, globally monotone receipt and source-fact
+  prepass, bounded 4096-record ingestion and 4097th source-fact audit, bounded
+  streaming provenance, 66,565-byte canonical ceiling, explicit complete,
+  incomplete, or absent attribution, 50 ms caller schedule, exact
+  byte-constraint binding, and preflight-before-freeze requirements.
+- Before sealing retained-GTT component evidence into a profiling input, call
+  `compose_retained_gtt_profiling_input_evidence`. It preserves the exact
+  nonnegative byte bound, including zero, binds the component checksum and a
+  separately supplied transient-envelope digest, and maps absent component
+  attribution to downstream unknown ownership coverage.
 - The accepted portable adapter, footprint, pressure-reclamation, configuration, explanation, validation, and promotion policies and their decision rationale live in [Choose portable residency adapter contracts](https://github.com/nisavid/lemonade/issues/31), [Choose footprint estimation and confidence policy](https://github.com/nisavid/lemonade/issues/32), [Choose portable pressure reclamation controls](https://github.com/nisavid/lemonade/issues/33), [Define portable residency configuration and explanations](https://github.com/nisavid/lemonade/issues/34), and [Define residency validation and capability promotion](https://github.com/nisavid/lemonade/issues/35); the bullets below are their scout map.
 - Continued fork maintenance is decided. Reconcile onto current stable upstream, then implement this target using upstream terminology and APIs where they fit.
 - One server-owned planner defines admission, pressure, protection, ordering, and refusal semantics. Platform and backend adapters describe residency-memory-domain topology, trustworthy capacity and pressure signals, footprint confidence, and available reclamation actions; adapters do not redefine common policy.

@@ -4,11 +4,31 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 
 namespace lemon::residency::profiling_internal {
+
+class BoundedSha256 {
+public:
+    explicit BoundedSha256(std::uint64_t maximum_bytes) noexcept;
+    ~BoundedSha256();
+
+    BoundedSha256(const BoundedSha256 &) = delete;
+    BoundedSha256 &operator=(const BoundedSha256 &) = delete;
+
+    bool append(std::string_view bytes) noexcept;
+    bool append_u64(std::uint64_t value) noexcept;
+    bool append_string(std::string_view value) noexcept;
+    std::optional<std::string> finish() noexcept;
+    std::uint64_t bytes_hashed() const noexcept;
+
+private:
+    class Implementation;
+    std::unique_ptr<Implementation> implementation_;
+};
 
 std::string bounded_diagnostic(std::string value);
 

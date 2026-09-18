@@ -22,6 +22,15 @@ bool identifier_is_valid(std::string_view value) noexcept {
            });
 }
 
+bool method_binding_is_structurally_valid(
+    const ProfilingDifferentialMethodBinding &binding) noexcept {
+    return identifier_is_valid(binding.method_id) &&
+           digest_is_valid(binding.method_revision_sha256) &&
+           identifier_is_valid(binding.constraint_id) &&
+           digest_is_valid(binding.constraint_revision_sha256) &&
+           identifier_is_valid(binding.covered_effect);
+}
+
 bool bindings_equal_except_background(
     const ProfilingNoiseBindings &left,
     const ProfilingNoiseBindings &right) noexcept {
@@ -52,6 +61,22 @@ bool bindings_equal(const ProfilingNoiseBindings &left,
     return bindings_equal_except_background(left, right) &&
            left.background_inventory_sha256 ==
                right.background_inventory_sha256;
+}
+
+bool bindings_are_valid(const ProfilingNoiseBindings &bindings) noexcept {
+    return digest_is_valid(bindings.deployment_id) &&
+           digest_is_valid(bindings.deployment_epoch_sha256) &&
+           digest_is_valid(bindings.boot_id_sha256) &&
+           digest_is_valid(bindings.device_identity_sha256) &&
+           digest_is_valid(bindings.topology_sha256) &&
+           digest_is_valid(bindings.kernel_identity_sha256) &&
+           digest_is_valid(bindings.driver_identity_sha256) &&
+           identifier_is_valid(bindings.counter_source_id) &&
+           digest_is_valid(bindings.counter_source_revision_sha256) &&
+           digest_is_valid(bindings.counter_continuity_epoch_sha256) &&
+           digest_is_valid(bindings.campaign_contract_sha256) &&
+           digest_is_valid(bindings.procedure_revision_sha256) &&
+           digest_is_valid(bindings.background_inventory_sha256);
 }
 
 bool generations_are_valid(
@@ -191,7 +216,7 @@ std::optional<std::string> frozen_input_digest(
     const ParsedProfilingNoiseResult &noise,
     const ProfilingDifferentialInputDraft &draft) {
     std::string bytes =
-        "lemonade/profiling-differential-input/v1";
+        "lemonade/profiling-differential-input/v2";
     append_string(bytes, noise.canonical_bytes());
     append_transaction(bytes, draft.identity.transaction);
     append_string(bytes,
@@ -203,6 +228,12 @@ std::optional<std::string> frozen_input_digest(
     append_string(bytes, draft.identity.safety_contract_sha256);
     append_string(bytes,
                   draft.identity.noise_trace_provenance_sha256);
+    append_string(bytes, draft.method_binding.method_id);
+    append_string(bytes, draft.method_binding.method_revision_sha256);
+    append_string(bytes, draft.method_binding.constraint_id);
+    append_string(bytes,
+                  draft.method_binding.constraint_revision_sha256);
+    append_string(bytes, draft.method_binding.covered_effect);
     append_string(
         bytes, draft.noise_validity.noise_result_checksum_sha256);
     append_u64(bytes,
@@ -218,6 +249,93 @@ std::optional<std::string> frozen_input_digest(
     append_string(bytes, draft.accounting.partition_contract_sha256);
     append_u64(bytes, draft.calibration_repetitions);
     append_u64(bytes, draft.validation_repetitions);
+    return sha256_hex(bytes);
+}
+
+void append_bindings(std::string &bytes,
+                     const ProfilingNoiseBindings &bindings) {
+    append_string(bytes, bindings.deployment_id);
+    append_string(bytes, bindings.deployment_epoch_sha256);
+    append_string(bytes, bindings.boot_id_sha256);
+    append_string(bytes, bindings.device_identity_sha256);
+    append_string(bytes, bindings.topology_sha256);
+    append_string(bytes, bindings.kernel_identity_sha256);
+    append_string(bytes, bindings.driver_identity_sha256);
+    append_string(bytes, bindings.counter_source_id);
+    append_string(bytes, bindings.counter_source_revision_sha256);
+    append_string(bytes, bindings.counter_continuity_epoch_sha256);
+    append_string(bytes, bindings.campaign_contract_sha256);
+    append_string(bytes, bindings.procedure_revision_sha256);
+    append_string(bytes, bindings.background_inventory_sha256);
+}
+
+bool revalidation_observation_is_structurally_valid(
+    const ProfilingDifferentialRevalidationObservation &observation) noexcept {
+    return bindings_are_valid(observation.observed_bindings) &&
+           digest_is_valid(
+               observation.observed_noise_result_checksum_sha256) &&
+           digest_is_valid(
+               observation.observed_counter_continuity_epoch_sha256) &&
+           (!observation.target_activity ||
+            (digest_is_valid(
+                 observation.target_activity->client_identity_sha256) &&
+             digest_is_valid(
+                 observation.target_activity
+                     ->containment_identity_sha256)));
+}
+
+std::optional<std::string> revalidation_observation_digest(
+    const ProfilingDifferentialRevalidationObservation &observation) {
+    if (!revalidation_observation_is_structurally_valid(observation)) {
+        return std::nullopt;
+    }
+
+    std::string bytes =
+        "lemonade/profiling-differential-revalidation-observation/v1";
+    append_u64(bytes, static_cast<std::uint64_t>(
+                          observation.checked_at.time_since_epoch().count()));
+    append_bindings(bytes, observation.observed_bindings);
+    append_string(bytes,
+                  observation.observed_noise_result_checksum_sha256);
+    append_string(bytes,
+                  observation.observed_counter_continuity_epoch_sha256);
+    append_u64(bytes, observation.observed_non_target_gtt_range_bytes);
+    append_u64(bytes, observation.target_activity.has_value() ? 1 : 0);
+    if (observation.target_activity) {
+        append_string(bytes,
+                      observation.target_activity->client_identity_sha256);
+        append_string(
+            bytes,
+            observation.target_activity->containment_identity_sha256);
+    }
+    append_u64(bytes, observation.counter_reset_detected ? 1 : 0);
+    append_u64(bytes, observation.counter_discontinuity_detected ? 1 : 0);
+    append_u64(bytes,
+               observation.unexpected_non_target_client_detected ? 1 : 0);
+    return sha256_hex(bytes);
+}
+
+std::optional<std::string> revalidation_receipt_digest(
+    const FrozenProfilingDifferentialInput &input,
+    ProfilingDifferentialRepetitionPhase phase,
+    std::uint32_t ordinal,
+    std::chrono::steady_clock::time_point checked_at,
+    std::string_view observation_sha256,
+    std::string_view previous_receipt_sha256,
+    ProfilingDifferentialRevalidationStatus status,
+    ProfilingDifferentialRevalidationDisposition disposition) {
+    std::string bytes =
+        "lemonade/profiling-differential-revalidation-receipt/v1";
+    append_string(bytes, input.frozen_input_sha256());
+    append_string(bytes, input.noise().checksum_sha256());
+    append_u64(bytes, static_cast<std::uint64_t>(phase));
+    append_u64(bytes, ordinal);
+    append_u64(bytes, static_cast<std::uint64_t>(
+                          checked_at.time_since_epoch().count()));
+    append_string(bytes, observation_sha256);
+    append_string(bytes, previous_receipt_sha256);
+    append_u64(bytes, static_cast<std::uint64_t>(status));
+    append_u64(bytes, static_cast<std::uint64_t>(disposition));
     return sha256_hex(bytes);
 }
 
@@ -257,6 +375,11 @@ FrozenProfilingDifferentialInput::identity() const noexcept {
     return draft_.identity;
 }
 
+const ProfilingDifferentialMethodBinding &
+FrozenProfilingDifferentialInput::method_binding() const noexcept {
+    return draft_.method_binding;
+}
+
 const ProfilingDifferentialRevisionBinding &
 FrozenProfilingDifferentialInput::revision() const noexcept {
     return draft_.revision;
@@ -282,12 +405,102 @@ FrozenProfilingDifferentialInput::frozen_input_sha256() const noexcept {
     return frozen_input_sha256_;
 }
 
-bool FrozenProfilingDifferentialInput::revision_rejected() const noexcept {
+ProfilingDifferentialRevalidationReceipt::
+    ProfilingDifferentialRevalidationReceipt(
+        ProfilingDifferentialRepetitionPhase phase,
+        std::uint32_t ordinal,
+        std::chrono::steady_clock::time_point checked_at,
+        std::string frozen_input_sha256,
+        std::string noise_result_checksum_sha256,
+        std::string observation_sha256,
+        std::string previous_receipt_sha256,
+        ProfilingDifferentialRevalidationStatus status,
+        ProfilingDifferentialRevalidationDisposition disposition,
+        std::string receipt_sha256)
+    : phase_(phase), ordinal_(ordinal), checked_at_(checked_at),
+      frozen_input_sha256_(std::move(frozen_input_sha256)),
+      noise_result_checksum_sha256_(
+          std::move(noise_result_checksum_sha256)),
+      observation_sha256_(std::move(observation_sha256)),
+      previous_receipt_sha256_(std::move(previous_receipt_sha256)),
+      status_(status), disposition_(disposition),
+      receipt_sha256_(std::move(receipt_sha256)) {}
+
+ProfilingDifferentialRepetitionPhase
+ProfilingDifferentialRevalidationReceipt::phase() const noexcept {
+    return phase_;
+}
+
+std::uint32_t
+ProfilingDifferentialRevalidationReceipt::ordinal() const noexcept {
+    return ordinal_;
+}
+
+std::chrono::steady_clock::time_point
+ProfilingDifferentialRevalidationReceipt::checked_at() const noexcept {
+    return checked_at_;
+}
+
+std::string_view ProfilingDifferentialRevalidationReceipt::
+frozen_input_sha256() const noexcept {
+    return frozen_input_sha256_;
+}
+
+std::string_view ProfilingDifferentialRevalidationReceipt::
+noise_result_checksum_sha256() const noexcept {
+    return noise_result_checksum_sha256_;
+}
+
+std::string_view ProfilingDifferentialRevalidationReceipt::
+observation_sha256() const noexcept {
+    return observation_sha256_;
+}
+
+std::string_view ProfilingDifferentialRevalidationReceipt::
+previous_receipt_sha256() const noexcept {
+    return previous_receipt_sha256_;
+}
+
+ProfilingDifferentialRevalidationStatus
+ProfilingDifferentialRevalidationReceipt::status() const noexcept {
+    return status_;
+}
+
+ProfilingDifferentialRevalidationDisposition
+ProfilingDifferentialRevalidationReceipt::disposition() const noexcept {
+    return disposition_;
+}
+
+std::string_view ProfilingDifferentialRevalidationReceipt::
+receipt_sha256() const noexcept {
+    return receipt_sha256_;
+}
+
+bool ProfilingDifferentialRevalidationReceipt::accepted() const noexcept {
+    return status_ == ProfilingDifferentialRevalidationStatus::Accepted &&
+           disposition_ ==
+               ProfilingDifferentialRevalidationDisposition::Continue;
+}
+
+ProfilingDifferentialAttemptState::ProfilingDifferentialAttemptState(
+    const FrozenProfilingDifferentialInput &input)
+    : frozen_input_sha256_(input.frozen_input_sha256()),
+      noise_result_checksum_sha256_(input.noise().checksum_sha256()),
+      last_receipt_sha256_(input.revision().attempt_receipt_sha256),
+      calibration_repetitions_(input.calibration_repetitions()),
+      validation_repetitions_(input.validation_repetitions()) {}
+
+std::uint32_t
+ProfilingDifferentialAttemptState::receipts_issued() const noexcept {
+    return receipts_issued_;
+}
+
+bool ProfilingDifferentialAttemptState::revision_rejected() const noexcept {
     return revision_rejected_;
 }
 
 bool
-FrozenProfilingDifferentialInput::noise_result_invalidated() const noexcept {
+ProfilingDifferentialAttemptState::noise_result_invalidated() const noexcept {
     return noise_result_invalidated_;
 }
 
@@ -299,7 +512,8 @@ bool ProfilingDifferentialInputFreezeResult::accepted() const noexcept {
 bool ProfilingDifferentialRevalidationResult::accepted() const noexcept {
     return status == ProfilingDifferentialRevalidationStatus::Accepted &&
            disposition ==
-               ProfilingDifferentialRevalidationDisposition::Continue;
+               ProfilingDifferentialRevalidationDisposition::Continue &&
+           receipt.has_value() && receipt->accepted();
 }
 
 ProfilingDifferentialInputFreezeResult
@@ -343,6 +557,12 @@ freeze_profiling_differential_input(
         }
         draft.identity.transaction.selector =
             std::move(*canonical_selector.selector);
+
+        if (!method_binding_is_structurally_valid(draft.method_binding)) {
+            return freeze_failure(
+                ProfilingDifferentialInputFreezeStatus::InvalidMethodBinding,
+                "differential method binding is invalid");
+        }
 
         if (!digest_is_valid(
                 draft.identity.noise_trace_provenance_sha256)) {
@@ -427,18 +647,15 @@ freeze_profiling_differential_input(
 
 ProfilingDifferentialRevalidationResult
 revalidate_profiling_differential_input(
-    FrozenProfilingDifferentialInput &input,
+    const FrozenProfilingDifferentialInput &input,
+    ProfilingDifferentialAttemptState &attempt,
+    ProfilingDifferentialRepetitionPhase phase,
+    std::uint32_t ordinal,
     const ProfilingDifferentialRevalidationObservation &observation) {
-    auto reject =
+    const auto without_receipt =
         [&](ProfilingDifferentialRevalidationStatus status,
             ProfilingDifferentialRevalidationDisposition disposition,
             std::string diagnostic) {
-            input.revision_rejected_ = true;
-            if (disposition ==
-                ProfilingDifferentialRevalidationDisposition::
-                    InvalidateNoiseResult) {
-                input.noise_result_invalidated_ = true;
-            }
             ProfilingDifferentialRevalidationResult result;
             result.status = status;
             result.disposition = disposition;
@@ -447,138 +664,239 @@ revalidate_profiling_differential_input(
         };
 
     try {
-        if (input.revision_rejected_) {
-            return reject(
-                ProfilingDifferentialRevalidationStatus::
-                    RevisionRejected,
-                input.noise_result_invalidated_
+        if (attempt.frozen_input_sha256_ != input.frozen_input_sha256() ||
+            attempt.noise_result_checksum_sha256_ !=
+                input.noise().checksum_sha256()) {
+            attempt.revision_rejected_ = true;
+            return without_receipt(
+                ProfilingDifferentialRevalidationStatus::RevisionRejected,
+                ProfilingDifferentialRevalidationDisposition::RejectRevision,
+                "attempt state does not match the frozen input");
+        }
+        if (attempt.revision_rejected_) {
+            return without_receipt(
+                ProfilingDifferentialRevalidationStatus::RevisionRejected,
+                attempt.noise_result_invalidated_
                     ? ProfilingDifferentialRevalidationDisposition::
                           InvalidateNoiseResult
                     : ProfilingDifferentialRevalidationDisposition::
                           RejectRevision,
                 "calibration revision is terminally rejected");
         }
+
+        const auto receipt_index =
+            static_cast<std::uint64_t>(attempt.receipts_issued_);
+        const auto calibration_count =
+            static_cast<std::uint64_t>(attempt.calibration_repetitions_);
+        const auto validation_count =
+            static_cast<std::uint64_t>(attempt.validation_repetitions_);
+        if (receipt_index >= calibration_count + validation_count) {
+            attempt.revision_rejected_ = true;
+            return without_receipt(
+                ProfilingDifferentialRevalidationStatus::RevisionRejected,
+                ProfilingDifferentialRevalidationDisposition::RejectRevision,
+                "all frozen repetition receipts were already issued");
+        }
+        const auto expected_phase =
+            receipt_index < calibration_count
+                ? ProfilingDifferentialRepetitionPhase::Calibration
+                : ProfilingDifferentialRepetitionPhase::Validation;
+        const auto expected_ordinal = static_cast<std::uint32_t>(
+            receipt_index < calibration_count
+                ? receipt_index
+                : receipt_index - calibration_count);
+        if (phase != expected_phase || ordinal != expected_ordinal) {
+            attempt.revision_rejected_ = true;
+            return without_receipt(
+                ProfilingDifferentialRevalidationStatus::RevisionRejected,
+                ProfilingDifferentialRevalidationDisposition::RejectRevision,
+                "revalidation repetition is not the next frozen repetition");
+        }
+
+        auto status = ProfilingDifferentialRevalidationStatus::Accepted;
+        auto disposition =
+            ProfilingDifferentialRevalidationDisposition::Continue;
+        std::string_view diagnostic =
+            "frozen differential input remains valid";
+        const auto invalidate =
+            [&](ProfilingDifferentialRevalidationStatus observed_status,
+                std::string_view observed_diagnostic) {
+                attempt.noise_result_invalidated_ = true;
+                status = observed_status;
+                disposition = ProfilingDifferentialRevalidationDisposition::
+                    InvalidateNoiseResult;
+                diagnostic = observed_diagnostic;
+            };
         if (observation.counter_reset_detected) {
-            return reject(
-                ProfilingDifferentialRevalidationStatus::CounterReset,
-                ProfilingDifferentialRevalidationDisposition::
-                    InvalidateNoiseResult,
-                "global GTT counter reset was detected");
-        }
-        if (observation.counter_discontinuity_detected) {
-            return reject(
-                ProfilingDifferentialRevalidationStatus::
-                    CounterDiscontinuity,
-                ProfilingDifferentialRevalidationDisposition::
-                    InvalidateNoiseResult,
+            invalidate(ProfilingDifferentialRevalidationStatus::CounterReset,
+                       "global GTT counter reset was detected");
+        } else if (observation.counter_discontinuity_detected) {
+            invalidate(
+                ProfilingDifferentialRevalidationStatus::CounterDiscontinuity,
                 "global GTT counter discontinuity was detected");
-        }
-        if (!digest_is_valid(
-                observation.observed_noise_result_checksum_sha256) ||
-            observation.observed_noise_result_checksum_sha256 !=
-                input.noise_.checksum_sha256()) {
-            return reject(
-                ProfilingDifferentialRevalidationStatus::
-                    NoiseResultMismatch,
-                ProfilingDifferentialRevalidationDisposition::
-                    InvalidateNoiseResult,
+        } else if (!digest_is_valid(
+                       observation.observed_noise_result_checksum_sha256) ||
+                   observation.observed_noise_result_checksum_sha256 !=
+                       input.noise().checksum_sha256()) {
+            invalidate(
+                ProfilingDifferentialRevalidationStatus::NoiseResultMismatch,
                 "no-target noise result binding changed");
-        }
-        if (!digest_is_valid(
-                observation
-                    .observed_counter_continuity_epoch_sha256) ||
-            observation.observed_counter_continuity_epoch_sha256 !=
-                input.draft_.identity.counter_continuity_epoch_sha256) {
-            return reject(
-                ProfilingDifferentialRevalidationStatus::
-                    CounterDiscontinuity,
-                ProfilingDifferentialRevalidationDisposition::
-                    InvalidateNoiseResult,
+        } else if (!digest_is_valid(
+                       observation
+                           .observed_counter_continuity_epoch_sha256) ||
+                   observation.observed_counter_continuity_epoch_sha256 !=
+                       input.identity().counter_continuity_epoch_sha256) {
+            invalidate(
+                ProfilingDifferentialRevalidationStatus::CounterDiscontinuity,
                 "global GTT counter continuity binding changed");
+        } else if (!bindings_equal_except_background(
+                       observation.observed_bindings,
+                       input.noise().bindings())) {
+            invalidate(ProfilingDifferentialRevalidationStatus::BindingMismatch,
+                       "boot-scoped no-target binding changed");
+        } else if (observation.observed_bindings
+                           .background_inventory_sha256 !=
+                       input.noise().bindings()
+                           .background_inventory_sha256 ||
+                   observation.unexpected_non_target_client_detected) {
+            invalidate(ProfilingDifferentialRevalidationStatus::BackgroundDrift,
+                       "non-target GTT client inventory changed");
+        } else if (observation.observed_non_target_gtt_range_bytes >
+                   input.noise().n_gtt_bytes()) {
+            invalidate(ProfilingDifferentialRevalidationStatus::ExcessVariation,
+                       "non-target GTT variation exceeds the frozen bound");
+        } else if (observation.target_activity &&
+                   (!digest_is_valid(
+                        observation.target_activity
+                            ->client_identity_sha256) ||
+                    !digest_is_valid(
+                        observation.target_activity
+                            ->containment_identity_sha256) ||
+                    observation.target_activity->client_identity_sha256 !=
+                        input.identity().target_client_identity_sha256 ||
+                    observation.target_activity
+                            ->containment_identity_sha256 !=
+                        input.identity()
+                            .target_containment_identity_sha256)) {
+            status = ProfilingDifferentialRevalidationStatus::TargetMismatch;
+            disposition =
+                ProfilingDifferentialRevalidationDisposition::RejectRevision;
+            diagnostic =
+                "observed target activity is not the frozen contained target";
+        } else if (attempt.last_accepted_revalidation_at_ &&
+                   observation.checked_at <=
+                       *attempt.last_accepted_revalidation_at_) {
+            status = ProfilingDifferentialRevalidationStatus::
+                NonIncreasingObservation;
+            disposition =
+                ProfilingDifferentialRevalidationDisposition::RejectRevision;
+            diagnostic =
+                "revalidation observation is not newer than the last accepted observation";
         }
 
-        const auto &expected_bindings = input.noise_.bindings();
-        if (!bindings_equal_except_background(
-                observation.observed_bindings, expected_bindings)) {
-            return reject(
-                ProfilingDifferentialRevalidationStatus::
-                    BindingMismatch,
-                ProfilingDifferentialRevalidationDisposition::
-                    InvalidateNoiseResult,
-                "boot-scoped no-target binding changed");
-        }
-        if (observation.observed_bindings
-                    .background_inventory_sha256 !=
-                expected_bindings.background_inventory_sha256 ||
-            observation.unexpected_non_target_client_detected) {
-            return reject(
-                ProfilingDifferentialRevalidationStatus::
-                    BackgroundDrift,
-                ProfilingDifferentialRevalidationDisposition::
-                    InvalidateNoiseResult,
-                "non-target GTT client inventory changed");
-        }
-        if (observation.observed_non_target_gtt_range_bytes >
-            input.noise_.n_gtt_bytes()) {
-            return reject(
-                ProfilingDifferentialRevalidationStatus::
-                    ExcessVariation,
-                ProfilingDifferentialRevalidationDisposition::
-                    InvalidateNoiseResult,
-                "non-target GTT variation exceeds the frozen bound");
-        }
-        if (observation.target_activity.has_value()) {
-            const auto &target = *observation.target_activity;
-            if (!digest_is_valid(target.client_identity_sha256) ||
-                !digest_is_valid(
-                    target.containment_identity_sha256) ||
-                target.client_identity_sha256 !=
-                    input.draft_.identity
-                        .target_client_identity_sha256 ||
-                target.containment_identity_sha256 !=
-                    input.draft_.identity
-                        .target_containment_identity_sha256) {
-                return reject(
-                    ProfilingDifferentialRevalidationStatus::
-                        TargetMismatch,
-                    ProfilingDifferentialRevalidationDisposition::
-                        RejectRevision,
-                    "observed target activity is not the frozen "
-                    "contained target");
+        const auto observation_sha256 =
+            revalidation_observation_digest(observation);
+        if (!observation_sha256) {
+            attempt.revision_rejected_ = true;
+            if (!revalidation_observation_is_structurally_valid(
+                    observation)) {
+                return without_receipt(status, disposition,
+                                       std::string(diagnostic));
             }
+            attempt.noise_result_invalidated_ =
+                attempt.noise_result_invalidated_ ||
+                disposition == ProfilingDifferentialRevalidationDisposition::
+                                   InvalidateNoiseResult;
+            return without_receipt(
+                ProfilingDifferentialRevalidationStatus::DigestUnavailable,
+                attempt.noise_result_invalidated_
+                    ? ProfilingDifferentialRevalidationDisposition::
+                          InvalidateNoiseResult
+                    : ProfilingDifferentialRevalidationDisposition::
+                          RejectRevision,
+                "revalidation observation digest is unavailable");
         }
-
-        if (input.last_accepted_revalidation_at_.has_value() &&
-            observation.checked_at <=
-                *input.last_accepted_revalidation_at_) {
-            return reject(
-                ProfilingDifferentialRevalidationStatus::
-                    NonIncreasingObservation,
-                ProfilingDifferentialRevalidationDisposition::
-                    RejectRevision,
-                "revalidation observation is not newer than the "
-                "last accepted observation");
+        const auto receipt_sha256 = revalidation_receipt_digest(
+            input, phase, ordinal, observation.checked_at,
+            *observation_sha256, attempt.last_receipt_sha256_, status,
+            disposition);
+        if (!receipt_sha256) {
+            attempt.revision_rejected_ = true;
+            attempt.noise_result_invalidated_ =
+                attempt.noise_result_invalidated_ ||
+                disposition == ProfilingDifferentialRevalidationDisposition::
+                                   InvalidateNoiseResult;
+            return without_receipt(
+                ProfilingDifferentialRevalidationStatus::DigestUnavailable,
+                attempt.noise_result_invalidated_
+                    ? ProfilingDifferentialRevalidationDisposition::
+                          InvalidateNoiseResult
+                    : ProfilingDifferentialRevalidationDisposition::
+                          RejectRevision,
+                "revalidation receipt digest is unavailable");
         }
-        input.last_accepted_revalidation_at_ = observation.checked_at;
 
         ProfilingDifferentialRevalidationResult result;
-        result.status =
-            ProfilingDifferentialRevalidationStatus::Accepted;
-        result.disposition =
-            ProfilingDifferentialRevalidationDisposition::Continue;
-        result.diagnostic =
-            "frozen differential input remains valid";
+        result.status = status;
+        result.disposition = disposition;
+        result.diagnostic = diagnostic;
+        result.receipt = ProfilingDifferentialRevalidationReceipt(
+            phase, ordinal, observation.checked_at,
+            std::string(input.frozen_input_sha256()),
+            std::string(input.noise().checksum_sha256()),
+            *observation_sha256, attempt.last_receipt_sha256_, status,
+            disposition, *receipt_sha256);
+        attempt.last_receipt_sha256_ = *receipt_sha256;
+        ++attempt.receipts_issued_;
+        if (disposition ==
+            ProfilingDifferentialRevalidationDisposition::Continue) {
+            attempt.last_accepted_revalidation_at_ = observation.checked_at;
+        } else {
+            attempt.revision_rejected_ = true;
+            attempt.noise_result_invalidated_ =
+                attempt.noise_result_invalidated_ ||
+                disposition == ProfilingDifferentialRevalidationDisposition::
+                                   InvalidateNoiseResult;
+        }
         return result;
     } catch (...) {
-        return reject(
-            ProfilingDifferentialRevalidationStatus::
-                RevisionRejected,
-            input.noise_result_invalidated_
+        attempt.revision_rejected_ = true;
+        return without_receipt(
+            ProfilingDifferentialRevalidationStatus::RevisionRejected,
+            attempt.noise_result_invalidated_
                 ? ProfilingDifferentialRevalidationDisposition::
                       InvalidateNoiseResult
                 : ProfilingDifferentialRevalidationDisposition::
                       RejectRevision,
             "differential profiling input revalidation failed");
+    }
+}
+
+bool validate_profiling_differential_revalidation_receipt(
+    const FrozenProfilingDifferentialInput &input,
+    const ProfilingDifferentialRevalidationReceipt &receipt,
+    ProfilingDifferentialRepetitionPhase expected_phase,
+    std::uint32_t expected_ordinal,
+    std::string_view expected_previous_receipt_sha256) noexcept {
+    try {
+        if (receipt.phase() != expected_phase ||
+            receipt.ordinal() != expected_ordinal ||
+            receipt.frozen_input_sha256() != input.frozen_input_sha256() ||
+            receipt.noise_result_checksum_sha256() !=
+                input.noise().checksum_sha256() ||
+            !digest_is_valid(receipt.observation_sha256()) ||
+            receipt.previous_receipt_sha256() !=
+                expected_previous_receipt_sha256 ||
+            !digest_is_valid(receipt.receipt_sha256())) {
+            return false;
+        }
+        const auto expected = revalidation_receipt_digest(
+            input, receipt.phase(), receipt.ordinal(), receipt.checked_at(),
+            receipt.observation_sha256(), receipt.previous_receipt_sha256(),
+            receipt.status(), receipt.disposition());
+        return expected && *expected == receipt.receipt_sha256();
+    } catch (...) {
+        return false;
     }
 }
 

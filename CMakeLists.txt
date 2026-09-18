@@ -980,6 +980,7 @@ set(SOURCES_CORE
     src/cpp/server/residency/profiling_capture_authority.cpp
     src/cpp/server/residency/profiling_common.cpp
     src/cpp/server/residency/profiling_differential_input.cpp
+    src/cpp/server/residency/profiling_differential_evaluator.cpp
     src/cpp/server/residency/profiling_noise.cpp
     src/cpp/server/residency/profiling_provider.cpp
     src/cpp/server/residency/profiling_transaction.cpp
@@ -1123,6 +1124,33 @@ list(APPEND SOURCES_CORE ${LEMON_BACKEND_DESCRIPTOR_SOURCES} ${LEMON_BACKEND_FAC
 add_library(lemonade-server-core OBJECT ${SOURCES_CORE})
 target_include_directories(lemonade-server-core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/residency
+)
+
+set(_RESIDENCY_PROFILING_DIFFERENTIAL_PROCEDURE
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/agents/profiling-retained-gtt-differential.md"
+)
+set(_RESIDENCY_PROFILING_NO_TARGET_PROCEDURE
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/agents/profiling-no-target-gtt-noise.md"
+)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${_RESIDENCY_PROFILING_DIFFERENTIAL_PROCEDURE}"
+    "${_RESIDENCY_PROFILING_NO_TARGET_PROCEDURE}"
+)
+file(SHA256 "${_RESIDENCY_PROFILING_DIFFERENTIAL_PROCEDURE}"
+    _RESIDENCY_PROFILING_DIFFERENTIAL_METHOD_REVISION_SHA256
+)
+file(SHA256 "${_RESIDENCY_PROFILING_NO_TARGET_PROCEDURE}"
+    _RESIDENCY_PROFILING_NO_TARGET_PROCEDURE_SHA256
+)
+if(NOT _RESIDENCY_PROFILING_NO_TARGET_PROCEDURE_SHA256 STREQUAL
+        "5a7a73e909d08133ee6d8b5d3f4e27535f95107d4f04164801b6f6d14ec4c292")
+    message(FATAL_ERROR
+        "The retained-GTT evaluator requires the reviewed no-target procedure revision")
+endif()
+set_source_files_properties(
+    src/cpp/server/residency/profiling_differential_evaluator.cpp
+    PROPERTIES COMPILE_DEFINITIONS
+        "LEMONADE_PROFILING_DIFFERENTIAL_METHOD_REVISION_SHA256=\"${_RESIDENCY_PROFILING_DIFFERENTIAL_METHOD_REVISION_SHA256}\""
 )
 
 # ============================================================
@@ -3698,6 +3726,61 @@ if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_DIFFERENTIAL_INPUT_TEST_SRC}
     )
     set_tests_properties(
         ResidencyProfilingDifferentialInput PROPERTIES TIMEOUT 30
+    )
+endif()
+
+set(_RESIDENCY_PROFILING_DIFFERENTIAL_HASH_FAILURE_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_differential_hash_failures.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_DIFFERENTIAL_HASH_FAILURE_TEST_SRC}")
+    add_executable(
+        test_residency_profiling_differential_hash_failures
+        test/cpp/test_residency_profiling_differential_hash_failures.cpp
+        test/cpp/residency_profiling_hash_failure_test_support.cpp
+        src/cpp/server/residency/claims.cpp
+        src/cpp/server/residency/local_overlay.cpp
+        src/cpp/server/residency/profiling_noise.cpp
+        src/cpp/server/residency/profiling_differential_input.cpp
+    )
+    target_include_directories(
+        test_residency_profiling_differential_hash_failures PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/server/residency
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/cpp
+    )
+    target_link_libraries(
+        test_residency_profiling_differential_hash_failures PRIVATE
+        lemonade-digest-crypto
+        nlohmann_json::nlohmann_json
+    )
+    add_cpp_ci_test(
+        ResidencyProfilingDifferentialHashFailures
+        CI ON
+        COMMAND test_residency_profiling_differential_hash_failures
+    )
+    set_tests_properties(
+        ResidencyProfilingDifferentialHashFailures PROPERTIES TIMEOUT 30
+    )
+endif()
+
+set(_RESIDENCY_PROFILING_DIFFERENTIAL_EVALUATOR_TEST_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_residency_profiling_differential_evaluator.cpp"
+)
+if(BUILD_TESTING AND EXISTS "${_RESIDENCY_PROFILING_DIFFERENTIAL_EVALUATOR_TEST_SRC}")
+    add_executable(
+        test_residency_profiling_differential_evaluator
+        test/cpp/test_residency_profiling_differential_evaluator.cpp
+    )
+    target_link_libraries(test_residency_profiling_differential_evaluator PRIVATE
+        lemonade-server-core
+    )
+    add_cpp_ci_test(
+        ResidencyProfilingDifferentialEvaluator
+        CI ON
+        COMMAND test_residency_profiling_differential_evaluator
+    )
+    set_tests_properties(
+        ResidencyProfilingDifferentialEvaluator PROPERTIES TIMEOUT 30
     )
 endif()
 

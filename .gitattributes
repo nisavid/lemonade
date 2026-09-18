@@ -1,3 +1,5 @@
 *.py text eol=lf
 src/cpp/include/lemon/residency/journal.h text eol=lf
 src/cpp/server/residency/journal.cpp text eol=lf
+docs/agents/profiling-no-target-gtt-noise.md text eol=lf
+docs/agents/profiling-retained-gtt-differential.md text eol=lf

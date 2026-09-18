@@ -1264,6 +1264,28 @@ def require_local_overlay_schemas(
         "differential evidence omitted its transient envelope",
     )
 
+    zero_retained = copy.deepcopy(examples["profiling_input_envelope"])
+    zero_retained["method_evidence"]["retained_gtt_claim"]["amount"] = 0
+    zero_retained["completion"]["manifest_claims"][0] = {
+        "completeness": "known_zero",
+        "entries": [],
+        "family": "consumable_capacity",
+    }
+    require(
+        profiling.is_valid(zero_retained),
+        "profiling schema rejected a zero retained bound with an explicit "
+        "known-zero manifest",
+    )
+
+    zero_bounded_manifest_entry = copy.deepcopy(examples["profiling_input_envelope"])
+    zero_bounded_manifest_entry["completion"]["manifest_claims"][0]["entries"][0][
+        "amount"
+    ] = 0
+    require(
+        not profiling.is_valid(zero_bounded_manifest_entry),
+        "profiling schema weakened positive bounded manifest entries",
+    )
+
     for owner_coverage in ("complete", "incomplete", "unknown"):
         differential_owner = copy.deepcopy(examples["profiling_input_envelope"])
         differential_owner["method_evidence"][
