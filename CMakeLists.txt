@@ -2908,6 +2908,7 @@ if(BUILD_TESTING AND EXISTS "${_MODEL_RESIDENCY_TEST_SRC}")
         ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
         ${CMAKE_CURRENT_BINARY_DIR}/include
     )
+    target_link_libraries(test_model_residency PRIVATE nlohmann_json::nlohmann_json)
 
     include(CTest)
     add_cpp_ci_test(ModelResidencyTest CI ON COMMAND test_model_residency)
@@ -2946,8 +2947,8 @@ if(BUILD_TESTING AND EXISTS "${_LATEST_FALLBACK_TEST_SRC}")
     add_cpp_ci_test(LatestVersionFallbackTest CI ON COMMAND test_latest_version_fallback)
 endif()
 
-# Label-to-deployment-mode mapping (lemon::get_model_type_from_labels). Header-only,
-# so the test links nothing beyond the standard library.
+# Label-to-deployment-mode mapping (lemon::get_model_type_from_labels). Header-only;
+# nlohmann_json is linked only for its include path (via backend_descriptor.h).
 set(_MODEL_TYPE_CLASSIFIER_TEST_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_model_type_classifier.cpp"
 )
@@ -2959,6 +2960,7 @@ if(BUILD_TESTING AND EXISTS "${_MODEL_TYPE_CLASSIFIER_TEST_SRC}")
         ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
         ${CMAKE_CURRENT_BINARY_DIR}/include
     )
+    target_link_libraries(test_model_type_classifier PRIVATE nlohmann_json::nlohmann_json)
 
     include(CTest)
     add_cpp_ci_test(ModelTypeClassifierTest CI ON COMMAND test_model_type_classifier)
@@ -3606,6 +3608,7 @@ if(BUILD_TESTING AND EXISTS "${_GPU_MEMORY_PLANNER_TEST_SRC}")
         test/cpp/test_gpu_memory_planner.cpp
         src/cpp/server/gpu_memory_planner.cpp)
     target_include_directories(test_gpu_memory_planner PRIVATE src/cpp/include)
+    target_link_libraries(test_gpu_memory_planner PRIVATE nlohmann_json::nlohmann_json)
     add_cpp_ci_test(GpuMemoryPlannerTest CI ON COMMAND test_gpu_memory_planner)
 endif()
 

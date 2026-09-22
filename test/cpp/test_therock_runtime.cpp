@@ -104,7 +104,10 @@ void test_cleanup_preserves_every_architecture_at_the_pinned_version() {
           "cleanup preserves the first architecture at the pinned version");
     check(fs::is_directory(current_second),
           "cleanup preserves another architecture at the pinned version");
+    // cleanup_old_therock_versions() is a no-op on other platforms.
+#if defined(__linux__) || defined(_WIN32)
     check(!fs::exists(stale), "cleanup removes a stale wheel runtime version");
+#endif
 }
 
 void test_explicit_wheel_selection_does_not_use_a_tarball_runtime() {
