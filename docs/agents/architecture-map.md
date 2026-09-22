@@ -33,11 +33,9 @@ This file captures implementation landmarks that are useful before changing Lemo
 - Model type controls the LRU bucket: LLM, embedding, reranking, audio, image, or TTS.
 - `max_loaded_models` applies per model type, not globally.
 - `max_gpu_memory_occupancy_gb` applies across loaded GPU models. Router dry-runs largest-to-smallest GPU evictions and leaves existing models loaded when the requested model cannot fit.
-- Configured pins live in `pinned_models`, are loaded at startup, do not consume count-managed slots, and are excluded from ordinary automatic capacity victims.
-- An incoming pinned NPU/FLM model can evict an incompatible pinned incumbent. This last-pinned-load-wins behavior is unsafe and is replaced by the accepted target below.
-- Busy `WrappedServer` instances are protected from eviction until their active request ends.
-- The load-failure retry path preserves configured pins but can evict every eligible unpinned model before retrying.
-- This ref has no upstream-style reactive pressure engine or idle KV-cache reclamation.
+- An explicit load `pinned` value wins; otherwise pin state ORs the retained pin, `pinned_models` (loaded at startup), and the `pinned` recipe option. Pins keep their count-managed slot; a full pool whose residents are all pinned or in use fails the load with `slots_pinned_error`.
+- Admission never displaces pinned or in-use residents. An NPU/FLM conflict or a GPU-budget victim that is pinned or busy rejects the load; count victims are only unpinned idle LRU residents. The load-failure retry evicts every model only when none is pinned or in use, and otherwise fails the load.
+- Upstream's opt-in `EvictionEngine` runs whenever lemond runs but does nothing until opted in. `auto_evict` (global, default false; per-model recipe option overrides) enables idle eviction (`evict_idle_timeout`, 300 s) and idle downsizing (`downsize_idle_timeout`, 60 s; llama.cpp erases KV-cache slots). VRAM-pressure eviction at `auto_evict_threshold_pct` (0.90) needs the global flag. It skips pinned, in-use, and exclusive-job residents.
 
 ## Accepted Model Residency Target
 
@@ -45,6 +43,8 @@ This file captures implementation landmarks that are useful before changing Lemo
 - Agents producing or consuming boot-scoped no-target GTT noise evidence must
   follow the [no-target GTT noise procedure](profiling-no-target-gtt-noise.md)
   and preserve its Server-owned authentication and lifecycle preconditions.
+  The procedure is a component-level contract for the deferred
+  portable-residency rework; no production route invokes it.
 - The accepted portable adapter, footprint, pressure-reclamation, configuration, explanation, validation, and promotion policies and their decision rationale live in [Choose portable residency adapter contracts](https://github.com/nisavid/lemonade/issues/31), [Choose footprint estimation and confidence policy](https://github.com/nisavid/lemonade/issues/32), [Choose portable pressure reclamation controls](https://github.com/nisavid/lemonade/issues/33), [Define portable residency configuration and explanations](https://github.com/nisavid/lemonade/issues/34), and [Define residency validation and capability promotion](https://github.com/nisavid/lemonade/issues/35); the bullets below are their scout map.
 - Continued fork maintenance is decided. Reconcile onto current stable upstream, then implement this target using upstream terminology and APIs where they fit.
 - One server-owned planner defines admission, pressure, protection, ordering, and refusal semantics. Platform and backend adapters describe residency-memory-domain topology, trustworthy capacity and pressure signals, footprint confidence, and available reclamation actions; adapters do not redefine common policy.
