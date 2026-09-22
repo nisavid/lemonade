@@ -3608,6 +3608,7 @@ if(BUILD_TESTING AND EXISTS "${_GPU_MEMORY_PLANNER_TEST_SRC}")
         test/cpp/test_gpu_memory_planner.cpp
         src/cpp/server/gpu_memory_planner.cpp)
     target_include_directories(test_gpu_memory_planner PRIVATE src/cpp/include)
+    target_link_libraries(test_gpu_memory_planner PRIVATE nlohmann_json::nlohmann_json)
     add_cpp_ci_test(GpuMemoryPlannerTest CI ON COMMAND test_gpu_memory_planner)
 endif()
 
