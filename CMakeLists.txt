@@ -2908,6 +2908,7 @@ if(BUILD_TESTING AND EXISTS "${_MODEL_RESIDENCY_TEST_SRC}")
         ${CMAKE_CURRENT_SOURCE_DIR}/src/cpp/include
         ${CMAKE_CURRENT_BINARY_DIR}/include
     )
+    target_link_libraries(test_model_residency PRIVATE nlohmann_json::nlohmann_json)
 
     include(CTest)
     add_cpp_ci_test(ModelResidencyTest CI ON COMMAND test_model_residency)

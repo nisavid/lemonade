@@ -1605,7 +1605,7 @@ jobs:
           test "$CATALOG_MEMBER_COUNT" -eq 1
           test "$CATALOG_MEMBERS" = "$CATALOG_MEMBER"
 
-          dnf install -y shadow-utils "$RPM_FILE"
+          dnf install -y shadow-utils diffutils "$RPM_FILE"
 
           echo "Installed package information:"
           rpm -qi lemonade-server
