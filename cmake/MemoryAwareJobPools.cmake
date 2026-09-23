@@ -37,6 +37,8 @@
 #   compile = max(1, jobs - link)
 #
 # A link depth set through MEMORY_AWARE_LINK_JOBS is the link in that formula.
+# When jobs is 1 and neither depth is set, compile and link share one pool of
+# depth 1, since two pools of depth 1 would allow two jobs.
 #
 # Cache settings:
 #
@@ -248,8 +250,8 @@ function(_memory_aware_job_pools)
         _memory_aware_job_pools_available(avail cgroup_limited)
     endif()
 
+    set(jobs 0)
     if(NOT avail STREQUAL "")
-        set(jobs 0)
         if(avail GREATER reserve_mib)
             math(EXPR jobs "(${avail} - ${reserve_mib}) / ${job_mib}")
         endif()
@@ -270,6 +272,18 @@ function(_memory_aware_job_pools)
             string(APPEND inputs " in cgroup")
         endif()
         string(APPEND inputs ", reserve ${reserve_gib} GiB, ${job_gib} GiB/job")
+    endif()
+
+    if(jobs EQUAL 1 AND want_compile AND want_link
+       AND MEMORY_AWARE_COMPILE_JOBS EQUAL 0
+       AND MEMORY_AWARE_LINK_JOBS EQUAL 0)
+        _memory_aware_job_pools_add(memory_aware_jobs 1)
+        set(CMAKE_JOB_POOL_COMPILE memory_aware_jobs PARENT_SCOPE)
+        set(CMAKE_JOB_POOL_LINK memory_aware_jobs PARENT_SCOPE)
+        message(STATUS "MemoryAwareJobPools: compile+link=1 (one pool; "
+            "${inputs}); set MEMORY_AWARE_COMPILE_JOBS or "
+            "MEMORY_AWARE_LINK_JOBS to override")
+        return()
     endif()
 
     set(link "")
