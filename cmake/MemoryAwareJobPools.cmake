@@ -95,10 +95,11 @@ function(_memory_aware_job_pools_available out_mib out_cgroup_limited)
     if(EXISTS "/proc/self/cgroup")
         file(STRINGS "/proc/self/cgroup" line REGEX "^0::/")
         if(line MATCHES "^0::(/.*)$")
-            set(rel "${CMAKE_MATCH_1}")
+            # file(STRINGS) returns a list, which escapes a ";" in the path.
+            string(REPLACE "\\;" ";" rel "${CMAKE_MATCH_1}")
         endif()
     endif()
-    # Walk the path as a string: systemd escapes unit names with backslashes
+    # Walk the path as a string: cgroup names can contain backslash escapes
     # (for example "\x2d"), which CMake's path commands treat as separators.
     while(NOT rel STREQUAL "")
         set(dir "/sys/fs/cgroup${rel}")
