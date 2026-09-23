@@ -123,7 +123,7 @@ cd build && cpack -G RPM     # .rpm
 
 CMake presets: `default` (Ninja, Release), `windows` (VS 2022), `vs18` (VS 2026), `debug` (Ninja, Debug).
 
-CMake options: `BUILD_WEB_APP` (ON by default on all platforms), `BUILD_TAURI_APP` (Linux only, include Tauri desktop app in deb), `LEMONADE_SYSTEMD_UNIT_NAME` (default: `lemond.service`).
+CMake options: `BUILD_WEB_APP` (ON by default on all platforms), `BUILD_TAURI_APP` (Linux only, include Tauri desktop app in deb), `LEMONADE_SYSTEMD_UNIT_NAME` (default: `lemond.service`), and for Ninja builds `MEMORY_AWARE_JOB_POOLS` (ON: size compile and link job pools from Linux `MemAvailable` and cgroup v2 headroom), `MEMORY_AWARE_COMPILE_JOBS` and `MEMORY_AWARE_LINK_JOBS` (0 sizes from memory; N fixes the depth), and `MEMORY_AWARE_JOB_MIB` (1536 MiB per job in this tree). See `cmake/MemoryAwareJobPools.cmake`.
 
 ## Testing
 
