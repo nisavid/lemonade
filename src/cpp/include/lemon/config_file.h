@@ -122,12 +122,18 @@ public:
     /// Thread-safe.
     static void save(const std::string& config_dir, const json& config);
 
+    /// Merge sparse overrides into <config_dir>/config.json, drop every key
+    /// that matches get_defaults(), and save. Concurrent callers are serialized
+    /// so read-modify-write updates of different keys are not lost.
+    static void save_overrides(const std::string& config_dir, const json& overrides);
+
 private:
     /// When config.json doesn't exist yet, read legacy LEMONADE_* environment
     /// variables, typed against `defaults`. Returns only the sparse overrides.
     static json migrate_from_env(const json& defaults);
 
     static std::shared_mutex file_mutex_;
+    static std::mutex overrides_mutex_;
 };
 
 } // namespace lemon

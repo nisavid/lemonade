@@ -969,13 +969,13 @@ bool Server::is_model_loading(const std::string& model_name) {
     return model_load_tracker_.is_loading(canonical_model_name);
 }
 
-void Server::persist_config_snapshot() {
-    if (cache_dir_.empty()) {
+void Server::persist_config_overrides(const json& overrides) {
+    if (config_dir_.empty()) {
         return;
     }
 
     try {
-        ConfigFile::save(cache_dir_, config_->snapshot());
+        ConfigFile::save_overrides(config_dir_, overrides);
     } catch (const std::exception& e) {
         LOG(WARNING, "Server") << "Failed to persist config.json: " << e.what() << std::endl;
     }
@@ -990,7 +990,7 @@ void Server::save_pinned_models(const std::vector<std::string>& pinned_models) {
     config_->set({{"pinned_models", pins}}, [this](const json& applied) {
         apply_config_side_effects(applied);
     });
-    persist_config_snapshot();
+    persist_config_overrides({{"pinned_models", pins}});
 }
 
 bool Server::remove_model_pin(const std::string& model_name) {
@@ -7927,19 +7927,9 @@ void Server::handle_config_set(const httplib::Request& req, httplib::Response& r
             apply_config_side_effects(applied);
         });
 
-        if (!config_dir_.empty()) {
-            try {
-                json user_cfg = ConfigFile::load_raw(config_dir_);
-                if (result.contains("updated") && result["updated"].is_object()) {
-                    user_cfg = utils::JsonUtils::merge(user_cfg, result["updated"]);
-                }
-                json defaults = ConfigFile::get_defaults();
-                utils::JsonUtils::prune_matching(user_cfg, defaults);
-                ConfigFile::save(config_dir_, user_cfg);
-            } catch (const std::exception& e) {
-                LOG(WARNING, "Server") << "Failed to persist config.json: " << e.what() << std::endl;
-            }
-        }
+        persist_config_overrides(result.contains("updated") && result["updated"].is_object()
+                                     ? result["updated"]
+                                     : json::object());
 
         res.set_content(result.dump(), "application/json");
     } catch (const nlohmann::json::parse_error& e) {

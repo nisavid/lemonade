@@ -3519,6 +3519,13 @@ if(BUILD_TESTING AND EXISTS "${_CONFIG_MERGING_TEST_SRC}")
     add_cpp_ci_test(ConfigMergingTest CI ON COMMAND test_config_merging)
 endif()
 
+set(_PIN_CONFIG_PERSISTENCE_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_pin_config_persistence.cpp")
+if(BUILD_TESTING AND EXISTS "${_PIN_CONFIG_PERSISTENCE_TEST_SRC}")
+    add_executable(test_pin_config_persistence test/cpp/test_pin_config_persistence.cpp)
+    target_link_libraries(test_pin_config_persistence PRIVATE lemonade-server-core)
+    add_cpp_ci_test(PinConfigPersistenceTest CI ON COMMAND test_pin_config_persistence)
+endif()
+
 set(_CONFIG_DISCOVERY_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_config_discovery.cpp")
 if(BUILD_TESTING AND EXISTS "${_CONFIG_DISCOVERY_TEST_SRC}")
     add_executable(test_config_discovery test/cpp/test_config_discovery.cpp)

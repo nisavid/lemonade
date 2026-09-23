@@ -389,7 +389,7 @@ private:
     void mark_model_loading(const std::string& model_name);
     void clear_model_loading(const std::string& model_name);
     bool is_model_loading(const std::string& model_name);
-    void persist_config_snapshot();
+    void persist_config_overrides(const nlohmann::json& overrides);
     void save_pinned_models(const std::vector<std::string>& pinned_models);
     bool remove_model_pin(const std::string& model_name);
     bool is_config_model_pinned(const std::string& model_name);

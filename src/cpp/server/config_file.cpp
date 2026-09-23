@@ -18,6 +18,7 @@ namespace fs = std::filesystem;
 namespace lemon {
 
 std::shared_mutex ConfigFile::file_mutex_;
+std::mutex ConfigFile::overrides_mutex_;
 
 static json load_json_file(const fs::path& path) {
     std::ifstream file(path);
@@ -294,6 +295,13 @@ void ConfigFile::save(const std::string& config_dir, const json& config) {
         }
         fs::remove(temp_path);
     }
+}
+
+void ConfigFile::save_overrides(const std::string& config_dir, const json& overrides) {
+    std::lock_guard<std::mutex> lock(overrides_mutex_);
+    json user_cfg = utils::JsonUtils::merge(load_raw(config_dir), overrides);
+    utils::JsonUtils::prune_matching(user_cfg, get_defaults());
+    save(config_dir, user_cfg);
 }
 
 // ---------------------------------------------------------------------------
