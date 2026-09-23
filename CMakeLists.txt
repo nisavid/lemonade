@@ -8,6 +8,7 @@ endif()
 project(lemon_cpp VERSION 11.7.0)
 
 include(CTest)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/MemoryAwareJobPools.cmake)
 
 # Aggregate build target for the C++ tests selected by packaging CI.
 # Platform-specific tests add themselves only inside their existing if() block.
