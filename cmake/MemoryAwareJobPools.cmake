@@ -93,9 +93,14 @@ function(_memory_aware_job_pools_available out_mib out_cgroup_limited)
         set(cgroup_root "${_MEMORY_AWARE_JOB_POOLS_CGROUP_ROOT}")
     endif()
 
-    # EXISTS is false for a file this process cannot read, which file() would
-    # otherwise turn into a configure error.
-    if(EXISTS "${proc}/meminfo")
+    # file() would turn a file this process cannot read into a configure error.
+    # EXISTS also checks readability today, but CMake may make it check
+    # existence only, so use IS_READABLE where it exists.
+    set(readable EXISTS)
+    if(NOT CMAKE_VERSION VERSION_LESS 3.29)
+        set(readable IS_READABLE)
+    endif()
+    if(${readable} "${proc}/meminfo")
         file(STRINGS "${proc}/meminfo" line REGEX "^MemAvailable:")
         if(line MATCHES "^MemAvailable:[ \t]*([0-9]+) kB")
             math(EXPR avail "${CMAKE_MATCH_1} / 1024")
@@ -107,7 +112,7 @@ function(_memory_aware_job_pools_available out_mib out_cgroup_limited)
     endif()
 
     set(rel "")
-    if(EXISTS "${proc}/self/cgroup")
+    if(${readable} "${proc}/self/cgroup")
         file(STRINGS "${proc}/self/cgroup" line REGEX "^0::/")
         if(line MATCHES "^0::(/.*)$")
             # file(STRINGS) returns a list, which escapes a ";" in the path.
@@ -118,13 +123,14 @@ function(_memory_aware_job_pools_available out_mib out_cgroup_limited)
     # (for example "\x2d"), which CMake's path commands treat as separators.
     while(NOT rel STREQUAL "")
         set(dir "${cgroup_root}${rel}")
-        if(EXISTS "${dir}/memory.max" AND EXISTS "${dir}/memory.current")
+        if(${readable} "${dir}/memory.max" AND
+           ${readable} "${dir}/memory.current")
             file(STRINGS "${dir}/memory.max" max LIMIT_COUNT 1)
             file(STRINGS "${dir}/memory.current" current LIMIT_COUNT 1)
             # With the multi-generational LRU, cache that was used once can
             # still show as active_file, so inactive_file alone undercounts.
             set(file_cache 0)
-            if(EXISTS "${dir}/memory.stat")
+            if(${readable} "${dir}/memory.stat")
                 file(STRINGS "${dir}/memory.stat" stat_lines
                     REGEX "^(in)?active_file [0-9]+$")
                 foreach(stat_line IN LISTS stat_lines)
