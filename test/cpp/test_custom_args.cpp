@@ -250,6 +250,10 @@ int main() {
         merge_layers("--system-prompt 'say \\'hi\\' now' --alias \"a \\\"b\\\" c\"", global),
         {"--alias", "a \"b\" c", "--system-prompt", "say 'hi' now", "--threads", "8"});
     failures += !expect_merged_argv(
+        "single-quoted JSON with backslash-escaped inner quotes round-trips through a merge",
+        merge_layers("--chat-template-kwargs '{\"greeting\":\"say \\\"hi\\\"\"}'", global),
+        {"--chat-template-kwargs", "{\"greeting\":\"say \\\"hi\\\"\"}", "--threads", "8"});
+    failures += !expect_merged_argv(
         "backslash-escaped and bare backslash values round-trip through a merge",
         merge_layers("--lora \"C:\\\\Models\\\\my adapter.gguf\" --log-file C:\\logs\\run.log",
                      global),
