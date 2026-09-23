@@ -192,7 +192,7 @@ int main() {
             out << "{\"config_version\": 2, \"port\": 13305, \"host\": \"localhost\", \"no_broadcast\": true}\n";
         }
 
-        json loaded = ConfigFile::load(temp_test_dir.string());
+        json loaded = ConfigFile::load(temp_test_dir.string(), temp_test_dir.string());
         check(loaded["broadcast"] == false, "ConfigFile::load migrates legacy no_broadcast: true to broadcast: false");
         check(!loaded.contains("no_broadcast"), "ConfigFile::load removes legacy no_broadcast from in-memory object");
 
@@ -230,7 +230,7 @@ int main() {
 
         // When user creates a fresh config under these defaults, broadcast is false
         fs::path fresh_cache_dir = temp_defaults_dir / "cache";
-        json fresh_loaded = ConfigFile::load(fresh_cache_dir.string());
+        json fresh_loaded = ConfigFile::load(fresh_cache_dir.string(), fresh_cache_dir.string());
         check(fresh_loaded["broadcast"] == false, "fresh config inherited broadcast=false from deployment defaults");
 
 #ifdef _WIN32
@@ -252,7 +252,8 @@ int main() {
 #else
         setenv("LEMONADE_NO_BROADCAST", "1", 1);
 #endif
-        json disabled = ConfigFile::load((temp_env_dir / "disabled").string());
+        json disabled = ConfigFile::load((temp_env_dir / "disabled").string(),
+                                        (temp_env_dir / "disabled").string());
         check(disabled["broadcast"].is_boolean() && disabled["broadcast"] == false,
               "LEMONADE_NO_BROADCAST=1 migrates to broadcast=false");
         check(!disabled.contains("no_broadcast"),
@@ -263,7 +264,8 @@ int main() {
 #else
         setenv("LEMONADE_NO_BROADCAST", "0", 1);
 #endif
-        json enabled = ConfigFile::load((temp_env_dir / "enabled").string());
+        json enabled = ConfigFile::load((temp_env_dir / "enabled").string(),
+                                        (temp_env_dir / "enabled").string());
         check(enabled["broadcast"].is_boolean() && enabled["broadcast"] == true,
               "LEMONADE_NO_BROADCAST=0 migrates to broadcast=true");
     } catch (const std::exception& e) {
@@ -290,7 +292,7 @@ int main() {
 
         bool threw_malformed = false;
         try {
-            ConfigFile::load(malformed_dir.string());
+            ConfigFile::load(malformed_dir.string(), malformed_dir.string());
         } catch (const std::invalid_argument&) {
             threw_malformed = true;
         }
