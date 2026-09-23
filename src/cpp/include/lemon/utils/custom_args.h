@@ -58,6 +58,9 @@ inline bool is_custom_arg_flag(const std::string& token) {
     return !token.empty() && token[0] == '-' && !is_negative_numeric_value(token);
 }
 
+// keep_quotes returns tokens already serialized for map_to_args_string:
+// quoted segments come back double-quoted and escaped, so a quoted value is
+// never mistaken for a flag and a merged string parses to the same argv.
 inline std::vector<std::string> parse_custom_args(const std::string& custom_args_str, bool keep_quotes = false) {
     std::vector<std::string> result;
     if (custom_args_str.empty()) {
@@ -68,30 +71,45 @@ inline std::vector<std::string> parse_custom_args(const std::string& custom_args
     bool in_quotes = false;
     char quote_char = '\0';
 
+    auto append_quoted = [&](char c) {
+        if (keep_quotes && (c == '\\' || c == '"')) {
+            current_arg += '\\';
+        }
+        current_arg += c;
+    };
+
     for (size_t i = 0; i < custom_args_str.size(); ++i) {
         char c = custom_args_str[i];
         if (in_quotes && c == '\\' && i + 1 < custom_args_str.size() &&
             (custom_args_str[i + 1] == quote_char || custom_args_str[i + 1] == '\\')) {
-            current_arg += custom_args_str[++i];
+            append_quoted(custom_args_str[++i]);
         } else if (!in_quotes && (c == '"' || c == '\'')) {
             in_quotes = true;
             quote_char = c;
+            if (keep_quotes) {
+                current_arg += '"';
+            }
         } else if (in_quotes && c == quote_char) {
             in_quotes = false;
-            if (keep_quotes) {
-                current_arg = quote_char + current_arg + quote_char;
-            }
             quote_char = '\0';
+            if (keep_quotes) {
+                current_arg += '"';
+            }
         } else if (!in_quotes && c == ' ') {
             if (!current_arg.empty()) {
                 result.push_back(current_arg);
                 current_arg.clear();
             }
+        } else if (in_quotes) {
+            append_quoted(c);
         } else {
             current_arg += c;
         }
     }
 
+    if (keep_quotes && in_quotes) {
+        current_arg += '"';
+    }
     if (!current_arg.empty()) {
         result.push_back(current_arg);
     }
@@ -108,9 +126,10 @@ inline CustomArgsMap build_custom_args_map(const std::vector<std::string>& token
     for (const auto& token : tokens) {
         if (is_custom_arg_flag(token)) {
             // This is a flag; start a new entry. Normalize --flag=value so it
-            // has the same precedence key as --flag value.
-            size_t eq_pos = token.find('=');
-            if (eq_pos != std::string::npos) {
+            // has the same precedence key as --flag value. An '=' inside a
+            // kept quoted segment belongs to the value, not the flag.
+            size_t eq_pos = token.find_first_of("=\"'");
+            if (eq_pos != std::string::npos && token[eq_pos] == '=') {
                 last_flag = token.substr(0, eq_pos);
                 result[last_flag].push_back({token.substr(eq_pos + 1)});
             } else {
@@ -153,22 +172,6 @@ inline std::string validate_custom_args(const std::string& custom_args_str, cons
     return "";
 }
 
-inline std::string quote_custom_arg_value(const std::string& value) {
-    if (value.find_first_of(" \t\"\\'") == std::string::npos) {
-        return value;
-    }
-
-    std::string escaped;
-    escaped.reserve(value.size());
-    for (char c : value) {
-        if (c == '\\' || c == '"') {
-            escaped.push_back('\\');
-        }
-        escaped.push_back(c);
-    }
-    return "\"" + escaped + "\"";
-}
-
 inline bool custom_args_has_flag(const std::vector<std::string>& tokens,
                                  const std::string& flag) {
     for (const auto& arg : tokens) {
@@ -193,7 +196,7 @@ inline std::string map_to_args_string(const CustomArgsMap& m) {
             first = false;
             result += flag;
             for (const auto& v : values) {
-                result += " " + quote_custom_arg_value(v);
+                result += " " + v;
             }
         }
     }
