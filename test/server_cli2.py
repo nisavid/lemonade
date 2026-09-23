@@ -783,7 +783,7 @@ sys.exit(0)
     def test_045_config_set_broadcast(self):
         """Verify that CLI config set can modify broadcast setting, and client CLI works with --discovery / --no-discovery."""
         response = requests.get(
-            f"http://localhost:{PORT}/api/v1/params",
+            f"http://localhost:{PORT}/internal/config",
             headers=_auth_headers(),
             timeout=10,
         )
