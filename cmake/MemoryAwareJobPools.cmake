@@ -19,6 +19,11 @@
 # It acts only for Ninja generators and defers to pools the builder defines: it
 # does nothing when CMAKE_JOB_POOLS or the JOB_POOLS global property is set, and
 # leaves CMAKE_JOB_POOL_COMPILE or CMAKE_JOB_POOL_LINK alone when either is set.
+# Those checks see only what is set before it runs. With CMake >= 3.19 it also
+# keeps pools the project defines later: at the end of the top-level directory
+# it adds the CMAKE_JOB_POOLS entries that its own JOB_POOLS entries would
+# hide, and restores its entries if the project replaced JOB_POOLS. Older CMake
+# skips that step, so there include it after the project defines its pools.
 #
 # Available memory is MemAvailable from /proc/meminfo, lowered to the tightest
 # cgroup v2 headroom (memory.max - memory.current) of this process's cgroup and
@@ -124,6 +129,53 @@ function(_memory_aware_job_pools_available out_mib out_cgroup_limited)
 
     set(${out_mib} ${avail} PARENT_SCOPE)
     set(${out_cgroup_limited} ${cgroup_limited} PARENT_SCOPE)
+endfunction()
+
+# CMake reads CMAKE_JOB_POOLS only while JOB_POOLS is unset, and a project may
+# replace JOB_POOLS outright. Either way a pool defined after this file ran
+# would go missing from build.ninja, and Ninja rejects a missing pool.
+function(_memory_aware_job_pools_reconcile)
+    get_property(ours GLOBAL PROPERTY _MEMORY_AWARE_JOB_POOLS)
+    get_property(pools GLOBAL PROPERTY JOB_POOLS)
+    set(names "")
+    set(foreign FALSE)
+    foreach(entry IN LISTS pools)
+        string(REGEX REPLACE "=.*" "" name "${entry}")
+        list(APPEND names "${name}")
+        list(FIND ours "${entry}" index)
+        if(index EQUAL -1)
+            set(foreign TRUE)
+        endif()
+    endforeach()
+    # Without this file, entries of the project's own in JOB_POOLS would hide
+    # CMAKE_JOB_POOLS, so add it only when JOB_POOLS holds none.
+    set(wanted ${ours})
+    if(NOT foreign)
+        set(wanted ${CMAKE_JOB_POOLS} ${ours})
+    endif()
+    set(missing "")
+    foreach(entry IN LISTS wanted)
+        string(REGEX REPLACE "=.*" "" name "${entry}")
+        list(FIND names "${name}" index)
+        if(index EQUAL -1)
+            list(APPEND missing "${entry}")
+            list(APPEND names "${name}")
+        endif()
+    endforeach()
+    if(NOT "${missing}" STREQUAL "")
+        set_property(GLOBAL APPEND PROPERTY JOB_POOLS ${missing})
+    endif()
+endfunction()
+
+function(_memory_aware_job_pools_add name depth)
+    get_property(ours GLOBAL PROPERTY _MEMORY_AWARE_JOB_POOLS)
+    if("${ours}" STREQUAL "" AND NOT CMAKE_VERSION VERSION_LESS 3.19)
+        cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+            CALL _memory_aware_job_pools_reconcile)
+    endif()
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS ${name}=${depth})
+    set_property(GLOBAL APPEND PROPERTY _MEMORY_AWARE_JOB_POOLS
+        ${name}=${depth})
 endfunction()
 
 function(_memory_aware_job_pools)
@@ -235,15 +287,13 @@ function(_memory_aware_job_pools)
     endif()
 
     if(NOT compile STREQUAL "")
-        set_property(GLOBAL APPEND PROPERTY JOB_POOLS
-            memory_aware_compile=${compile})
+        _memory_aware_job_pools_add(memory_aware_compile ${compile})
         set(CMAKE_JOB_POOL_COMPILE memory_aware_compile PARENT_SCOPE)
         message(STATUS "MemoryAwareJobPools: compile=${compile} "
             "(${compile_why}); ${compile_how}")
     endif()
     if(NOT link STREQUAL "")
-        set_property(GLOBAL APPEND PROPERTY JOB_POOLS
-            memory_aware_link=${link})
+        _memory_aware_job_pools_add(memory_aware_link ${link})
         set(CMAKE_JOB_POOL_LINK memory_aware_link PARENT_SCOPE)
         message(STATUS "MemoryAwareJobPools: link=${link} "
             "(${link_why}); ${link_how}")
