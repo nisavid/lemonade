@@ -60,6 +60,64 @@ static bool expect_merge(const char* name, const std::string& target,
     return ok;
 }
 
+using Argv = std::vector<std::string>;
+
+// The production *_args layer merge, high-precedence layer first.
+static std::string merge_layers(const std::string& high, const std::string& low) {
+    if (high.empty()) return low;
+    if (low.empty()) return high;
+    return map_to_args_string(merge_args_maps(build_custom_args_map(parse_custom_args(high, true)),
+                                              build_custom_args_map(parse_custom_args(low, true))));
+}
+
+static std::string dump(const Argv& argv) {
+    std::string s = "[";
+    for (size_t i = 0; i < argv.size(); ++i) {
+        if (i) s += ", ";
+        s += "<" + argv[i] + ">";
+    }
+    return s + "]";
+}
+
+static bool expect_merged_argv(const char* name, const std::string& merged,
+                               const Argv& expected) {
+    Argv actual = parse_custom_args(merged);
+    bool ok = (actual == expected);
+    std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
+    if (!ok) {
+        std::printf("  args: %s\n  got:  %s\n  want: %s\n", merged.c_str(),
+                    dump(actual).c_str(), dump(expected).c_str());
+    }
+    return ok;
+}
+
+static bool expect_merged_argv_one_of(const char* name, const std::string& merged,
+                                      const std::vector<Argv>& accepted) {
+    Argv actual = parse_custom_args(merged);
+    bool ok = false;
+    for (const auto& expected : accepted) {
+        ok = ok || (actual == expected);
+    }
+    std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
+    if (!ok) {
+        std::printf("  args: %s\n  got:  %s\n", merged.c_str(), dump(actual).c_str());
+        for (const auto& expected : accepted) {
+            std::printf("  want: %s\n", dump(expected).c_str());
+        }
+    }
+    return ok;
+}
+
+static bool expect_same_args(const char* name, const std::string& actual,
+                             const std::string& expected) {
+    bool ok = (actual == expected);
+    std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
+    if (!ok) {
+        std::printf("  got:  %s\n  want: %s\n", actual.c_str(), expected.c_str());
+    }
+    return ok;
+}
+
 static bool expect_has_flag(const char* name, const std::string& input,
                             const std::string& flag, bool expected) {
     bool actual = custom_args_has_flag(parse_custom_args(input), flag);
@@ -159,6 +217,75 @@ int main() {
     failures += !expect_has_flag(
         "missing alias does not match",
         "--threads 8", "--mmap", false);
+
+    // Merged layers must reach the backend argv exactly as one unmerged layer
+    // would: no literal quote characters, however many layers were merged.
+    const std::string global = "--threads 8";
+    const std::string arch = "--chat-template-kwargs '{\"preserve_thinking\":true}'";
+    const std::string arch_scope = merge_layers(arch, global);
+    failures += !expect_merged_argv(
+        "architecture JSON value merged with global args has no literal quotes", arch_scope,
+        {"--chat-template-kwargs", "{\"preserve_thinking\":true}", "--threads", "8"});
+
+    const std::string model =
+        "--alias \"My Model\" --chat-template-kwargs '{\"enable_thinking\":false}'";
+    const std::string model_scope = merge_layers(model, arch_scope);
+    failures += !expect_merged_argv(
+        "quoted user-model values merged over architecture and global args", model_scope,
+        {"--alias", "My Model", "--chat-template-kwargs", "{\"enable_thinking\":false}",
+         "--threads", "8"});
+    failures += !expect_merged_argv(
+        "request, model, architecture and global layers nest without extra quoting",
+        merge_layers("--temp 0.5", model_scope),
+        {"--alias", "My Model", "--chat-template-kwargs", "{\"enable_thinking\":false}",
+         "--temp", "0.5", "--threads", "8"});
+
+    failures += !expect_same_args("re-merging a merged layer is idempotent",
+                                  merge_layers(arch_scope, global), arch_scope);
+    failures += !expect_same_args("merging a merged layer into itself is idempotent",
+                                  merge_layers(model_scope, model_scope), model_scope);
+
+    failures += !expect_merged_argv(
+        "values with spaces and escaped quotes round-trip through a merge",
+        merge_layers("--system-prompt 'say \\'hi\\' now' --alias \"a \\\"b\\\" c\"", global),
+        {"--alias", "a \"b\" c", "--system-prompt", "say 'hi' now", "--threads", "8"});
+    failures += !expect_merged_argv(
+        "backslash-escaped and bare backslash values round-trip through a merge",
+        merge_layers("--lora \"C:\\\\Models\\\\my adapter.gguf\" --log-file C:\\logs\\run.log",
+                     global),
+        {"--log-file", "C:\\logs\\run.log", "--lora", "C:\\Models\\my adapter.gguf",
+         "--threads", "8"});
+    failures += !expect_merged_argv(
+        "backslash values stay stable across repeated merges",
+        merge_layers(merge_layers(merge_layers("--lora \"C:\\\\Models\\\\my adapter.gguf\"",
+                                               global),
+                                  global),
+                     arch),
+        {"--chat-template-kwargs", "{\"preserve_thinking\":true}", "--lora",
+         "C:\\Models\\my adapter.gguf", "--threads", "8"});
+
+    failures += !expect_merged_argv(
+        "quoted value that starts with a dash stays attached to its flag",
+        merge_layers("--reverse-prompt '-User:' --threads 4", "--ctx-size 4096 --n-gpu-layers 99"),
+        {"--ctx-size", "4096", "--n-gpu-layers", "99", "--reverse-prompt", "-User:",
+         "--threads", "4"});
+    failures += !expect_merged_argv_one_of(
+        "equals-form flag keeps its quoted spaced value intact",
+        merge_layers("--chat-template-kwargs='{\"enable_thinking\": false}'", global),
+        {{"--chat-template-kwargs={\"enable_thinking\": false}", "--threads", "8"},
+         {"--chat-template-kwargs", "{\"enable_thinking\": false}", "--threads", "8"}});
+    failures += !expect_merged_argv(
+        "unterminated quote keeps the rest of its layer as one value",
+        merge_layers("--system-prompt \"be brief --temp 0.1", global),
+        {"--system-prompt", "be brief --temp 0.1", "--threads", "8"});
+
+    const std::string empty_value = "--reasoning-format ''";
+    failures += !expect_merged_argv("empty quoted value survives a merge as it would unmerged",
+                                    merge_layers(empty_value, global),
+                                    {"--reasoning-format", "--threads", "8"});
+    failures += !expect_same_args("empty quoted value is idempotent across merges",
+                                  merge_layers(merge_layers(empty_value, global), global),
+                                  merge_layers(empty_value, global));
 
     std::printf("\n%d failures\n", failures);
     return failures == 0 ? 0 : 1;
