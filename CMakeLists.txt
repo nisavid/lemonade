@@ -8,6 +8,10 @@ endif()
 project(lemon_cpp VERSION 11.7.0)
 
 include(CTest)
+# The heaviest compiles in this tree peak near 1.6 GiB.
+if(NOT DEFINED MEMORY_AWARE_JOB_MIB)
+    set(MEMORY_AWARE_JOB_MIB 1536)
+endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/MemoryAwareJobPools.cmake)
 
 # Aggregate build target for the C++ tests selected by packaging CI.
