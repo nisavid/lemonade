@@ -383,6 +383,7 @@ private:
     void start_model_cache_warmup();
     void start_pinned_model_loading();
     void load_pinned_model(const std::string& model_name);
+    bool reload_updated_pinned_model(const std::string& model_name);
     void set_pin_load_error(const std::string& model_name, const std::string& error);
     std::string get_pin_load_error(const std::string& model_name);
     void clear_pin_load_error(const std::string& model_name);

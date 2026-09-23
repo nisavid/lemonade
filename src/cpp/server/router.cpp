@@ -2146,6 +2146,36 @@ void Router::unload_model(const std::string& model_name) {
     }
 }
 
+bool Router::reload_pinned_model_after_update(const std::string& model_name,
+                                              const ModelInfo& model_info) {
+    RecipeOptions options;
+    LoadPurpose load_purpose = LoadPurpose::UserInference;
+    {
+        std::lock_guard<std::mutex> lock(load_mutex_);
+        const std::string canonical_model_name = resolve_model_name(model_name);
+        WrappedServer* server = find_server_by_model_name(canonical_model_name);
+        if (!server || !server->is_backend_alive() ||
+            !(server->is_pinned() || is_config_pinned(canonical_model_name))) {
+            return false;
+        }
+        options = server->get_recipe_options();
+        if (server->ctx_size_is_auto()) {
+            options.set_option("ctx_size", -1);
+        }
+        load_purpose = load_purpose_for_residency_class(server->get_residency_class());
+    }
+    options.remove_option("pinned");
+
+    LOG(INFO, "Router") << "Reloading pinned model on its updated files: "
+                        << model_name << std::endl;
+    unload_model(model_name);
+    auto preparation = prepare_model_load(
+        model_name, load_purpose, ExistingModelPolicy::UpdatePinAndResidency);
+    load_prepared_model(
+        std::move(preparation), model_info, options, true, /*pinned=*/true);
+    return true;
+}
+
 void Router::evict_if_committed(const std::string& model_name) {
     std::lock_guard<std::mutex> lock(load_mutex_);
 

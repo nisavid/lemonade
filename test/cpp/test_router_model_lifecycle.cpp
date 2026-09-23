@@ -1,4 +1,5 @@
 #include "lemon/config_file.h"
+#include "lemon/error_types.h"
 #include "lemon/router.h"
 
 #include <atomic>
@@ -712,6 +713,106 @@ int main() {
         }
         failed |= !reverse_exclusive.get();
         router.end_exclusive();
+    }
+
+    {
+        lemon::Router router(&config, nullptr, nullptr);
+        auto reloaded_state =
+            std::make_shared<lemon::BlockingBackendState>();
+        reloaded_state->release_promise.set_value();
+        lemon::RouterModelLifecycleTestHook::set_backend(
+            router, reloaded_state);
+
+        auto runtime_pin_state =
+            std::make_shared<lemon::BlockingBackendState>();
+        lemon::RouterModelLifecycleTestHook::add_ready_server(
+            router, "updated.runtime-pin", nlohmann::json::object(),
+            runtime_pin_state);
+        router.set_model_pinned("updated.runtime-pin", true);
+        expect(
+            router.reload_pinned_model_after_update(
+                "updated.runtime-pin", model_info("updated.runtime-pin")),
+            "update reload takes ownership of a pinned model");
+        expect(
+            runtime_pin_state->unload_count.load() == 1,
+            "update reload unloads the backend serving the old files");
+        expect(
+            reloaded_state->load_entered_signaled.load(),
+            "update reload starts a backend on the new files");
+        expect(
+            lemon::RouterModelLifecycleTestHook::loaded_pinned(
+                router, "updated.runtime-pin"),
+            "update reload keeps a pinned model resident and pinned");
+        router.unload_model("updated.runtime-pin");
+
+        config.set({
+            {"pinned_models", nlohmann::json::array({"updated.saved-pin"})}});
+        auto saved_pin_state =
+            std::make_shared<lemon::BlockingBackendState>();
+        lemon::RouterModelLifecycleTestHook::add_ready_server(
+            router, "updated.saved-pin", nlohmann::json::object(),
+            saved_pin_state);
+        expect(
+            router.reload_pinned_model_after_update(
+                "updated.saved-pin", model_info("updated.saved-pin")),
+            "update reload takes ownership of a saved pin");
+        expect(
+            saved_pin_state->unload_count.load() == 1 &&
+                lemon::RouterModelLifecycleTestHook::loaded_pinned(
+                    router, "updated.saved-pin"),
+            "update reload keeps a saved pin resident and pinned");
+        router.unload_model("updated.saved-pin");
+        config.set({{"pinned_models", nlohmann::json::array()}});
+
+        auto unpinned_state =
+            std::make_shared<lemon::BlockingBackendState>();
+        lemon::RouterModelLifecycleTestHook::add_ready_server(
+            router, "updated.unpinned", nlohmann::json::object(),
+            unpinned_state);
+        expect(
+            !router.reload_pinned_model_after_update(
+                "updated.unpinned", model_info("updated.unpinned")),
+            "update reload leaves an unpinned model to upstream eviction");
+        expect(
+            unpinned_state->unload_count.load() == 0 &&
+                router.is_model_loaded("updated.unpinned"),
+            "update reload does not touch an unpinned model");
+        router.unload_model("updated.unpinned");
+
+        for (const std::string resident :
+             {"resident.pinned-a", "resident.pinned-b"}) {
+            lemon::RouterModelLifecycleTestHook::add_ready_server(
+                router, resident);
+            router.set_model_pinned(resident, true);
+        }
+        auto crowded_state =
+            std::make_shared<lemon::BlockingBackendState>();
+        lemon::RouterModelLifecycleTestHook::add_ready_server(
+            router, "updated.crowded", nlohmann::json::object(),
+            crowded_state);
+        router.set_model_pinned("updated.crowded", true);
+        bool reload_refused = false;
+        try {
+            router.reload_pinned_model_after_update(
+                "updated.crowded", model_info("updated.crowded"));
+        } catch (const lemon::SlotsPinnedException&) {
+            reload_refused = true;
+        }
+        expect(
+            reload_refused,
+            "update reload reports admission refusal to the caller");
+        expect(
+            lemon::RouterModelLifecycleTestHook::loaded_pinned(
+                router, "resident.pinned-a") &&
+                lemon::RouterModelLifecycleTestHook::loaded_pinned(
+                    router, "resident.pinned-b"),
+            "refused update reload never displaces pinned residents");
+        expect(
+            crowded_state->unload_count.load() == 1 &&
+                !router.is_model_loaded("updated.crowded"),
+            "refused update reload leaves no backend on the old files");
+        lemon::RouterModelLifecycleTestHook::clear_backend(router);
+        router.unload_model();
     }
 
     lemon::RuntimeConfig::set_global(nullptr);

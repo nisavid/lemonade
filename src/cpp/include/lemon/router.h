@@ -299,6 +299,11 @@ public:
                                    uint64_t generation);
 
     void unload_model(const std::string& model_name = "");  // Empty = unload all
+    // Unload a pinned model and reload it on its updated files through normal
+    // admission, which may refuse it. Returns false, leaving the model
+    // untouched, when it is not loaded and pinned.
+    bool reload_pinned_model_after_update(const std::string& model_name,
+                                          const ModelInfo& model_info);
     // Hold this guard across the corresponding registry or artifact mutation.
     // Its tombstone prevents a same-model load from preparing or publishing.
     [[nodiscard]] ModelRuntimeMutation begin_model_runtime_mutation(

@@ -515,6 +515,9 @@ Server::Server(std::shared_ptr<RuntimeConfig> config,
 
     model_manager_->set_model_updated_callback([this](const std::string& model_name) {
         if (router_ && router_->is_model_loaded(model_name)) {
+            if (!should_shutdown() && reload_updated_pinned_model(model_name)) {
+                return;
+            }
             LOG(INFO, "Server") << "Evicting updated model from memory: " << model_name << std::endl;
             router_->unload_model(model_name);
         }
@@ -927,6 +930,29 @@ void Server::load_pinned_model(const std::string& model_name) {
         return;
     }
     clear_pin_load_error(canonical_model_name);
+}
+
+bool Server::reload_updated_pinned_model(const std::string& model_name) {
+    ModelInfo info;
+    try {
+        info = model_manager_->get_model_info(model_name);
+    } catch (const std::exception&) {
+        return false;
+    }
+
+    try {
+        if (!router_->reload_pinned_model_after_update(model_name, info)) {
+            return false;
+        }
+        clear_pin_load_error(model_name);
+    } catch (const std::exception& e) {
+        LOG(WARNING, "Server") << "Failed to reload updated pinned model '"
+                               << model_name << "': " << e.what() << std::endl;
+        if (is_config_model_pinned(model_name)) {
+            set_pin_load_error(model_name, e.what());
+        }
+    }
+    return true;
 }
 
 void Server::set_pin_load_error(const std::string& model_name, const std::string& error) {
