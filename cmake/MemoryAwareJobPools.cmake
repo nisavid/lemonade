@@ -30,7 +30,10 @@
 # minus memory.current, not counting the file cache on the LRU lists
 # (active_file + inactive_file in memory.stat). The kernel reclaims that cache
 # before it lets the cgroup exceed memory.max, and MemAvailable counts it as
-# available. Without MemAvailable it is CMake's AVAILABLE_PHYSICAL_MEMORY.
+# available. cgroup v1 limits are not read. Without MemAvailable, as outside
+# Linux, it sizes nothing from memory and Ninja's default parallelism applies:
+# other platforms' free-memory figures leave out reclaimable memory and would
+# serialize builds that have room to spare.
 #
 #   jobs    = max(1, (available - reserve) / job budget)
 #   link    = max(1, jobs / 4)
@@ -86,10 +89,6 @@ function(_memory_aware_job_pools_available out_mib out_cgroup_limited)
         if(line MATCHES "^MemAvailable:[ \t]*([0-9]+) kB")
             math(EXPR avail "${CMAKE_MATCH_1} / 1024")
         endif()
-    endif()
-    if(avail STREQUAL "")
-        cmake_host_system_information(RESULT avail
-            QUERY AVAILABLE_PHYSICAL_MEMORY)
     endif()
     if(NOT avail MATCHES "^[0-9]+$" OR avail EQUAL 0)
         set(${out_mib} "" PARENT_SCOPE)
@@ -248,6 +247,11 @@ function(_memory_aware_job_pools)
     if((want_compile AND MEMORY_AWARE_COMPILE_JOBS EQUAL 0) OR
        (want_link AND MEMORY_AWARE_LINK_JOBS EQUAL 0))
         _memory_aware_job_pools_available(avail cgroup_limited)
+        if(avail STREQUAL "")
+            message(STATUS "MemoryAwareJobPools: no MemAvailable, so Ninja's "
+                "default parallelism applies; set MEMORY_AWARE_COMPILE_JOBS or "
+                "MEMORY_AWARE_LINK_JOBS to set a depth")
+        endif()
     endif()
 
     set(jobs 0)
