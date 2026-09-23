@@ -83,9 +83,20 @@ endfunction()
 function(_memory_aware_job_pools_available out_mib out_cgroup_limited)
     set(avail "")
     set(cgroup_limited FALSE)
+    # Tests point these at fixture trees.
+    set(proc "/proc")
+    if(DEFINED _MEMORY_AWARE_JOB_POOLS_PROC)
+        set(proc "${_MEMORY_AWARE_JOB_POOLS_PROC}")
+    endif()
+    set(cgroup_root "/sys/fs/cgroup")
+    if(DEFINED _MEMORY_AWARE_JOB_POOLS_CGROUP_ROOT)
+        set(cgroup_root "${_MEMORY_AWARE_JOB_POOLS_CGROUP_ROOT}")
+    endif()
 
-    if(EXISTS "/proc/meminfo")
-        file(STRINGS "/proc/meminfo" line REGEX "^MemAvailable:")
+    # EXISTS is false for a file this process cannot read, which file() would
+    # otherwise turn into a configure error.
+    if(EXISTS "${proc}/meminfo")
+        file(STRINGS "${proc}/meminfo" line REGEX "^MemAvailable:")
         if(line MATCHES "^MemAvailable:[ \t]*([0-9]+) kB")
             math(EXPR avail "${CMAKE_MATCH_1} / 1024")
         endif()
@@ -96,8 +107,8 @@ function(_memory_aware_job_pools_available out_mib out_cgroup_limited)
     endif()
 
     set(rel "")
-    if(EXISTS "/proc/self/cgroup")
-        file(STRINGS "/proc/self/cgroup" line REGEX "^0::/")
+    if(EXISTS "${proc}/self/cgroup")
+        file(STRINGS "${proc}/self/cgroup" line REGEX "^0::/")
         if(line MATCHES "^0::(/.*)$")
             # file(STRINGS) returns a list, which escapes a ";" in the path.
             string(REPLACE "\\;" ";" rel "${CMAKE_MATCH_1}")
@@ -106,7 +117,7 @@ function(_memory_aware_job_pools_available out_mib out_cgroup_limited)
     # Walk the path as a string: cgroup names can contain backslash escapes
     # (for example "\x2d"), which CMake's path commands treat as separators.
     while(NOT rel STREQUAL "")
-        set(dir "/sys/fs/cgroup${rel}")
+        set(dir "${cgroup_root}${rel}")
         if(EXISTS "${dir}/memory.max" AND EXISTS "${dir}/memory.current")
             file(STRINGS "${dir}/memory.max" max LIMIT_COUNT 1)
             file(STRINGS "${dir}/memory.current" current LIMIT_COUNT 1)
