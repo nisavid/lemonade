@@ -26,8 +26,11 @@
 # skips that step, so there include it after the project defines its pools.
 #
 # Available memory is MemAvailable from /proc/meminfo, lowered to the tightest
-# cgroup v2 headroom (memory.max - memory.current) of this process's cgroup and
-# its ancestors. Without MemAvailable it is CMake's AVAILABLE_PHYSICAL_MEMORY.
+# cgroup v2 headroom of this process's cgroup and its ancestors: memory.max
+# minus memory.current, not counting the file cache on the LRU lists
+# (active_file + inactive_file in memory.stat). The kernel reclaims that cache
+# before it lets the cgroup exceed memory.max, and MemAvailable counts it as
+# available. Without MemAvailable it is CMake's AVAILABLE_PHYSICAL_MEMORY.
 #
 #   jobs    = max(1, (available - reserve) / job budget)
 #   link    = max(1, jobs / 4)
@@ -106,8 +109,23 @@ function(_memory_aware_job_pools_available out_mib out_cgroup_limited)
         if(EXISTS "${dir}/memory.max" AND EXISTS "${dir}/memory.current")
             file(STRINGS "${dir}/memory.max" max LIMIT_COUNT 1)
             file(STRINGS "${dir}/memory.current" current LIMIT_COUNT 1)
+            # With the multi-generational LRU, cache that was used once can
+            # still show as active_file, so inactive_file alone undercounts.
+            set(file_cache 0)
+            if(EXISTS "${dir}/memory.stat")
+                file(STRINGS "${dir}/memory.stat" stat_lines
+                    REGEX "^(in)?active_file [0-9]+$")
+                foreach(stat_line IN LISTS stat_lines)
+                    string(REGEX REPLACE "^[a-z_]+ " "" bytes "${stat_line}")
+                    math(EXPR file_cache "${file_cache} + ${bytes}")
+                endforeach()
+            endif()
             if(max MATCHES "^[0-9]+$" AND current MATCHES "^[0-9]+$")
-                math(EXPR headroom "(${max} - ${current}) / 1048576")
+                math(EXPR used "${current} - ${file_cache}")
+                if(used LESS 0)
+                    set(used 0)
+                endif()
+                math(EXPR headroom "(${max} - ${used}) / 1048576")
                 if(headroom LESS 0)
                     set(headroom 0)
                 endif()
