@@ -90,6 +90,10 @@ run_case(host_memory MEMAVAILABLE_KB 16777216
     POOLS "${ours}" ${pooled}
     OUTPUT "compile=11 (available 16.0 GiB, reserve 2 GiB, 1 GiB/job)")
 run_case(project_budget MEMAVAILABLE_KB 16777216
+    "ARGS" "-DFIXTURE_BEFORE_CODE=set(MEMORY_AWARE_JOB_MIB 1536)"
+    POOLS "memory_aware_compile=7,memory_aware_link=2" ${pooled}
+    OUTPUT "1.5 GiB/job")
+run_case(cache_budget MEMAVAILABLE_KB 16777216
     ARGS -DMEMORY_AWARE_JOB_MIB=1536
     POOLS "memory_aware_compile=7,memory_aware_link=2" ${pooled}
     OUTPUT "1.5 GiB/job")
@@ -136,11 +140,20 @@ run_case(project_replaces_pools MEMAVAILABLE_KB 16777216
     "ARGS" "-DFIXTURE_AFTER_CODE=set_property(GLOBAL PROPERTY JOB_POOLS other=1)"
     POOLS "other=1,${ours}" ${pooled})
 
-# An unreadable limit is skipped instead of failing the configure. Root can
-# read it anyway.
-execute_process(COMMAND id -u OUTPUT_VARIABLE uid
-    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-if(NOT uid STREQUAL "0")
+# An unreadable limit is skipped instead of failing the configure. Root, and
+# Windows, where the chmod only clears the read-only attribute, can still read
+# a write-only file, so the case runs only where the probe below cannot.
+set(probe "${WORK_DIR}/write-only-probe")
+file(WRITE "${probe}" "")
+file(CHMOD "${probe}" PERMISSIONS OWNER_WRITE)
+set(readable EXISTS)
+if(NOT CMAKE_VERSION VERSION_LESS 3.29)
+    set(readable IS_READABLE)
+endif()
+if(${readable} "${probe}")
+    message(STATUS "unreadable_limit: skipped; this process can read a "
+        "write-only file")
+else()
     run_case(unreadable_limit MEMAVAILABLE_KB 16777216 CGROUP /a
         LIMIT "/a|4294967296|0|0" UNREADABLE /a/memory.max
         POOLS "${ours}" ${pooled})

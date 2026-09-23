@@ -1,5 +1,7 @@
-# The fixture configures with Ninja, which only a Ninja build is sure to have.
-if(BUILD_TESTING AND CMAKE_GENERATOR MATCHES "^Ninja")
+# The fixture configures with Ninja, which only a Ninja build is sure to have,
+# and uses cmake_language(DEFER) and file(CHMOD) from CMake 3.19.
+if(BUILD_TESTING AND CMAKE_GENERATOR MATCHES "^Ninja"
+   AND NOT CMAKE_VERSION VERSION_LESS 3.19)
     add_custom_target(memory_aware_job_pools_tests
         SOURCES
             ${CMAKE_CURRENT_LIST_DIR}/CMakeLists.txt

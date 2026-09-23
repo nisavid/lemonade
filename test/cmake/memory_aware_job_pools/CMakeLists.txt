@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.19)
 project(MemoryAwareJobPoolsFixture NONE)
 
+if(DEFINED FIXTURE_BEFORE_CODE)
+    cmake_language(EVAL CODE "${FIXTURE_BEFORE_CODE}")
+endif()
 include("${MODULE}")
 if(DEFINED FIXTURE_AFTER_CODE)
     cmake_language(EVAL CODE "${FIXTURE_AFTER_CODE}")
