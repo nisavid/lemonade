@@ -3605,7 +3605,7 @@ if(BUILD_TESTING)
     set_tests_properties(HttplibDetection_polluted_target_fatal PROPERTIES WILL_FAIL TRUE)
     add_cpp_ci_test(HttplibDetection_wolfssl_target CI OFF COMMAND ${CMAKE_COMMAND} -B ${CMAKE_CURRENT_BINARY_DIR}/test_httplib_wolfssl_target -S ${CMAKE_CURRENT_SOURCE_DIR}/test/cmake -DTEST_CASE=wolfssl_target -DDETECTION_MACRO_PATH=${CMAKE_SOURCE_DIR}/cmake/DetectSystemHttplib.cmake)
 endif()
-include(${CMAKE_CURRENT_SOURCE_DIR}/test/cmake/memory_aware_job_pools/tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/test/cmake/memory_aware_job_pools/tests.cmake OPTIONAL)
 
 set(_GPU_MEMORY_PLANNER_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_gpu_memory_planner.cpp")
 if(BUILD_TESTING AND EXISTS "${_GPU_MEMORY_PLANNER_TEST_SRC}")
