@@ -951,6 +951,9 @@ bool Server::reload_updated_pinned_model(const std::string& model_name) {
         if (is_config_model_pinned(model_name)) {
             set_pin_load_error(model_name, e.what());
         }
+        // A refused unload leaves the old runtime serving replaced files, so the
+        // caller must still evict it.
+        return !router_->is_model_loaded(model_name);
     }
     return true;
 }
