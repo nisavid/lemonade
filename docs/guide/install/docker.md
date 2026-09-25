@@ -21,7 +21,8 @@ docker run -d \
   -p 13305:13305 \
   -v lemonade-cache:/opt/lemonade/.cache/huggingface \
   -v lemonade-llama:/opt/lemonade/llama \
-  -v lemonade-recipe:/opt/lemonade/.cache/lemonade \
+  -v lemonade-data:/opt/lemonade/.cache/lemonade \
+  -v lemonade-config:/opt/lemonade/.config/lemonade \
   ghcr.io/lemonade-sdk/lemonade-server:latest
 ```
 
@@ -32,13 +33,14 @@ docker run -d \
 > ```bash
 > docker run --rm -v lemonade-cache:/v ubuntu:24.04 chown -R 10001:10001 /v
 > docker run --rm -v lemonade-llama:/v ubuntu:24.04 chown -R 10001:10001 /v
-> docker run --rm -v lemonade-recipe:/v ubuntu:24.04 chown -R 10001:10001 /v
+> docker run --rm -v lemonade-data:/v ubuntu:24.04 chown -R 10001:10001 /v
+> docker run --rm -v lemonade-config:/v ubuntu:24.04 chown -R 10001:10001 /v
 > ```
 >
 > Alternatively, remove the old volumes and let the new container recreate them:
 >
 > ```bash
-> docker volume rm lemonade-cache lemonade-llama lemonade-recipe
+> docker volume rm lemonade-cache lemonade-llama lemonade-data lemonade-config
 > ```
 
 ### Docker Run with a Specific Port
@@ -49,7 +51,8 @@ docker run -d \
   -p 4000:5000 \
   -v lemonade-cache:/opt/lemonade/.cache/huggingface \
   -v lemonade-llama:/opt/lemonade/llama \
-  -v lemonade-recipe:/opt/lemonade/.cache/lemonade \
+  -v lemonade-data:/opt/lemonade/.cache/lemonade \
+  -v lemonade-config:/opt/lemonade/.config/lemonade \
   ghcr.io/lemonade-sdk/lemonade-server:latest \
   ./lemond --host 0.0.0.0 --port 5000
 ```
@@ -58,18 +61,19 @@ docker run -d \
 
 ### Docker Run with CPU backend
 
-To use the CPU backend, create or modify `config.json` inside the `lemonade-recipe` volume, then start or restart the container. For a named Docker volume, one option is to write the file through a temporary helper container:
+To use the CPU backend, create or modify `config.json` inside the `lemonade-config` volume, then start or restart the container. For a named Docker volume, one option is to write the file through a temporary helper container. The server runs as UID 10001, so the helper also gives that user ownership of the file:
 
 ```bash
 docker run --rm \
-  -v lemonade-recipe:/root/.cache/lemonade \
-  alpine sh -c 'mkdir -p /root/.cache/lemonade && cat > /root/.cache/lemonade/config.json <<EOF
+  -v lemonade-config:/config \
+  alpine sh -c 'cat > /config/config.json <<EOF
 {
   "llamacpp": {
     "backend": "cpu"
   }
 }
-EOF'
+EOF
+chown -R 10001:10001 /config'
 ```
 
 The resulting file should contain:
@@ -90,24 +94,26 @@ docker run -d \
   -p 13305:13305 \
   -v lemonade-cache:/opt/lemonade/.cache/huggingface \
   -v lemonade-llama:/opt/lemonade/llama \
-  -v lemonade-recipe:/opt/lemonade/.cache/lemonade \
+  -v lemonade-data:/opt/lemonade/.cache/lemonade \
+  -v lemonade-config:/opt/lemonade/.config/lemonade \
   ghcr.io/lemonade-sdk/lemonade-server:latest
 ```
 
 ### Docker Run with AMD GPU Passthrough using ROCm
 
-To use the ROCm backend, create or modify `config.json` inside the `lemonade-recipe` volume, then start or restart the container. For a named Docker volume, one option is to write the file through a temporary helper container:
+To use the ROCm backend, create or modify `config.json` inside the `lemonade-config` volume, then start or restart the container. For a named Docker volume, one option is to write the file through a temporary helper container. The server runs as UID 10001, so the helper also gives that user ownership of the file:
 
 ```bash
 docker run --rm \
-  -v lemonade-recipe:/root/.cache/lemonade \
-  alpine sh -c 'mkdir -p /root/.cache/lemonade && cat > /root/.cache/lemonade/config.json <<EOF
+  -v lemonade-config:/config \
+  alpine sh -c 'cat > /config/config.json <<EOF
 {
   "llamacpp": {
     "backend": "rocm"
   }
 }
-EOF'
+EOF
+chown -R 10001:10001 /config'
 ```
 
 The resulting file should contain:
@@ -128,7 +134,8 @@ docker run -d \
   -p 13305:13305 \
   -v lemonade-cache:/opt/lemonade/.cache/huggingface \
   -v lemonade-llama:/opt/lemonade/llama \
-  -v lemonade-recipe:/opt/lemonade/.cache/lemonade \
+  -v lemonade-data:/opt/lemonade/.cache/lemonade \
+  -v lemonade-config:/opt/lemonade/.config/lemonade \
   --device=/dev/kfd \
   --device=/dev/dri \
   --group-add video \
@@ -156,7 +163,7 @@ docker run -d \
 
 Make sure you follow install steps described in [ROCm for WSL](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/wsl/howto_wsl.html)
 
-Create or modify the `config.json` file in the `lemonade-recipe` volume:
+Create or modify the `config.json` file in the `lemonade-config` volume:
 
 ```json
 {
@@ -174,7 +181,8 @@ docker run -d \
   -p 13305:13305 \
   -v lemonade-cache:/opt/lemonade/.cache/huggingface \
   -v lemonade-llama:/opt/lemonade/llama \
-  -v lemonade-recipe:/opt/lemonade/.cache/lemonade \
+  -v lemonade-data:/opt/lemonade/.cache/lemonade \
+  -v lemonade-config:/opt/lemonade/.config/lemonade \
   -v /usr/lib/wsl/lib:/usr/lib/wsl/lib:ro \
   -v /opt/rocm/lib:/opt/rocm/lib:ro \
   -e LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib/rocm_sysdeps/lib:/usr/lib/wsl/lib:/usr/lib \
@@ -203,8 +211,10 @@ services:
       - lemonade-cache:/opt/lemonade/.cache/huggingface
       # Persist llama binaries
       - lemonade-llama:/opt/lemonade/llama
-      # Persist model options and other backend binaries
-      - lemonade-recipe:/opt/lemonade/.cache/lemonade
+      # Persist backend binaries and runtime cache
+      - lemonade-data:/opt/lemonade/.cache/lemonade
+      # Persist config.json, jobs.json, recipe_options.json, etc.
+      - lemonade-config:/opt/lemonade/.config/lemonade
     restart: unless-stopped
     # For AMD GPU (ROCm) on Linux only, also add:
     # devices:
@@ -217,10 +227,11 @@ services:
 volumes:
   lemonade-cache:
   lemonade-llama:
-  lemonade-recipe:
+  lemonade-data:
+  lemonade-config:
 ```
 
-> To configure the llama.cpp backend (e.g., CPU instead of auto-detect), create a `config.json` file in the `lemonade-recipe` volume with:
+> To configure the llama.cpp backend (e.g., CPU instead of auto-detect), create a `config.json` file in the `lemonade-config` volume with:
 > ```json
 > {
 >   "llamacpp": {
@@ -393,7 +404,8 @@ ENV PATH="/opt/lemonade:${PATH}"
 RUN mkdir -p /opt/lemonade/llama/cpu \
     /opt/lemonade/llama/vulkan \
     /opt/lemonade/.cache/huggingface \
-    /opt/lemonade/.cache/lemonade && \
+    /opt/lemonade/.cache/lemonade \
+    /opt/lemonade/.config/lemonade && \
     chown -R lemonade:lemonade /opt/lemonade /run/lemonade
 
 USER lemonade
@@ -430,18 +442,21 @@ services:
       - lemonade-cache:/opt/lemonade/.cache/huggingface
       # Persist llama binaries
       - lemonade-llama:/opt/lemonade/llama
-      # Persist model options and other backend binaries
-      - lemonade-recipe:/opt/lemonade/.cache/lemonade
+      # Persist backend binaries and runtime cache
+      - lemonade-data:/opt/lemonade/.cache/lemonade
+      # Persist config.json, jobs.json, recipe_options.json, etc.
+      - lemonade-config:/opt/lemonade/.config/lemonade
     restart: unless-stopped
 
 volumes:
   lemonade-cache:
   lemonade-llama:
-  lemonade-recipe:
+  lemonade-data:
+  lemonade-config:
 
 ```
 
-> To configure the llama.cpp backend (e.g., CPU instead of auto-detect), create a `config.json` file in the `lemonade-recipe` volume with:
+> To configure the llama.cpp backend (e.g., CPU instead of auto-detect), create a `config.json` file in the `lemonade-config` volume with:
 > ```json
 > {
 >   "llamacpp": {

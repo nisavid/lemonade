@@ -18,6 +18,7 @@ namespace fs = std::filesystem;
 namespace lemon {
 
 std::shared_mutex ConfigFile::file_mutex_;
+std::mutex ConfigFile::overrides_mutex_;
 
 static json load_json_file(const fs::path& path) {
     std::ifstream file(path);
@@ -115,19 +116,11 @@ static bool migrate_deprecated_rocm_preview_channel(json& config) {
     return migrated;
 }
 
-json ConfigFile::load(const std::string& cache_dir) {
-    json defaults = get_defaults();
-    fs::path config_path = utils::path_from_utf8(cache_dir) / "config.json";
+json ConfigFile::load_raw(const std::string& config_dir) {
+    fs::path config_path = utils::path_from_utf8(config_dir) / "config.json";
 
     if (!fs::exists(config_path)) {
-        fs::path cache_path = utils::path_from_utf8(cache_dir);
-        if (!fs::exists(cache_path)) {
-            fs::create_directories(cache_path);
-        }
-        json config = migrate_from_env(defaults);
-        migrate_deprecated_rocm_preview_channel(config);
-        save(cache_dir, config);
-        return config;
+        return json::object();
     }
 
     // Clean up stale temp file from a previous interrupted save
@@ -146,9 +139,8 @@ json ConfigFile::load(const std::string& cache_dir) {
 
         std::ifstream file(config_path);
         if (!file.is_open()) {
-            LOG(WARNING) << "Could not open " << config_path.string()
-                        << ", using defaults" << std::endl;
-            return defaults;
+            LOG(WARNING) << "Could not open " << config_path.string() << std::endl;
+            return json::object();
         }
 
         try {
@@ -172,9 +164,41 @@ json ConfigFile::load(const std::string& cache_dir) {
             LOG(WARNING) << "  Renamed to " << backup.string() << std::endl;
         }
 
-        LOG(WARNING) << "  Using defaults." << std::endl;
-        save(cache_dir, defaults);
-        return defaults;
+        return json::object();
+    }
+
+    if (!loaded.is_object()) {
+        LOG(WARNING) << "Config in " << config_path.string()
+                     << " is not a JSON object, treating as empty" << std::endl;
+        return json::object();
+    }
+
+    return loaded;
+}
+
+json ConfigFile::load(const std::string& cache_dir, const std::string& config_dir) {
+    json defaults = get_defaults();
+    std::string effective_config_dir = config_dir.empty() ? utils::get_config_dir() : config_dir;
+    fs::path config_path = utils::path_from_utf8(effective_config_dir) / "config.json";
+
+    const char* env_origins = std::getenv("LEMONADE_ALLOWED_ORIGINS");
+
+    const bool first_create = !fs::exists(config_path);
+    json loaded = load_raw(effective_config_dir);
+    if (loaded.empty()) {
+        json new_cfg = first_create ? migrate_from_env(defaults) : json::object();
+        if (env_origins && *env_origins != '\0') {
+            new_cfg["allowed_origins"] = std::string(env_origins);
+            LOG(WARNING) << "Migrating deprecated LEMONADE_ALLOWED_ORIGINS environment variable to config.json (allowed_origins="
+                         << env_origins << "). The LEMONADE_ALLOWED_ORIGINS environment variable is deprecated and will be removed in a future release."
+                         << std::endl;
+        }
+        if (!new_cfg.empty()) {
+            save(effective_config_dir, new_cfg);
+        }
+        json merged = utils::JsonUtils::merge(defaults, new_cfg);
+        migrate_deprecated_rocm_preview_channel(merged);
+        return merged;
     }
 
     // Capture the original config version BEFORE merge, so that migration
@@ -184,17 +208,37 @@ json ConfigFile::load(const std::string& cache_dir) {
     bool had_legacy_no_broadcast = loaded.contains("no_broadcast");
     json normalized_loaded = normalize_legacy_keys(loaded);
 
-    // Deep-merge: user values override defaults, missing fields filled from defaults.
-    json merged = utils::JsonUtils::merge(defaults, normalized_loaded);
-
     // Apply migrations if the config is older than the current version.
     // The inline config_migrate() handles version bumping and field removal.
-    bool migrated = config_migrate(merged, defaults, original_version);
+    bool migrated = config_migrate(normalized_loaded, defaults, original_version);
 
     if (had_legacy_no_broadcast) {
         LOG(INFO) << "Migrating config: no_broadcast=" << loaded["no_broadcast"]
-                  << " -> broadcast=" << merged["broadcast"] << std::endl;
+                  << " -> broadcast=" << normalized_loaded["broadcast"] << std::endl;
         migrated = true;
+    }
+
+    if (env_origins && *env_origins != '\0') {
+        if (config_migrate_allowed_origins_env(normalized_loaded, env_origins)) {
+            LOG(WARNING) << "Migrating deprecated LEMONADE_ALLOWED_ORIGINS environment variable to config.json (allowed_origins="
+                         << env_origins << "). The LEMONADE_ALLOWED_ORIGINS environment variable is deprecated and will be removed in a future release."
+                         << std::endl;
+            migrated = true;
+        } else {
+            std::string config_origins = normalized_loaded.contains("allowed_origins") && normalized_loaded["allowed_origins"].is_string()
+                                             ? normalized_loaded["allowed_origins"].get<std::string>()
+                                             : "";
+            if (config_origins != env_origins) {
+                LOG(WARNING) << "The LEMONADE_ALLOWED_ORIGINS environment variable ('" << env_origins << "') conflicts with "
+                             << "the 'allowed_origins' setting in config.json ('" << config_origins << "') and takes precedence at runtime. "
+                             << "LEMONADE_ALLOWED_ORIGINS is deprecated; please unset or remove the environment variable to use your config.json setting."
+                             << std::endl;
+            } else {
+                LOG(WARNING) << "The LEMONADE_ALLOWED_ORIGINS environment variable is deprecated and will be removed in a future release. "
+                             << "Please unset or remove LEMONADE_ALLOWED_ORIGINS as 'allowed_origins' is already configured in config.json."
+                             << std::endl;
+            }
+        }
     }
 
     if (migrated) {
@@ -208,24 +252,27 @@ json ConfigFile::load(const std::string& cache_dir) {
         }
     }
 
-    migrated = migrate_deprecated_rocm_preview_channel(merged) || migrated;
+    migrated = migrate_deprecated_rocm_preview_channel(normalized_loaded) || migrated;
     if (migrated) {
-        save(cache_dir, merged);
+        save(effective_config_dir, normalized_loaded);
     }
 
+    // Deep-merge: user values override defaults, missing fields filled from defaults.
+    json merged = utils::JsonUtils::merge(defaults, normalized_loaded);
+    migrate_deprecated_rocm_preview_channel(merged);
     return merged;
 }
 
-void ConfigFile::save(const std::string& cache_dir, const json& config) {
+void ConfigFile::save(const std::string& config_dir, const json& config) {
     std::unique_lock lock(file_mutex_);
 
-    fs::path cache_path = utils::path_from_utf8(cache_dir);
-    if (!fs::exists(cache_path)) {
-        fs::create_directories(cache_path);
+    fs::path config_dir_path = utils::path_from_utf8(config_dir);
+    if (!fs::exists(config_dir_path)) {
+        fs::create_directories(config_dir_path);
     }
 
-    fs::path config_path = cache_path / "config.json";
-    fs::path temp_path = cache_path / "config.json.tmp";
+    fs::path config_path = config_dir_path / "config.json";
+    fs::path temp_path = config_dir_path / "config.json.tmp";
 
     {
         std::ofstream file(temp_path);
@@ -248,6 +295,13 @@ void ConfigFile::save(const std::string& cache_dir, const json& config) {
         }
         fs::remove(temp_path);
     }
+}
+
+void ConfigFile::save_overrides(const std::string& config_dir, const json& overrides) {
+    std::lock_guard<std::mutex> lock(overrides_mutex_);
+    json user_cfg = utils::JsonUtils::merge(load_raw(config_dir), overrides);
+    utils::JsonUtils::prune_matching(user_cfg, get_defaults());
+    save(config_dir, user_cfg);
 }
 
 // ---------------------------------------------------------------------------
@@ -374,7 +428,7 @@ json ConfigFile::migrate_from_env(const json& defaults) {
                   << oss.str() << std::endl;
     }
 
-    return utils::JsonUtils::merge(defaults, overlay);
+    return overlay;
 }
 
 } // namespace lemon
