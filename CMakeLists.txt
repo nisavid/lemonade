@@ -8,6 +8,11 @@ endif()
 project(lemon_cpp VERSION 11.9.0)
 
 include(CTest)
+# The heaviest compiles in this tree peak near 1.6 GiB.
+if(NOT DEFINED MEMORY_AWARE_JOB_MIB)
+    set(MEMORY_AWARE_JOB_MIB 1536)
+endif()
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/MemoryAwareJobPools.cmake)
 
 # Aggregate build target for the C++ tests selected by packaging CI.
 # Platform-specific tests add themselves only inside their existing if() block.
@@ -3859,6 +3864,7 @@ if(BUILD_TESTING)
     set_tests_properties(HttplibDetection_polluted_target_fatal PROPERTIES WILL_FAIL TRUE)
     add_cpp_ci_test(HttplibDetection_wolfssl_target CI OFF COMMAND ${CMAKE_COMMAND} -B ${CMAKE_CURRENT_BINARY_DIR}/test_httplib_wolfssl_target -S ${CMAKE_CURRENT_SOURCE_DIR}/test/cmake -DTEST_CASE=wolfssl_target -DDETECTION_MACRO_PATH=${CMAKE_SOURCE_DIR}/cmake/DetectSystemHttplib.cmake)
 endif()
+include(${CMAKE_CURRENT_SOURCE_DIR}/test/cmake/memory_aware_job_pools/tests.cmake OPTIONAL)
 
 set(_GPU_MEMORY_PLANNER_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/test_gpu_memory_planner.cpp")
 if(BUILD_TESTING AND EXISTS "${_GPU_MEMORY_PLANNER_TEST_SRC}")
