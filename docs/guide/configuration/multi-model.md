@@ -146,6 +146,7 @@ To prevent frequently used models from being auto-evicted by the LRU policy, you
   ```
   Or via a POST request to `/internal/pin`.
 - **Pre-emptive Warnings:** The CLI checks `/api/v1/health` before loading a new model. If all slots for that model type are occupied by pinned models, the CLI will output a pre-emptive warning alerting you that loading will fail.
+- **Model Updates:** When a pull, sync, or automatic update changes a loaded model's files, Lemonade unloads it. A pinned model is then reloaded on the new files under the normal admission rules. If admission refuses the reload, a saved pin (`pinned_models`) is kept and `GET /api/v1/pins` reports the reason as `load_error`; a runtime pin from `--pinned` or `/internal/pin` ends with the unloaded model.
 - **Capacity Failures:** If every model in the target `(residency class, model type)` pool is pinned and another model needs that pool, the load request fails with a `409 Conflict` HTTP status containing a `slots_pinned_error` code. You must unpin or unload a model from that pool to free its slot.
 
 ## Per-Model Settings

@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import platform
 import subprocess
@@ -49,9 +50,9 @@ def shutdown_existing_server():
 
 
 def start_server(env_overrides=None):
-    """Start lemond with given env overrides in an isolated temp cache dir.
+    """Start lemond with given env overrides in isolated temp cache and config dirs.
 
-    Returns (subprocess.Popen, cache_dir).
+    Returns (subprocess.Popen, cache_dir, config_dir).
     """
     shutdown_existing_server()
     env = os.environ.copy()
@@ -59,7 +60,11 @@ def start_server(env_overrides=None):
     for k in list(env.keys()):
         if k.startswith("LEMONADE_"):
             del env[k]
+    # systemd exports these; lemond would then drain the real legacy cache.
+    env.pop("CACHE_DIRECTORY", None)
+    env.pop("STATE_DIRECTORY", None)
     cache_dir = tempfile.mkdtemp(prefix="lemon_test_")
+    config_dir = tempfile.mkdtemp(prefix="lemon_config_")
     runtime_dir = tempfile.mkdtemp(prefix="lemon_runtime_")
     os.chmod(runtime_dir, 0o700)
     env["LEMONADE_CACHE_DIR"] = cache_dir
@@ -71,12 +76,12 @@ def start_server(env_overrides=None):
         env.update(env_overrides)
 
     proc = subprocess.Popen(
-        [_lemond_binary],
+        [_lemond_binary, cache_dir, config_dir],
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    return proc, cache_dir
+    return proc, cache_dir, config_dir
 
 
 def stop_server(proc):
@@ -145,7 +150,7 @@ class TestConfigEnvVars(unittest.TestCase):
                     "LEMONADE_FLM_ARGS": "--socket 20",
                 }
             )
-        cls.proc, cls.cache_dir = start_server(cls.env)
+        cls.proc, cls.cache_dir, cls.config_dir = start_server(cls.env)
         wait_for_server(port=PORT)
         cls.snapshot = get_config()
 
@@ -208,6 +213,11 @@ class TestConfigEnvVars(unittest.TestCase):
     def test_flm_args(self):
         self.assertEqual(self.snapshot["flm"]["args"], "--socket 20")
 
+    def test_env_migration_persists_to_isolated_config_dir(self):
+        with open(os.path.join(self.config_dir, "config.json"), encoding="utf-8") as f:
+            persisted = json.load(f)
+        self.assertEqual(persisted.get("log_level"), "debug")
+
 
 # ---------------------------------------------------------------------------
 # Test: LEMONADE_API_KEY
@@ -222,7 +232,9 @@ class TestApiKeyEnvVar(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.proc, cls.cache_dir = start_server({"LEMONADE_API_KEY": cls.API_KEY})
+        cls.proc, cls.cache_dir, cls.config_dir = start_server(
+            {"LEMONADE_API_KEY": cls.API_KEY}
+        )
         # /live is unauthenticated, use it to detect readiness
         wait_for_server(port=PORT)
 
@@ -277,7 +289,7 @@ class TestAdminApiKeyEnvVar(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.proc, cls.cache_dir = start_server(
+        cls.proc, cls.cache_dir, cls.config_dir = start_server(
             {"LEMONADE_ADMIN_API_KEY": cls.ADMIN_API_KEY}
         )
         wait_for_server(port=PORT)
@@ -339,7 +351,7 @@ class TestBothApiKeysEnvVar(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.proc, cls.cache_dir = start_server(
+        cls.proc, cls.cache_dir, cls.config_dir = start_server(
             {
                 "LEMONADE_API_KEY": cls.REGULAR_API_KEY,
                 "LEMONADE_ADMIN_API_KEY": cls.ADMIN_API_KEY,
@@ -418,7 +430,7 @@ class TestDefaults(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.proc, cls.cache_dir = start_server()
+        cls.proc, cls.cache_dir, cls.config_dir = start_server()
         wait_for_server(port=PORT)
         cls.snapshot = get_config()
 
@@ -483,7 +495,9 @@ class TestWrongGgufVariantNotDownloaded(unittest.TestCase):
         with open(os.path.join(snapshot_dir, "WRONG-variant.gguf"), "wb") as f:
             f.write(b"\x00" * 64)
 
-        cls.proc, cls.cache_dir = start_server({"HF_HUB_CACHE": cls.fake_hf_cache})
+        cls.proc, cls.cache_dir, cls.config_dir = start_server(
+            {"HF_HUB_CACHE": cls.fake_hf_cache}
+        )
         wait_for_server(port=PORT)
 
     @classmethod

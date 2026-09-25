@@ -125,9 +125,17 @@ inline CustomArgsMap build_custom_args_map(const std::vector<std::string>& token
 
     for (const auto& token : tokens) {
         if (is_custom_arg_flag(token)) {
-            // This is a flag; start a new entry
-            result[token].push_back({});
-            last_flag = token;
+            // This is a flag; start a new entry. Normalize --flag=value so it
+            // has the same precedence key as --flag value. An '=' inside a
+            // kept quoted segment belongs to the value, not the flag.
+            size_t eq_pos = token.find_first_of("=\"'");
+            if (eq_pos != std::string::npos && token[eq_pos] == '=') {
+                last_flag = token.substr(0, eq_pos);
+                result[last_flag].push_back({token.substr(eq_pos + 1)});
+            } else {
+                result[token].push_back({});
+                last_flag = token;
+            }
         } else if (!last_flag.empty()) {
             // Append to the most recently seen flag
             result[last_flag].back().push_back(token);

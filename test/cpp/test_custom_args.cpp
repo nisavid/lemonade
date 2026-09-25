@@ -3,17 +3,20 @@
 // Run with: ctest --test-dir build -R '^CustomArgsTest$' --output-on-failure
 
 #include "lemon/utils/custom_args.h"
+#include "lemon/utils/recipe_arg_resolver.h"
 
 #include <cstdio>
 #include <map>
 #include <string>
 #include <vector>
 
+using lemon::utils::CustomArgsRequestState;
 using lemon::utils::build_custom_args_map;
 using lemon::utils::custom_args_has_flag;
 using lemon::utils::map_to_args_string;
 using lemon::utils::merge_args_maps;
 using lemon::utils::parse_custom_args;
+using lemon::utils::resolve_scoped_custom_args;
 
 using ArgMap = lemon::utils::CustomArgsMap;
 
@@ -273,11 +276,21 @@ int main() {
         merge_layers("--reverse-prompt '-User:' --threads 4", "--ctx-size 4096 --n-gpu-layers 99"),
         {"--ctx-size", "4096", "--n-gpu-layers", "99", "--reverse-prompt", "-User:",
          "--threads", "4"});
+    const std::string end_prompt = merge_layers("--reverse-prompt '--END'", "--ctx-size 4096");
+    failures += !expect_merged_argv(
+        "quoted value that looks like a long flag stays attached to its flag", end_prompt,
+        {"--ctx-size", "4096", "--reverse-prompt", "--END"});
+    failures += !expect_same_args("quoted long-flag-like value is idempotent across merges",
+                                  merge_layers(end_prompt, "--ctx-size 4096"), end_prompt);
     failures += !expect_merged_argv_one_of(
         "equals-form flag keeps its quoted spaced value intact",
         merge_layers("--chat-template-kwargs='{\"enable_thinking\": false}'", global),
         {{"--chat-template-kwargs={\"enable_thinking\": false}", "--threads", "8"},
          {"--chat-template-kwargs", "{\"enable_thinking\": false}", "--threads", "8"}});
+    failures += !expect_merged_argv(
+        "equals inside a quoted segment of a flag token does not split the flag",
+        merge_layers("--prompt-prefix\"a=b c\"", global),
+        {"--prompt-prefixa=b c", "--threads", "8"});
     failures += !expect_merged_argv(
         "unterminated quote keeps the rest of its layer as one value",
         merge_layers("--system-prompt \"be brief --temp 0.1", global),
@@ -290,6 +303,24 @@ int main() {
     failures += !expect_same_args("empty quoted value is idempotent across merges",
                                   merge_layers(merge_layers(empty_value, global), global),
                                   merge_layers(empty_value, global));
+
+    const std::string qwen35_arch =
+        "--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.00 --repeat-penalty 1.0 "
+        "--chat-template-kwargs '{\"preserve_thinking\":true}'";
+    failures += !expect_merged_argv(
+        "qwen35 architecture JSON reaches argv as one unquoted argument over global args",
+        resolve_scoped_custom_args({global, qwen35_arch, "", "",
+                                    CustomArgsRequestState::Omitted, "", true}),
+        {"--chat-template-kwargs", "{\"preserve_thinking\":true}", "--min-p", "0.00",
+         "--repeat-penalty", "1.0", "--temp", "1.0", "--threads", "8", "--top-k", "20",
+         "--top-p", "0.95"});
+    failures += !expect_merged_argv(
+        "qwen35 architecture JSON stays one unquoted argument under model and global args",
+        resolve_scoped_custom_args({global, qwen35_arch, "", "--ctx-size 8192",
+                                    CustomArgsRequestState::Omitted, "", true}),
+        {"--chat-template-kwargs", "{\"preserve_thinking\":true}", "--ctx-size", "8192",
+         "--min-p", "0.00", "--repeat-penalty", "1.0", "--temp", "1.0", "--threads", "8",
+         "--top-k", "20", "--top-p", "0.95"});
 
     std::printf("\n%d failures\n", failures);
     return failures == 0 ? 0 : 1;
