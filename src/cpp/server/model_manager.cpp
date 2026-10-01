@@ -3882,7 +3882,9 @@ std::map<std::string, ModelInfo> ModelManager::filter_models_by_backend(
                          hardware["amd_npu"].value("available", false);
 
     double largest_mem_pool_gb = 0.0;
+    double largest_single_pool_gb = 0.0;
     double curr_mem_pool_gb = 0.0;
+    double curr_single_pool_gb = 0.0;
 
     for (const auto& [dev_type, devices] : hardware.items()) {
         // Because we have mixed types this just makes every device_type an array.
@@ -3893,19 +3895,23 @@ std::map<std::string, ModelInfo> ModelManager::filter_models_by_backend(
                 continue;
 
             if (dev_type == "amd_gpu") {
+                const double vram_gb = dev.value("vram_gb", 0.0);
+                const double virtual_mem_gb = dev.value("virtual_mem_gb", 0.0);
+                const bool is_integrated_gpu = dev.value("gpu_type", "") == "integrated";
                 curr_mem_pool_gb = gpu_memory_capacity_from_pools_gb(
-                    dev.value("vram_gb", 0.0),
-                    dev.value("virtual_mem_gb", 0.0),
-                    dev.value("gpu_type", "") == "integrated",
-                    enable_dgpu_gtt);
+                    vram_gb, virtual_mem_gb, is_integrated_gpu, enable_dgpu_gtt);
+                curr_single_pool_gb = gpu_memory_single_pool_gb(
+                    vram_gb, virtual_mem_gb, is_integrated_gpu, enable_dgpu_gtt);
             } else {
                 // Expand this later to accommodate mixed pools
                 MemoryAllocBehavior dev_mem_alloc_behavior = MemoryAllocBehavior::Hardware;
                 if (enable_dgpu_gtt)
                     dev_mem_alloc_behavior = MemoryAllocBehavior::Unified;
                 curr_mem_pool_gb = get_max_memory_of_device(dev, dev_mem_alloc_behavior);
+                curr_single_pool_gb = curr_mem_pool_gb;
             }
             largest_mem_pool_gb = largest_mem_pool_gb < curr_mem_pool_gb ? curr_mem_pool_gb : largest_mem_pool_gb;
+            largest_single_pool_gb = largest_single_pool_gb < curr_single_pool_gb ? curr_single_pool_gb : largest_single_pool_gb;
         }
     }
 
@@ -4005,16 +4011,16 @@ std::map<std::string, ModelInfo> ModelManager::filter_models_by_backend(
                 // full model need not fit in memory — only its resident working
                 // set, and only in the device's own pool. ROCm cannot address
                 // system RAM plus the iGPU carveout as one pool; it gets the
-                // larger of the pools (largest_mem_pool_gb), so that is the ceiling.
+                // larger of the pools (largest_single_pool_gb), so that is the ceiling.
                 const double working_set = streaming_working_set_gb(info.min_resident_gb, info.size);
-                if (streaming_model_exceeds_pool(working_set, largest_mem_pool_gb)) {
+                if (streaming_model_exceeds_pool(working_set, largest_single_pool_gb)) {
                     filter_out = true;
                     size_filtered_recipes.insert(recipe);
                     std::ostringstream oss;
                     oss << std::fixed << std::setprecision(1);
                     oss << "This model streams from disk but needs about " << working_set
                         << " GB resident in GPU memory, and this device's largest memory "
-                        << "pool is only " << largest_mem_pool_gb << " GB.";
+                        << "pool is only " << largest_single_pool_gb << " GB.";
                     filter_reason = oss.str();
                 }
             } else if (system_ram_gb > 0.0 && info.size > max_model_size_gb) {
