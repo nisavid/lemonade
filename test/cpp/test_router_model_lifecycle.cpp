@@ -5,9 +5,11 @@
 #include <atomic>
 #include <chrono>
 #include <exception>
+#include <functional>
 #include <future>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -146,6 +148,20 @@ struct RouterModelLifecycleTestHook {
         std::lock_guard<std::mutex> lock(router.load_mutex_);
         auto* server = router.find_server_by_model_name(model_name);
         return server ? server->get_state() : ModelState::UNLOADED;
+    }
+
+    static void set_available_memory_sampler(
+        Router& router,
+        std::function<double(DeviceType, GpuMemoryVendor, const std::string&)>
+            sampler) {
+        router.available_memory_sampler_ = std::move(sampler);
+    }
+
+    static double sample_available_memory(
+        Router& router,
+        DeviceType device,
+        const RecipeOptions& options) {
+        return router.sample_available_memory_gb(device, options);
     }
 
 };
@@ -813,6 +829,62 @@ int main() {
             "refused update reload leaves no backend on the old files");
         lemon::RouterModelLifecycleTestHook::clear_backend(router);
         router.unload_model();
+    }
+
+    {
+        lemon::Router router(&config, nullptr, nullptr);
+        lemon::DeviceType sampled_device = lemon::DEVICE_NONE;
+        lemon::GpuMemoryVendor sampled_vendor = lemon::GpuMemoryVendor::Any;
+        std::string sampled_gpu_device = "unset";
+        lemon::RouterModelLifecycleTestHook::set_available_memory_sampler(
+            router,
+            [&](lemon::DeviceType device,
+                lemon::GpuMemoryVendor vendor,
+                const std::string& gpu_device) {
+                sampled_device = device;
+                sampled_vendor = vendor;
+                sampled_gpu_device = gpu_device;
+                return 42.0;
+            });
+
+        const double rocm_available_gb =
+            lemon::RouterModelLifecycleTestHook::sample_available_memory(
+                router, lemon::DEVICE_GPU,
+                lemon::RecipeOptions(
+                    "llamacpp",
+                    nlohmann::json{{"llamacpp_backend", "rocm"},
+                                   {"llamacpp_device", "ROCm1"}}));
+        expect(
+            rocm_available_gb == 42.0 &&
+                sampled_device == lemon::DEVICE_GPU,
+            "auto-tune sampling reaches the available-memory sampler");
+        expect(
+            sampled_vendor == lemon::GpuMemoryVendor::Amd &&
+                sampled_gpu_device == "ROCm1",
+            "auto-tune sampling passes the selected ROCm vendor and device");
+
+        lemon::RouterModelLifecycleTestHook::sample_available_memory(
+            router, lemon::DEVICE_GPU,
+            lemon::RecipeOptions(
+                "llamacpp",
+                nlohmann::json{{"llamacpp_backend", "cuda"},
+                               {"llamacpp_device", "CUDA0"}}));
+        expect(
+            sampled_vendor == lemon::GpuMemoryVendor::Nvidia &&
+                sampled_gpu_device == "CUDA0",
+            "auto-tune sampling passes the selected CUDA vendor and device");
+
+        lemon::RouterModelLifecycleTestHook::sample_available_memory(
+            router, lemon::DEVICE_CPU,
+            lemon::RecipeOptions(
+                "llamacpp",
+                nlohmann::json{{"llamacpp_backend", "rocm"},
+                               {"llamacpp_device", "ROCm1"}}));
+        expect(
+            sampled_device == lemon::DEVICE_CPU &&
+                sampled_vendor == lemon::GpuMemoryVendor::Any &&
+                sampled_gpu_device.empty(),
+            "CPU auto-tune sampling carries no GPU target");
     }
 
     lemon::RuntimeConfig::set_global(nullptr);

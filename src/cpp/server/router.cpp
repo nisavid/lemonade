@@ -1226,12 +1226,17 @@ double Router::sample_total_gpu_occupancy_gb() const {
     }
 }
 
-double Router::sample_available_memory_gb(DeviceType device) const {
+double Router::sample_available_memory_gb(DeviceType device,
+                                          const RecipeOptions& options) const {
+    GpuMemoryTarget target;
+    if (device & DEVICE_GPU) {
+        target = gpu_memory_target_for_options(options);
+    }
     if (!available_memory_sampler_) {
-        return get_available_memory_gb(device);
+        return get_available_memory_gb(device, target.vendor, target.device);
     }
     try {
-        return available_memory_sampler_(device);
+        return available_memory_sampler_(device, target.vendor, target.device);
     } catch (const std::exception& e) {
         LOG(WARNING, "Router") << "Failed to sample available memory: "
                                 << e.what() << std::endl;
@@ -1537,7 +1542,7 @@ void Router::load_model_impl(
             ModelInfo preflight_info = model_info;
             preflight_info.device = device_type;
             const double available_memory_gb =
-                sample_available_memory_gb(device_type);
+                sample_available_memory_gb(device_type, effective_options);
             bound_npu_auto_ctx = resolve_auto_ctx_size(
                 effective_options, preflight_info, available_memory_gb);
             if (*bound_npu_auto_ctx == AUTO_CTX_FALLBACK &&
@@ -1725,7 +1730,7 @@ void Router::load_model_impl(
             ? *bound_npu_auto_ctx
             : resolve_auto_ctx_size(
                   effective_options, auto_tune_info,
-                  sample_available_memory_gb(device_type));
+                  sample_available_memory_gb(device_type, effective_options));
         const bool ctx_size_auto = auto_ctx != -2;
         if (auto_ctx > 0) {
             LOG(INFO, "Router") << "Auto-tune ctx_size resolved to " << auto_ctx << std::endl;

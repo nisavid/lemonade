@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <optional>
+#include <string>
 #include <lemon/gpu_memory_selection.h>
 #include <lemon/model_manager.h>
 #include <lemon/system_info.h>
@@ -82,6 +83,25 @@ static double get_used_memory_gb(DeviceType device_type) {
     if (ram_used > 0) return ram_used;
 
     return 0.0;
+}
+
+struct GpuMemoryTarget {
+    GpuMemoryVendor vendor = GpuMemoryVendor::Any;
+    std::string device;
+};
+
+/// The GPU vendor and device selected by a recipe's `<recipe>_backend` and
+/// `<recipe>_device` options, for get_available_memory_gb.
+inline GpuMemoryTarget gpu_memory_target_for_options(const RecipeOptions& options) {
+    const std::string recipe = options.get_recipe();
+    const json backend_json = options.get_option(recipe + "_backend");
+    const json device_json = options.get_option(recipe + "_device");
+    const std::string backend =
+        backend_json.is_string() ? backend_json.get<std::string>() : std::string();
+    GpuMemoryTarget target;
+    if (device_json.is_string()) target.device = device_json.get<std::string>();
+    target.vendor = gpu_memory_vendor_for_target(backend, target.device);
+    return target;
 }
 
 /// Extract available memory (in GB) for the device targeted by the model.
@@ -310,17 +330,10 @@ inline int64_t resolve_auto_ctx_size(const RecipeOptions& effective_options,
 
 inline int64_t resolve_auto_ctx_size(const RecipeOptions& effective_options,
                                      const ModelInfo& model_info) {
-    std::string backend;
-    std::string device;
-    const std::string recipe = effective_options.get_recipe();
-    const json backend_json = effective_options.get_option(recipe + "_backend");
-    const json device_json = effective_options.get_option(recipe + "_device");
-    if (backend_json.is_string()) backend = backend_json.get<std::string>();
-    if (device_json.is_string()) device = device_json.get<std::string>();
+    const GpuMemoryTarget target = gpu_memory_target_for_options(effective_options);
     return resolve_auto_ctx_size(
         effective_options, model_info,
-        get_available_memory_gb(
-            model_info.device, gpu_memory_vendor_for_target(backend, device), device));
+        get_available_memory_gb(model_info.device, target.vendor, target.device));
 }
 
 } // namespace lemon
