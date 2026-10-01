@@ -9,6 +9,7 @@ permissions: {}
 
 jobs:
   create-release-branch:
+    if: ${{ github.repository == 'lemonade-sdk/lemonade' }}
     runs-on: ubuntu-latest
     steps:
       # release-v* branches only accept pushes from release admins, and a push

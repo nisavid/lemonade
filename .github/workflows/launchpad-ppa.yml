@@ -390,7 +390,10 @@ jobs:
     needs: [prepare-matrix, package]
     permissions:
       contents: read
-    if: ${{ startsWith(github.ref, 'refs/heads/release-v') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    if: >-
+      github.repository == 'lemonade-sdk/lemonade' &&
+      startsWith(github.ref, 'refs/heads/release-v') &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/upload.yml
     with:
       target: ppa:lemonade-team/candidate

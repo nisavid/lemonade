@@ -44,7 +44,9 @@ env:
 jobs:
   source-tarball:
     name: Build Source Tarball
-    if: startsWith(github.ref, 'refs/heads/release-v') || startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      github.repository == 'lemonade-sdk/lemonade' &&
+      (startsWith(github.ref, 'refs/heads/release-v') || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
@@ -2868,7 +2870,9 @@ jobs:
     # A stable tag points at a commit that already had a candidate build, so its artifacts
     # exist and describe the same commit range; regenerating them would only reword what the
     # release admin already read. The release job tolerates this job being skipped.
-    if: startsWith(github.ref, 'refs/heads/release-v')
+    if: >-
+      github.repository == 'lemonade-sdk/lemonade' &&
+      startsWith(github.ref, 'refs/heads/release-v')
     runs-on: [self-hosted, stx-halo, Linux, X64, lemon-prod]
     timeout-minutes: 180
     # The workflow-level grant is `contents: write` and nothing else. repo-manager reads this
