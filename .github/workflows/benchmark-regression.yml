@@ -52,6 +52,7 @@ jobs:
   # =========================================================================
   setup:
     name: Build fork matrix
+    if: ${{ github.repository == 'lemonade-sdk/lemonade' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -526,7 +527,7 @@ jobs:
   report:
     name: Aggregate and report
     needs: bench
-    if: always() && needs.bench.result != 'skipped'
+    if: github.repository == 'lemonade-sdk/lemonade' && always() && needs.bench.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

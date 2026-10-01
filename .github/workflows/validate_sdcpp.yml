@@ -512,6 +512,7 @@ jobs:
       contents: write
       pull-requests: write
     if: >-
+      github.repository == 'lemonade-sdk/lemonade' &&
       (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
       needs.validate.result == 'success' &&
       needs.verify-cuda-assets.result == 'success'
