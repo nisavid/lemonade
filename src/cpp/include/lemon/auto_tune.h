@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <iomanip>
+#include <optional>
+#include <string>
+#include <lemon/gpu_memory_selection.h>
 #include <lemon/model_manager.h>
 #include <lemon/system_info.h>
 #include <lemon/system_metrics_platform.h>
@@ -81,11 +85,32 @@ static double get_used_memory_gb(DeviceType device_type) {
     return 0.0;
 }
 
+struct GpuMemoryTarget {
+    GpuMemoryVendor vendor = GpuMemoryVendor::Any;
+    std::string device;
+};
+
+/// The GPU vendor and device selected by a recipe's `<recipe>_backend` and
+/// `<recipe>_device` options, for get_available_memory_gb.
+inline GpuMemoryTarget gpu_memory_target_for_options(const RecipeOptions& options) {
+    const std::string recipe = options.get_recipe();
+    const json backend_json = options.get_option(recipe + "_backend");
+    const json device_json = options.get_option(recipe + "_device");
+    const std::string backend =
+        backend_json.is_string() ? backend_json.get<std::string>() : std::string();
+    GpuMemoryTarget target;
+    if (device_json.is_string()) target.device = device_json.get<std::string>();
+    target.vendor = gpu_memory_vendor_for_target(backend, target.device);
+    return target;
+}
+
 /// Extract available memory (in GB) for the device targeted by the model.
 /// GPU  → VRAM (+ GTT for iGPU) minus currently-used VRAM
 /// CPU  → system RAM minus currently-used RAM
 /// NPU  → system RAM minus currently-used RAM
-inline double get_available_memory_gb(DeviceType device_type) {
+inline double get_available_memory_gb(DeviceType device_type,
+                                      GpuMemoryVendor gpu_vendor = GpuMemoryVendor::Any,
+                                      const std::string& gpu_device = "") {
     auto si = create_system_info();
 
     // Subtract currently-used memory
@@ -93,62 +118,36 @@ inline double get_available_memory_gb(DeviceType device_type) {
 
     // GPU recipes: use VRAM
     if (device_type & DEVICE_GPU) {
-        // AMD iGPU (APU — uses dedicated VRAM + GTT from system RAM)
         auto amd_igpu = si->get_amd_igpu_device();
-        if (amd_igpu.available && amd_igpu.vram_gb > 0) {
-            // iGPU total = dedicated VRAM + GTT (system memory pool accessible by GPU)
-            double total_gb = amd_igpu.vram_gb + amd_igpu.virtual_gb;
-            double available = (std::max)(0.0, total_gb - used_gb);
-            LOG(DEBUG, "AutoTune") << "get_available_memory_gb: GPU (AMD iGPU) total="
-                                   << std::fixed << std::setprecision(2) << total_gb
-                                   << " GB (vram=" << amd_igpu.vram_gb
-                                   << " + gtt=" << amd_igpu.virtual_gb << "), used=" << used_gb
-                                   << " GB → " << available << " GB available"  << " ";
-            return available;
-        }
-
-        // AMD dGPU
         auto amd_dgpus = si->get_amd_dgpu_devices();
-        for (const auto& gpu : amd_dgpus) {
-            if (gpu.available && gpu.vram_gb > 0) {
-                double available = (std::max)(0.0, gpu.vram_gb - used_gb);
-                LOG(DEBUG, "AutoTune") << "get_available_memory_gb: GPU (AMD dGPU) total="
-                                       << std::fixed << std::setprecision(2) << gpu.vram_gb
-                                       << " GB, used=" << used_gb
-                                       << " GB → " << available << " GB available"  << " ";
-                return available;
-            }
-        }
-
-        // NVIDIA
         auto nvidia_gpus = si->get_nvidia_gpu_devices();
-        for (const auto& gpu : nvidia_gpus) {
-            if (gpu.available && gpu.vram_gb > 0) {
-                double available = (std::max)(0.0, gpu.vram_gb - used_gb);
-                LOG(DEBUG, "AutoTune") << "get_available_memory_gb: GPU (NVIDIA) total="
-                                       << std::fixed << std::setprecision(2) << gpu.vram_gb
-                                       << " GB, used=" << used_gb
-                                       << " GB → " << available << " GB available"  << " ";
-                return available;
-            }
-        }
-
-        // Metal (macOS — Apple Silicon unified memory). CPU and GPU share one pool:
-        //   vram_gb    = Metal's recommended GPU working-set budget (a soft ceiling)
-        //   virtual_gb = total unified RAM
-        // Available to the GPU = the free unified RAM (total − used), capped at the
-        // working-set budget so we don't push the system into swap.
-        auto apple = si->get_apple_silicon_device();
-        if (apple.available && apple.vram_gb > 0) {
-            double free_unified = (std::max)(0.0, apple.virtual_gb - used_gb);
-            double available = (std::min)(apple.vram_gb, free_unified);
-            LOG(DEBUG, "AutoTune") << "get_available_memory_gb: GPU (Metal) budget="
-                                   << std::fixed << std::setprecision(2) << apple.vram_gb
-                                   << " GB, unified=" << apple.virtual_gb
-                                   << " GB, used=" << used_gb
-                                   << " GB → " << available << " GB available"  << " ";
+        auto apple_gpu = si->get_apple_silicon_device();
+        const char* cuda_visible_devices_env = std::getenv("CUDA_VISIBLE_DEVICES");
+        const std::optional<std::string> cuda_visible_devices =
+            cuda_visible_devices_env
+                ? std::optional<std::string>(cuda_visible_devices_env)
+                : std::nullopt;
+        auto pool = select_gpu_memory_pool(gpu_vendor,
+                                           amd_igpu, amd_dgpus, nvidia_gpus, apple_gpu,
+                                           gpu_device,
+                                           cuda_visible_devices);
+        if (pool.total_gb > 0) {
+            if (pool.used_gb >= 0.0) used_gb = pool.used_gb;
+            double available = pool.vendor == GpuMemoryVendor::Metal
+                ? (std::min)(pool.total_gb, (std::max)(0.0, apple_gpu.virtual_gb - used_gb))
+                : (std::max)(0.0, pool.total_gb - used_gb);
+            LOG(DEBUG, "AutoTune") << "get_available_memory_gb: GPU (" << pool.label
+                                   << ") total=" << std::fixed << std::setprecision(2)
+                                   << pool.total_gb << " GB, used=" << used_gb
+                                   << " GB → " << available << " GB available" << " ";
             return available;
         }
+
+        if (gpu_vendor != GpuMemoryVendor::Any) {
+            LOG(DEBUG, "AutoTune") << "get_available_memory_gb: selected GPU vendor unavailable";
+            return 0.0;
+        }
+
     }
 
     // CPU / NPU: use system RAM
@@ -331,8 +330,10 @@ inline int64_t resolve_auto_ctx_size(const RecipeOptions& effective_options,
 
 inline int64_t resolve_auto_ctx_size(const RecipeOptions& effective_options,
                                      const ModelInfo& model_info) {
+    const GpuMemoryTarget target = gpu_memory_target_for_options(effective_options);
     return resolve_auto_ctx_size(
-        effective_options, model_info, get_available_memory_gb(model_info.device));
+        effective_options, model_info,
+        get_available_memory_gb(model_info.device, target.vendor, target.device));
 }
 
 } // namespace lemon

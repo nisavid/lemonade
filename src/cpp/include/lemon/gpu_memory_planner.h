@@ -39,4 +39,11 @@ double gpu_memory_capacity_from_pools_gb(double vram_gb,
                                          bool is_integrated_gpu,
                                          bool enable_discrete_gpu_gtt);
 
+// ROCm cannot address an APU's VRAM carve-out and GTT as one pool, so a
+// backend limited to ROCm sees only the larger of the two.
+double gpu_memory_single_pool_gb(double vram_gb,
+                                 double virtual_mem_gb,
+                                 bool is_integrated_gpu,
+                                 bool enable_discrete_gpu_gtt);
+
 } // namespace lemon

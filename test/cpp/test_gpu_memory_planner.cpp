@@ -9,6 +9,7 @@
 using lemon::GpuMemoryAdmissionInputs;
 using lemon::GpuMemoryResident;
 using lemon::gpu_memory_capacity_from_pools_gb;
+using lemon::gpu_memory_single_pool_gb;
 using lemon::plan_gpu_memory_admission;
 using lemon::uses_gpu_memory_capacity;
 
@@ -143,6 +144,24 @@ int main() {
                         80.0);
         expect_capacity("dGPU capacity is unavailable when VRAM is unavailable and GTT is disabled",
                         gpu_memory_capacity_from_pools_gb(0.0, 20.0, false, false),
+                        0.0);
+    }
+
+    {
+        expect_capacity("APU single pool is GTT when it exceeds the VRAM carve-out",
+                        gpu_memory_single_pool_gb(1.0, 112.0, true, false),
+                        112.0);
+        expect_capacity("APU single pool is the VRAM carve-out when it exceeds GTT",
+                        gpu_memory_single_pool_gb(96.0, 16.0, true, false),
+                        96.0);
+        expect_capacity("dGPU single pool ignores GTT by default",
+                        gpu_memory_single_pool_gb(16.0, 64.0, false, false),
+                        16.0);
+        expect_capacity("dGPU single pool includes GTT when enabled",
+                        gpu_memory_single_pool_gb(16.0, 64.0, false, true),
+                        80.0);
+        expect_capacity("single pool is unavailable when both pools are empty",
+                        gpu_memory_single_pool_gb(0.0, 0.0, true, false),
                         0.0);
     }
 

@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 #include <httplib.h>
 #include "gpu_memory_planner.h"
+#include "gpu_memory_selection.h"
 #include "wrapped_server.h"
 #include "model_residency.h"
 #include "model_manager.h"
@@ -447,7 +448,8 @@ private:
     BackendManager* backend_manager_;  // Non-owning pointer to BackendManager
     CloudProviderRegistry* cloud_registry_ = nullptr;  // Non-owning
     std::function<double()> gpu_memory_sampler_;
-    std::function<double(DeviceType)> available_memory_sampler_;
+    std::function<double(DeviceType, GpuMemoryVendor, const std::string&)>
+        available_memory_sampler_;
 
     mutable std::mutex telemetry_mutex_;
     Telemetry aggregate_telemetry_;
@@ -630,7 +632,8 @@ private:
                                             const RecipeOptions& options) const;
     double get_total_gpu_capacity_gb() const;
     double sample_total_gpu_occupancy_gb() const;
-    double sample_available_memory_gb(DeviceType device) const;
+    double sample_available_memory_gb(DeviceType device,
+                                      const RecipeOptions& options) const;
     double get_lemonade_gpu_occupancy_gb() const;
     bool is_gpu_resident_server(const WrappedServer& server) const;
     GpuMemoryAdmissionPlan plan_gpu_memory_capacity(

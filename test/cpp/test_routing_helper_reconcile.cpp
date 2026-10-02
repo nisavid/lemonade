@@ -139,7 +139,9 @@ struct RoutingHelperTestHook {
 
     static void set_available_memory(Router& r, double available_gb) {
         r.available_memory_sampler_ =
-            [available_gb](DeviceType) { return available_gb; };
+            [available_gb](DeviceType, GpuMemoryVendor, const std::string&) {
+                return available_gb;
+            };
     }
 
     static json admission_state(Router& r) {
