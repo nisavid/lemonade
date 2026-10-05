@@ -27,6 +27,12 @@ Use before upstream Git-ref work. This fork separates live upstream development 
 - Use local `upstream-stable` only when maintaining that published baseline.
 - Choose the next stable baseline from live GitHub Releases, not tag sorting. Ignore drafts and prereleases unless explicitly requested.
 
+## Release Tags and Versioning
+
+- Upstream uses calendar versions (`vYYYY.WW.N`). A stable release tag may sit on a `release-vYYYY.WW` branch rather than on `main`, so `upstream-stable` need not be an ancestor of `upstream/main`; check ancestry instead of assuming it.
+- `candidate-v*` tags and GitHub prereleases mark release candidates. They are never a stable baseline.
+- Fork release versioning means a packager writing a `.version` file, which `tools/version.py` reads before any git state. Fork dev and CI builds keep upstream's git-derived development version.
+
 ## Scout Current Upstream State
 
 ```bash

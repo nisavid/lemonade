@@ -73,6 +73,15 @@ runtime configuration.
 
 Avoid rebase, force-push, `gh repo sync --force`, and other history-replacing flows unless the user explicitly requests that behavior.
 
+## Fork CI Guards
+
+- Every job that publishes, pushes branches, opens pull requests, or reaches into another repository carries a job-level `github.repository == 'lemonade-sdk/lemonade'` guard, alone or ANDed into its existing `if`. Guard each such job that an upstream sync brings in.
+- Tags are never pushed to the fork, and a tag ruleset enforces it (#180).
+- A job may stay unguarded when a guarded job it needs keeps it from running on the fork: Launchpad PPA's `package-arm64` and `upgrade-test` sit behind `prepare-matrix`, and `benchmark-regression.yml`'s `bench` sits behind `setup`.
+- Self-hosted `lemon-prod` jobs that only test, validate or check runner health stay unguarded on purpose: `cpp_server_build_test_release.yml`'s `test-exe-inference` and `test-deb-inference`, the `validate` jobs in `validate_llamacpp.yml`, `validate_sdcpp.yml` and `validate_vllm.yml`, and `runner_heartbeat.yml`. On the fork they queue until GitHub cancels them, which is an accepted CI exception.
+- `linux_distro_builds.yml` is a fork divergence. Upstream deleted it in lemonade-sdk/lemonade#3524; the fork keeps an Arch-only build as a blocking part of its CI bar. Rerun it, or record a waiver, only for failures clearly caused by the `archlinux:latest` image or its mirrors.
+- `tools/version.py` derives the version from git at configure time. Dev and CI builds keep upstream's `YYYY.WW.0~N.hash8` string; packagers that build outside a git checkout write a `.version` file instead.
+
 ## Documentation Shape
 
 Keep documentation progressive:

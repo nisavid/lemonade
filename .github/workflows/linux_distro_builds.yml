@@ -41,16 +41,33 @@ jobs:
           - distro: Arch
             image: archlinux:latest
             python: python
-          - distro: openSUSE
-            image: opensuse/tumbleweed:latest
-            python: python3
 
     steps:
+      # With git present, checkout clones a real repository instead of
+      # downloading a tarball, so the configure-time version carries the
+      # commit count and hash. CMake also requires a Python 3 interpreter.
+      - name: Install checkout prerequisites
+        run: |
+          success=false
+          for i in 1 2 3; do
+            if pacman -Syu --needed --noconfirm git python; then
+              success=true
+              break
+            fi
+            echo "Prerequisite install failed (attempt $i/3), retrying..."
+            sleep 10
+          done
+          $success
+
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           clean: true
           fetch-depth: 0
+
+      # The container runs as root over a workspace owned by the runner user.
+      - name: Mark the workspace as a safe git directory
+        run: git config --global --add safe.directory "$(pwd)"
 
       - name: Cache package downloads and ccache
         uses: actions/cache@v5
