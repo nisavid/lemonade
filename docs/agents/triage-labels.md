@@ -11,3 +11,5 @@ The skills use five canonical triage roles. This file maps those roles to the la
 | `wontfix`                  | `wontfix`            | Will not be actioned                     |
 
 When a skill mentions a triage role, use the corresponding label string from this table.
+
+New issues start with `needs-triage`, including follow-ups a review bot creates. Check a bot-created issue once it exists and add the label if it is missing.

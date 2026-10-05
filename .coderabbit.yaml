@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Without inheritance this file replaces the organization settings instead of
+# merging over them, dropping their review profile and request-changes workflow.
+inheritance: true
+reviews:
+  suggested_reviewers: false
+  auto_assign_reviewers: false
+chat:
+  integrations:
+    jira:
+      usage: disabled
+    linear:
+      usage: disabled
+knowledge_base:
+  # Pinned so inherited organization values, or `auto` on a private
+  # repository, cannot widen these scopes beyond this repository.
+  learnings:
+    scope: local
+  issues:
+    scope: local
+  pull_requests:
+    scope: local
+  jira:
+    usage: disabled
+  linear:
+    usage: disabled
+issue_enrichment:
+  auto_enrich:
+    enabled: false
+  planning:
+    auto_planning:
+      enabled: false
+  labeling:
+    auto_apply_labels: false

@@ -73,6 +73,10 @@ runtime configuration.
 
 Avoid rebase, force-push, `gh repo sync --force`, and other history-replacing flows unless the user explicitly requests that behavior.
 
+### Deferring review findings in sync PRs
+
+When you defer a review finding on unchanged upstream code in an upstream-sync pull request, say it is out of scope for the sync and tracked as a `nisavid/lemonade` follow-up. Never say it "belongs upstream" or call it an "upstream follow-up". When you ask a review bot to file the issue, ask for it in `nisavid/lemonade` with no upstream-coordination steps. Report upstream only when the fork owner asks.
+
 ## Fork CI Guards
 
 - Every job that publishes, pushes branches, opens pull requests, or reaches into another repository carries a job-level `github.repository == 'lemonade-sdk/lemonade'` guard, alone or ANDed into its existing `if`. Guard each such job that an upstream sync brings in.
