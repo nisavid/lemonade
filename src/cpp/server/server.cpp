@@ -825,6 +825,15 @@ void Server::start_model_cache_warmup() {
             LOG(DEBUG, "Server") << "Warming model list cache..." << std::endl;
             model_manager_->get_supported_models();
             LOG(DEBUG, "Server") << "Model list cache warmup complete" << std::endl;
+            const auto bindings = backends::llamacpp::executable_bindings();
+            for (const auto& [key, entry] : bindings->entries()) {
+                if (entry.state != backends::llamacpp::BindingState::Unbound &&
+                    !model_manager_->is_cache_key(key)) {
+                    LOG(WARNING, "Server") << "llama.cpp executable binding in "
+                                           << entry.source << " names no known model: '"
+                                           << key << "'" << std::endl;
+                }
+            }
         } catch (const std::exception& e) {
             LOG(WARNING, "Server") << "Model list cache warmup failed: " << e.what() << std::endl;
         } catch (...) {
@@ -3622,6 +3631,18 @@ std::string Server::register_model_definition_internal(
         throw std::invalid_argument("Request body must be a JSON object");
     }
 
+    if (request_json.contains("recipe_options") &&
+        request_json["recipe_options"].is_object() &&
+        request_json["recipe_options"].contains("llamacpp_backend")) {
+        const std::string conflict = backends::llamacpp::backend_conflict_error(
+            *backends::llamacpp::executable_bindings(),
+            model_manager_->resolve_model_name(model_name),
+            request_json["recipe_options"]["llamacpp_backend"]);
+        if (!conflict.empty()) {
+            throw std::invalid_argument(conflict);
+        }
+    }
+
     if (request_json.contains("recipe") && !request_json["recipe"].is_string()) {
         throw std::invalid_argument("`recipe` must be a string when provided");
     }
@@ -3760,8 +3781,10 @@ int64_t Server::resolve_context_length(const std::string& model_id, const ModelI
         }
 
         const RecipeOptions no_request_options(info.recipe, nlohmann::json::object());
-        const int64_t configured_ctx =
-            ctx_size_of(router_->resolve_effective_options(info, no_request_options));
+        const std::string cache_key =
+            model_manager_->resolve_model_name(resolve_alias_target(model_id));
+        const int64_t configured_ctx = ctx_size_of(
+            router_->resolve_effective_options(info, no_request_options, cache_key));
         if (configured_ctx > 0) {
             return configured_ctx;
         }
@@ -4067,11 +4090,13 @@ void Server::respond_with_model_options(
         if (mutation && !mutation(model_key, info, res)) return;
 
         const RecipeOptions no_request_options(info.recipe, nlohmann::json::object());
-        RecipeOptions effective = router_->resolve_effective_options(info, no_request_options);
+        RecipeOptions effective =
+            router_->resolve_effective_options(info, no_request_options, model_key);
 
         ModelInfo without_saved = info;
         without_saved.recipe_options = model_manager_->get_model_default_options(info);
-        RecipeOptions defaults = router_->resolve_effective_options(without_saved, no_request_options);
+        RecipeOptions defaults =
+            router_->resolve_effective_options(without_saved, no_request_options, model_key);
 
         // `effective` and `defaults` double as replayable /v1/load bodies.
         nlohmann::json effective_json = resolve_all_recipe_options(effective);
@@ -4191,6 +4216,17 @@ void Server::handle_model_options_post(const httplib::Request& req, httplib::Res
                     return false;
                 }
                 changes[key] = value;
+            }
+
+            if (changes.contains("llamacpp_backend")) {
+                const std::string conflict = backends::llamacpp::backend_conflict_error(
+                    *backends::llamacpp::executable_bindings(), model_key,
+                    changes["llamacpp_backend"]);
+                if (!conflict.empty()) {
+                    r.status = 400;
+                    r.set_content(nlohmann::json{{"error", conflict}}.dump(), "application/json");
+                    return false;
+                }
             }
 
             if (dry_run) {
@@ -6891,6 +6927,26 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
             res.status = 404;
             auto error_response = create_model_error(model_name, "Model not found");
             res.set_content(error_response.dump(), "application/json");
+            return;
+        }
+
+        // Reject before save_options can persist a backend the binding overrides.
+        const std::string backend_conflict = backends::llamacpp::backend_conflict_error(
+            *backends::llamacpp::executable_bindings(),
+            model_manager_->resolve_model_name(model_name),
+            request_json.contains("llamacpp_backend") ? request_json["llamacpp_backend"]
+                                                      : nlohmann::json());
+        if (!backend_conflict.empty()) {
+            LOG(ERROR, "Server") << backend_conflict << std::endl;
+            res.status = 400;
+            nlohmann::json error = {{"error", {
+                {"message", backend_conflict},
+                {"type", "invalid_request_error"},
+                {"param", "llamacpp_backend"},
+                {"code", "invalid_request"},
+                {"requested_model", model_name}
+            }}};
+            res.set_content(error.dump(), "application/json");
             return;
         }
 

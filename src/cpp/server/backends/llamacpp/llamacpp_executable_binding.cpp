@@ -9,9 +9,14 @@
 
 #include "lemon/backends/llamacpp/llamacpp.h"
 #include "lemon/config_file.h"
+#include "lemon/recipe_options.h"
 #include "lemon/system_info.h"
 #include "lemon/utils/aixlog.hpp"
 #include "lemon/utils/path_utils.h"
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -41,15 +46,6 @@ const std::vector<std::string>& bindable_backends() {
     static const std::vector<std::string> backends = {
         "cpu", "vulkan", "rocm", "cuda", "metal"};
     return backends;
-}
-
-bool backend_supported_on_current_os(const std::string& backend) {
-    const std::string os = get_current_os();
-    return std::any_of(
-        descriptor.support.begin(), descriptor.support.end(),
-        [&](const BackendSupport& row) {
-            return row.backend == backend && row.supported_os.count(os) > 0;
-        });
 }
 
 std::string join(const std::vector<std::string>& values) {
@@ -175,7 +171,7 @@ std::string validate_binding_entry(const json& entry, ExecutableBinding& out) {
         return "'backend' must be one of: " + join(allowed) + " (got '" +
                backend_text + "')";
     }
-    if (!backend_supported_on_current_os(backend_text)) {
+    if (!bindable_backend_on_current_os(backend_text)) {
         return "'backend' '" + backend_text +
                "' is not a llama.cpp backend on " + get_current_os();
     }
@@ -495,6 +491,105 @@ void ExecutableBindings::log_summary() const {
     }
     for (const auto& line : warnings_) {
         LOG(WARNING, "LlamaCpp") << line << std::endl;
+    }
+}
+
+bool bindable_backend_on_current_os(const std::string& backend) {
+    const auto& allowed = bindable_backends();
+    if (std::find(allowed.begin(), allowed.end(), backend) == allowed.end()) {
+        return false;
+    }
+    const std::string os = get_current_os();
+    return std::any_of(
+        descriptor.support.begin(), descriptor.support.end(),
+        [&](const BackendSupport& row) {
+            return row.backend == backend && row.supported_os.count(os) > 0;
+        });
+}
+
+std::string executable_file_error(const std::string& executable) {
+    const fs::path path = utils::path_from_utf8(executable);
+    std::error_code ec;
+    const fs::file_status status = fs::status(path, ec);
+    if (status.type() == fs::file_type::not_found) {
+        return "the bound executable is missing: " + executable;
+    }
+    if (ec) {
+        return "cannot inspect the bound executable " + executable + ": " + ec.message();
+    }
+    if (!fs::is_regular_file(status)) {
+        return "the bound executable is not a regular file: " + executable;
+    }
+#ifndef _WIN32
+    if (::access(path.c_str(), X_OK) != 0) {
+        return "the bound executable is not executable by lemond: " + executable;
+    }
+#endif
+    return "";
+}
+
+std::string backend_conflict_error(const ExecutableBindings& bindings,
+                                   const std::string& cache_key,
+                                   const json& requested) {
+    const auto binding = bindings.bound(cache_key);
+    if (!binding || RecipeOptions::is_default_sentinel("llamacpp_backend", requested)) {
+        return "";
+    }
+    if (requested.is_string() && requested.get<std::string>() == binding->backend) {
+        return "";
+    }
+    return "Model '" + cache_key + "' is bound to the llama.cpp '" + binding->backend +
+           "' backend by " + binding->source + "; llamacpp_backend " +
+           requested.dump() + " conflicts with that binding. Omit llamacpp_backend "
+           "or set it to \"" + binding->backend + "\".";
+}
+
+void check_binding_for_load(const ExecutableBindings& bindings,
+                            const std::string& cache_key,
+                            const std::string& recipe,
+                            const RecipeOptions& request_options,
+                            const RecipeOptions& model_options) {
+    const bool llamacpp_load = recipe == descriptor.recipe;
+    if (llamacpp_load && !bindings.map_error().empty()) {
+        throw ExecutableBindingError(
+            "llama.cpp executable bindings are misconfigured (" +
+            bindings.map_error_source() + "): " + bindings.map_error() +
+            ". Fix the configuration and restart lemond.");
+    }
+
+    const BindingEntry* entry = bindings.find(cache_key);
+    if (!entry || entry->state == BindingState::Unbound) {
+        return;
+    }
+    if (entry->state == BindingState::Rejected) {
+        throw ExecutableBindingError(
+            "The llama.cpp executable binding for '" + cache_key + "' in " +
+            entry->source + " is invalid: " + entry->error +
+            ". Fix it and restart lemond.");
+    }
+    if (!llamacpp_load) {
+        throw ExecutableBindingError(
+            "'" + cache_key + "' has a llama.cpp executable binding in " +
+            entry->binding.source + " but uses recipe '" + recipe + "'");
+    }
+
+    const std::string option = "llamacpp_backend";
+    if (request_options.has_explicit_option(option)) {
+        const std::string conflict = backend_conflict_error(
+            bindings, cache_key, request_options.get_explicit_option(option));
+        if (!conflict.empty()) {
+            throw ExecutableBindingError(conflict);
+        }
+    }
+    if (model_options.has_option(option)) {
+        const json saved = model_options.get_option(option);
+        if (!backend_conflict_error(bindings, cache_key, saved).empty()) {
+            LOG(WARNING, "LlamaCpp")
+                << "Ignoring the saved or registered llamacpp_backend " << saved.dump()
+                << " for '" << cache_key << "': it is bound to the '"
+                << entry->binding.backend << "' backend by " << entry->binding.source
+                << std::endl;
+        }
     }
 }
 

@@ -15,6 +15,7 @@
 #include <lemon/backends/backend_utils.h>
 #include <lemon/backends/cloud/cloud_server.h>
 #include <lemon/backends/fastflowlm/fastflowlm_models.h>
+#include <lemon/backends/llamacpp/llamacpp_executable_binding.h>
 #include <lemon/cloud_provider_registry.h>
 #include <lemon/gguf_shard_utils.h>
 #include <lemon/registry_files.h>
@@ -3968,6 +3969,7 @@ std::map<std::string, ModelInfo> ModelManager::filter_models_by_backend(
         debug_printed = true;
     }
 
+    const auto bindings = backends::llamacpp::executable_bindings();
     for (const auto& [name, info] : models) {
         const std::string& recipe = info.recipe;
         bool filter_out = false;
@@ -3994,8 +3996,22 @@ std::map<std::string, ModelInfo> ModelManager::filter_models_by_backend(
                                            is_extra_model_name(name) ||
                                            info.source == "local_upload";
 
+        // A bound model never uses a shared llama.cpp install, and its backend
+        // was already checked against this OS's llama.cpp support rows. A
+        // rejected binding stays listed so its loads report the configuration
+        // error instead of "model not found". While a map-level binding error
+        // is set, every llama.cpp model stays listed for the same reason.
+        const auto* binding_entry = bindings->find(name);
+        const bool has_executable_binding =
+            recipe == "llamacpp" &&
+            (!bindings->map_error().empty() ||
+             (binding_entry &&
+              binding_entry->state != backends::llamacpp::BindingState::Unbound));
+
         // Check recipe support using the centralized system_info recipes structure
-        std::string unsupported_reason = SystemInfo::check_recipe_supported(recipe);
+        std::string unsupported_reason = has_executable_binding
+            ? std::string()
+            : SystemInfo::check_recipe_supported(recipe);
         if (!unsupported_reason.empty()) {
             filter_out = true;
             filter_reason = unsupported_reason + " "
@@ -4710,6 +4726,16 @@ std::vector<std::string> ModelManager::register_components(const json& component
                 throw std::runtime_error(
                     "Collection component '" + name + "' has an incomplete inline "
                     "definition (a recipe and at least one checkpoint are required).");
+            }
+            if (def.contains("recipe_options") && def["recipe_options"].is_object() &&
+                def["recipe_options"].contains("llamacpp_backend")) {
+                const std::string conflict = backends::llamacpp::backend_conflict_error(
+                    *backends::llamacpp::executable_bindings(), canonical,
+                    def["recipe_options"]["llamacpp_backend"]);
+                if (!conflict.empty()) {
+                    throw std::runtime_error(
+                        "Collection component '" + name + "': " + conflict);
+                }
             }
             pending_registrations.emplace_back(canonical, def);
             components.push_back(canonical);
@@ -6464,6 +6490,13 @@ bool ModelManager::model_exists(const std::string& model_name) {
     }
 
     return false;
+}
+
+bool ModelManager::is_cache_key(const std::string& cache_key) {
+    build_cache();
+
+    std::lock_guard<std::mutex> lock(models_cache_mutex_);
+    return models_cache_.find(cache_key) != models_cache_.end();
 }
 
 std::optional<std::string> ModelManager::validate_collection_request(

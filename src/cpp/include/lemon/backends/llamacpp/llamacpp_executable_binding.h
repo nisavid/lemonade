@@ -10,6 +10,9 @@
 #include <nlohmann/json.hpp>
 
 namespace lemon {
+
+class RecipeOptions;
+
 namespace backends {
 namespace llamacpp {
 
@@ -106,6 +109,31 @@ std::string normalize_binding_key(const std::string& key);
 
 // Returns "" and fills `out` when the entry is valid, else the reason.
 std::string validate_binding_entry(const nlohmann::json& entry, ExecutableBinding& out);
+
+// Independent of install state: a bound model never uses a shared backend
+// install, so only the llama.cpp support row for this OS matters.
+bool bindable_backend_on_current_os(const std::string& backend);
+
+// "" when the bound executable is a regular file (after symlinks) that this
+// process can execute, else the reason.
+std::string executable_file_error(const std::string& executable);
+
+// "" unless `requested` names a llama.cpp backend other than the one bound to
+// `cache_key`. Values the option system reads as unset never conflict.
+std::string backend_conflict_error(const ExecutableBindings& bindings,
+                                   const std::string& cache_key,
+                                   const nlohmann::json& requested);
+
+// Load-only checks, run before admission so a failure can never evict other
+// models. Throws ExecutableBindingError for a rejected binding, a map-level
+// error on a llama.cpp load, a binding on a non-llama.cpp model, or a request
+// that names a conflicting backend. A conflicting saved or registered backend
+// is overridden with a warning.
+void check_binding_for_load(const ExecutableBindings& bindings,
+                            const std::string& cache_key,
+                            const std::string& recipe,
+                            const RecipeOptions& request_options,
+                            const RecipeOptions& model_options);
 
 void set_executable_bindings(std::shared_ptr<const ExecutableBindings> bindings);
 std::shared_ptr<const ExecutableBindings> executable_bindings();

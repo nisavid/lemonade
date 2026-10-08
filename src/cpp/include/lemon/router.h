@@ -132,6 +132,7 @@ public:
     // servers, seed the needed set, drive prune). Defined in the test binary.
     friend struct RoutingHelperTestHook;
     friend struct RouterModelLifecycleTestHook;
+    friend struct LlamaCppExecutableBindingTestHook;
     friend struct ProfilingTransactionTestHook;
     Router(RuntimeConfig* config,
 
@@ -269,8 +270,12 @@ public:
     // and overridable runtime defaults are materialized before this returns.
     // ctx_size may still be the -1 auto sentinel; the concrete value is only
     // resolved inside load_prepared_model, once eviction has freed memory.
+    // `cache_key` selects the model's executable binding. model_info.model_name
+    // cannot: it is a public name in listings and a cache key elsewhere, and
+    // a shadowed built-in's bare cache key resolves to the model shadowing it.
     RecipeOptions resolve_effective_options(const ModelInfo& model_info,
-                                            const RecipeOptions& request_options) const;
+                                            const RecipeOptions& request_options,
+                                            const std::string& cache_key) const;
 
     // Keep the preparation alive across registry lookup and artifact download.
     // A same-model mutation waits for that lease, and load_prepared_model

@@ -4172,5 +4172,6 @@ set(_LLAMACPP_EXECUTABLE_BINDING_TEST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/test/cpp/
 if(BUILD_TESTING AND EXISTS "${_LLAMACPP_EXECUTABLE_BINDING_TEST_SRC}")
     add_executable(test_llamacpp_executable_binding test/cpp/test_llamacpp_executable_binding.cpp)
     target_link_libraries(test_llamacpp_executable_binding PRIVATE lemonade-server-core)
+    add_dependencies(test_llamacpp_executable_binding copy_resources)
     add_cpp_ci_test(LlamaCppExecutableBindingTest CI ON COMMAND test_llamacpp_executable_binding)
 endif()
