@@ -8133,6 +8133,7 @@ void Server::handle_bin_change(const std::string& section,
     std::vector<Saved> previously_loaded;
     auto loaded = router_->get_all_loaded_models();
     std::string backend_option_key = recipe + "_backend";
+    const auto bindings = backends::llamacpp::executable_bindings();
     for (const auto& m : loaded) {
         if (m.value("recipe", "") != recipe) continue;
         std::string mb;
@@ -8142,6 +8143,8 @@ void Server::handle_bin_change(const std::string& section,
         if (!mb.empty() && mb != backend) continue;
         std::string name = m.value("model_name", "");
         if (name.empty()) continue;
+        // A bound model never runs the binary this key selects.
+        if (bindings->bound(model_manager_->resolve_model_name(name))) continue;
         previously_loaded.push_back({name, router_->get_model_recipe_options(name)});
     }
 
@@ -9154,6 +9157,7 @@ void Server::handle_uninstall(const httplib::Request& req, httplib::Response& re
         // Check if any loaded models use this recipe+backend and unload them first
         auto loaded_models = router_->get_all_loaded_models();
         std::string backend_option_key = recipe + "_backend";
+        const auto bindings = backends::llamacpp::executable_bindings();
         for (const auto& model : loaded_models) {
             if (model.value("recipe", "") == recipe) {
                 // Check if the model's backend matches the one being uninstalled
@@ -9165,6 +9169,10 @@ void Server::handle_uninstall(const httplib::Request& req, httplib::Response& re
                     continue;  // Different backend, skip
                 }
                 std::string model_name = model.value("model_name", "");
+                // A bound model does not run from the shared install.
+                if (bindings->bound(model_manager_->resolve_model_name(model_name))) {
+                    continue;
+                }
                 LOG(INFO, "Server") << "Unloading model " << model_name
                           << " before uninstalling " << recipe << ":" << backend << std::endl;
                 router_->unload_model(model_name);
