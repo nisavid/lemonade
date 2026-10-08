@@ -19,6 +19,7 @@
 #include "lemon/backends/backend_registry.h"
 #include "lemon/backends/cloud/cloud_server.h"
 #include "lemon/backends/backend_utils.h"
+#include "lemon/backends/llamacpp/llamacpp_executable_binding.h"
 #include "lemon/model_types.h"
 #include <cstring>
 #include "lemon/utils/conversation_fingerprint.h"
@@ -7981,6 +7982,13 @@ void Server::handle_config_set(const httplib::Request& req, httplib::Response& r
 void Server::handle_config_get(const httplib::Request& /*req*/, httplib::Response& res) {
     try {
         auto snap = config_->snapshot();
+        const auto bindings = backends::llamacpp::executable_bindings();
+        if (!bindings->empty()) {
+            if (!snap.contains("llamacpp") || !snap["llamacpp"].is_object()) {
+                snap["llamacpp"] = nlohmann::json::object();
+            }
+            snap["llamacpp"]["model_executables"] = bindings->to_json();
+        }
         res.set_content(snap.dump(), "application/json");
     } catch (const std::exception& e) {
         LOG(ERROR, "Server") << "ERROR in handle_config_get: " << e.what() << std::endl;

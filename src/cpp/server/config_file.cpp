@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 #include <lemon/utils/aixlog.hpp>
@@ -67,24 +68,33 @@ json ConfigFile::base_defaults() {
     return defaults;
 }
 
-json ConfigFile::get_defaults() {
-    json defaults = base_defaults();
+std::vector<ConfigFile::DefaultsLayer> ConfigFile::get_defaults_layers() {
+    std::vector<DefaultsLayer> layers;
+    layers.push_back({"resources/defaults.json", base_defaults()});
 
 #ifndef _WIN32
     fs::path distro_defaults = "/usr/share/lemonade/defaults.json";
     if (fs::exists(distro_defaults)) {
-        json distro = normalize_legacy_keys(load_json_file(distro_defaults));
-        defaults = utils::JsonUtils::merge(defaults, distro);
+        layers.push_back({utils::path_to_utf8(distro_defaults),
+                          normalize_legacy_keys(load_json_file(distro_defaults))});
     }
 #endif
 
     // Packagers on non-FHS distros (Nix, Guix) can't write the /usr/share
     // file above; this seeds the same defaults from any path.
     if (const char* env = std::getenv("LEMONADE_DEFAULTS_PATH"); env && *env && fs::exists(env)) {
-        json env_defaults = normalize_legacy_keys(load_json_file(env));
-        defaults = utils::JsonUtils::merge(defaults, env_defaults);
+        layers.push_back({env, normalize_legacy_keys(load_json_file(env))});
     }
 
+    return layers;
+}
+
+json ConfigFile::get_defaults() {
+    std::vector<DefaultsLayer> layers = get_defaults_layers();
+    json defaults = std::move(layers.front().value);
+    for (size_t i = 1; i < layers.size(); ++i) {
+        defaults = utils::JsonUtils::merge(defaults, layers[i].value);
+    }
     return defaults;
 }
 

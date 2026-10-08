@@ -3,6 +3,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <vector>
 #include <nlohmann/json.hpp>
 
 namespace lemon {
@@ -108,6 +109,15 @@ public:
     /// override at /usr/share/lemonade/defaults.json (and LEMONADE_DEFAULTS_PATH)
     /// is merged on top when present.
     static json get_defaults();
+
+    struct DefaultsLayer {
+        std::string source;
+        json value;
+    };
+
+    /// The layers get_defaults() merges, lowest precedence first, each before
+    /// merging: base_defaults(), then each override file that is present.
+    static std::vector<DefaultsLayer> get_defaults_layers();
 
     /// Load raw config.json from config_dir without merging defaults.
     /// Returns an empty JSON object if the file does not exist or is empty.
