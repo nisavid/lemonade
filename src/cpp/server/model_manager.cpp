@@ -3996,11 +3996,9 @@ std::map<std::string, ModelInfo> ModelManager::filter_models_by_backend(
                                            is_extra_model_name(name) ||
                                            info.source == "local_upload";
 
-        // A bound model never uses a shared llama.cpp install, and its backend
-        // was already checked against this OS's llama.cpp support rows. A
-        // rejected binding stays listed so its loads report the configuration
-        // error instead of "model not found". While a map-level binding error
-        // is set, every llama.cpp model stays listed for the same reason.
+        // Rejected entries (and, under a map-level error, all llama.cpp
+        // entries) stay listed so loads report the configuration error
+        // instead of "model not found".
         const auto* binding_entry = bindings->find(name);
         const bool has_executable_binding =
             recipe == "llamacpp" &&

@@ -16,8 +16,6 @@ class RecipeOptions;
 namespace backends {
 namespace llamacpp {
 
-// A per-model llama.cpp executable binding: the model runs on `executable`,
-// and `backend` selects its device class and `llamacpp.<backend>_args`.
 struct ExecutableBinding {
     std::string executable;
     std::string backend;
@@ -124,11 +122,7 @@ std::string backend_conflict_error(const ExecutableBindings& bindings,
                                    const std::string& cache_key,
                                    const nlohmann::json& requested);
 
-// Load-only checks, run before admission so a failure can never evict other
-// models. Throws ExecutableBindingError for a rejected binding, a map-level
-// error on a llama.cpp load, a binding on a non-llama.cpp model, or a request
-// that names a conflicting backend. A conflicting saved or registered backend
-// is overridden with a warning.
+// Runs before admission so that a failure can never evict anything.
 void check_binding_for_load(const ExecutableBindings& bindings,
                             const std::string& cache_key,
                             const std::string& recipe,
