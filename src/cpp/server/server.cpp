@@ -3631,18 +3631,6 @@ std::string Server::register_model_definition_internal(
         throw std::invalid_argument("Request body must be a JSON object");
     }
 
-    if (request_json.contains("recipe_options") &&
-        request_json["recipe_options"].is_object() &&
-        request_json["recipe_options"].contains("llamacpp_backend")) {
-        const std::string conflict = backends::llamacpp::backend_conflict_error(
-            *backends::llamacpp::executable_bindings(),
-            model_manager_->resolve_model_name(model_name),
-            request_json["recipe_options"]["llamacpp_backend"]);
-        if (!conflict.empty()) {
-            throw std::invalid_argument(conflict);
-        }
-    }
-
     if (request_json.contains("recipe") && !request_json["recipe"].is_string()) {
         throw std::invalid_argument("`recipe` must be a string when provided");
     }
@@ -3677,6 +3665,18 @@ std::string Server::register_model_definition_internal(
         throw std::invalid_argument(
             "Local import model names must not contain a path separator. Received: " +
             model_name);
+    }
+
+    if (request_json.contains("recipe_options") &&
+        request_json["recipe_options"].is_object() &&
+        request_json["recipe_options"].contains("llamacpp_backend")) {
+        const std::string conflict = backends::llamacpp::backend_conflict_error(
+            *backends::llamacpp::executable_bindings(),
+            model_manager_->resolve_model_name(model_name),
+            request_json["recipe_options"]["llamacpp_backend"]);
+        if (!conflict.empty()) {
+            throw std::invalid_argument(conflict);
+        }
     }
 
     if (request_json.contains("models") && !allow_embedded_models) {
