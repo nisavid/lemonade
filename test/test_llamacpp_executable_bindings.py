@@ -42,6 +42,9 @@ BAD_PATH_MODEL = "user.Bad-Path"
 MALFORMED_MODEL = "user.Malformed"
 # Bound by its public name, which is not its cache key.
 PUBLIC_KEY_MODEL = "user.Public-Key"
+# First registered while no shared llama.cpp is runnable.
+PULL_BOUND_MODEL = "user.Pull-Bound"
+PULL_UNBOUND_MODEL = "user.Pull-Unbound"
 REGISTERED_MODELS = (
     FRAGMENT_MODEL,
     CONFIG_MODEL,
@@ -103,6 +106,20 @@ def _register(model_name, checkpoint):
         },
         headers=_auth_headers(),
         timeout=TIMEOUT_DEFAULT,
+    )
+
+
+def _pull(model_name, checkpoint):
+    return requests.post(
+        _url("/api/v1/pull"),
+        json={
+            "model_name": model_name,
+            "recipe": "llamacpp",
+            "checkpoint": checkpoint,
+            "do_not_upgrade": True,
+        },
+        headers=_auth_headers(),
+        timeout=TIMEOUT_MODEL_OPERATION,
     )
 
 
@@ -537,6 +554,10 @@ class LlamaCppExecutableBindingTests(unittest.TestCase):
         with open(config_path, "r", encoding="utf-8") as handle:
             config = json.load(handle)
         config["llamacpp"].pop(f"{BOUND_BACKEND}_bin", None)
+        config["llamacpp"]["model_executables"][PULL_BOUND_MODEL] = {
+            "executable": self.bound_executable,
+            "backend": BOUND_BACKEND,
+        }
         with open(config_path, "w", encoding="utf-8") as handle:
             json.dump(config, handle)
         os.environ["PATH"] = self.original_env["PATH"] or ""
@@ -583,6 +604,16 @@ class LlamaCppExecutableBindingTests(unittest.TestCase):
 
         self._wait_for_pin_error(BAD_PATH_MODEL)
         self.assertIn(self.missing_executable, self._pin_error(BAD_PATH_MODEL))
+
+        checkpoint = self._checkpoint_of(FRAGMENT_MODEL)
+        response = _pull(PULL_BOUND_MODEL, checkpoint)
+        self.assertEqual(response.status_code, 200, response.text)
+        response = _load(PULL_BOUND_MODEL)
+        self.assertEqual(response.status_code, 200, response.text)
+        self._assert_bound_launch(PULL_BOUND_MODEL)
+        response = _pull(PULL_UNBOUND_MODEL, checkpoint)
+        self.assertNotEqual(response.status_code, 200, response.text)
+        self.assertIn("cannot be used on this system", response.text)
 
         warning = f"names no known model: '{_bare(PUBLIC_KEY_MODEL)}'"
         deadline = time.time() + 30

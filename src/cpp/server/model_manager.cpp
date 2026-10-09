@@ -5142,7 +5142,14 @@ void ModelManager::download_model(const std::string& model_name,
     if (auto* cfg = RuntimeConfig::global()) {
         disable_filtering = cfg->disable_model_filtering();
     }
-    std::string unsupported_reason = SystemInfo::check_recipe_supported(actual_recipe);
+    const bool bound_llamacpp_model =
+        actual_recipe == "llamacpp" &&
+        backends::llamacpp::executable_bindings()
+            ->bound(resolve_model_name(model_name))
+            .has_value();
+    std::string unsupported_reason = bound_llamacpp_model
+        ? std::string()
+        : SystemInfo::check_recipe_supported(actual_recipe);
     if (!unsupported_reason.empty() && !disable_filtering) {
         throw std::runtime_error(
             "Model '" + model_name + "' cannot be used on this system (recipe: " + actual_recipe + "): " +
