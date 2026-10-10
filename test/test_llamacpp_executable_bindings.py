@@ -45,6 +45,21 @@ PUBLIC_KEY_MODEL = "user.Public-Key"
 # First registered while no shared llama.cpp is runnable.
 PULL_BOUND_MODEL = "user.Pull-Bound"
 PULL_UNBOUND_MODEL = "user.Pull-Unbound"
+# Bound in config.json and left unregistered by setUpClass: each is the target
+# of one definition-write path.
+REGISTER_TARGET_MODEL = "user.Register-Target"
+PULL_TARGET_MODEL = "user.Pull-Target"
+IMPORT_TARGET_MODEL = "user.Import-Target"
+COMPONENT_TARGET_MODEL = "user.Component-Target"
+DEFINITION_TARGET_MODELS = (
+    REGISTER_TARGET_MODEL,
+    PULL_TARGET_MODEL,
+    IMPORT_TARGET_MODEL,
+    COMPONENT_TARGET_MODEL,
+)
+# Unbound itself; it carries COMPONENT_TARGET_MODEL as an inline component.
+COMPONENT_COLLECTION = "user.Component-Target-Kit"
+CONFLICTING_BACKEND = "vulkan"
 REGISTERED_MODELS = (
     FRAGMENT_MODEL,
     CONFIG_MODEL,
@@ -96,31 +111,46 @@ def _load(model_name, **options):
     )
 
 
-def _register(model_name, checkpoint):
+def _register(model_name, checkpoint, **definition):
     return requests.post(
         _url("/api/v1/models/register"),
         json={
             "model_name": model_name,
             "recipe": "llamacpp",
             "checkpoint": checkpoint,
+            **definition,
         },
         headers=_auth_headers(),
         timeout=TIMEOUT_DEFAULT,
     )
 
 
-def _pull(model_name, checkpoint):
+def _pull_request(body):
     return requests.post(
         _url("/api/v1/pull"),
-        json={
-            "model_name": model_name,
-            "recipe": "llamacpp",
-            "checkpoint": checkpoint,
-            "do_not_upgrade": True,
-        },
+        json={**body, "do_not_upgrade": True},
         headers=_auth_headers(),
         timeout=TIMEOUT_MODEL_OPERATION,
     )
+
+
+def _pull(model_name, checkpoint, **definition):
+    return _pull_request(
+        {
+            "model_name": model_name,
+            "recipe": "llamacpp",
+            "checkpoint": checkpoint,
+            **definition,
+        }
+    )
+
+
+def _model_status(model_name):
+    return requests.get(
+        _url(f"/api/v1/models/{model_name}"),
+        headers=_auth_headers(),
+        timeout=TIMEOUT_DEFAULT,
+    ).status_code
 
 
 def _effective_options(model_name):
@@ -247,6 +277,13 @@ class LlamaCppExecutableBindingTests(unittest.TestCase):
                             "executable": cls.bound_executable,
                             "backend": BOUND_BACKEND,
                         },
+                        **{
+                            model_name: {
+                                "executable": cls.bound_executable,
+                                "backend": BOUND_BACKEND,
+                            }
+                            for model_name in DEFINITION_TARGET_MODELS
+                        },
                     },
                 },
             }
@@ -349,6 +386,12 @@ class LlamaCppExecutableBindingTests(unittest.TestCase):
         )
         return entry
 
+    def _assert_conflict_saved_nothing(self, response, model_name):
+        self.assertEqual(response.status_code, 400, f"{model_name}: {response.text}")
+        self.assertIn("conflicts", response.text)
+        self.assertIn(model_name, response.text)
+        self.assertEqual(_model_status(model_name), 404, model_name)
+
     def test_001_fragment_binding_runs_bound_executable(self):
         """A fragment-bound model loads with the shared backend uninstalled."""
         response = _load(FRAGMENT_MODEL)
@@ -443,13 +486,13 @@ class LlamaCppExecutableBindingTests(unittest.TestCase):
 
     def test_007_conflicting_backend_is_rejected(self):
         """A request naming another backend fails visibly; unset values proceed."""
-        response = _load(FRAGMENT_MODEL, llamacpp_backend="vulkan")
+        response = _load(FRAGMENT_MODEL, llamacpp_backend=CONFLICTING_BACKEND)
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("conflicts", response.text)
 
         response = requests.post(
             _url(f"/api/v1/models/{FRAGMENT_MODEL}/options"),
-            json={"llamacpp_backend": "vulkan"},
+            json={"llamacpp_backend": CONFLICTING_BACKEND},
             headers=_auth_headers(),
             timeout=TIMEOUT_DEFAULT,
         )
@@ -543,7 +586,75 @@ class LlamaCppExecutableBindingTests(unittest.TestCase):
         self.assertIsNotNone(entry, f"{PUBLIC_KEY_MODEL} is not loaded")
         self.assertNotEqual(entry["launch_command"][0], self.bound_executable)
 
-    def test_011_no_shared_llamacpp_keeps_bound_models(self):
+    def test_011_conflicting_definition_is_rejected(self):
+        """Registration, pull, and local import refuse a conflicting backend."""
+        checkpoint = self._checkpoint_of(FRAGMENT_MODEL)
+        conflicting = {"llamacpp_backend": CONFLICTING_BACKEND}
+        for write, model_name in (
+            (_register, REGISTER_TARGET_MODEL),
+            (_pull, PULL_TARGET_MODEL),
+        ):
+            response = write(model_name, checkpoint, recipe_options=conflicting)
+            self._assert_conflict_saved_nothing(response, model_name)
+
+            response = write(
+                model_name,
+                checkpoint,
+                recipe_options={"llamacpp_backend": BOUND_BACKEND},
+            )
+            self.assertEqual(
+                response.status_code, 200, f"{model_name}: {response.text}"
+            )
+            self.assertEqual(_model_status(model_name), 200, model_name)
+
+        # No model directory is staged: the import is refused before lemond
+        # looks for one.
+        response = _pull_request(
+            {
+                "model_name": IMPORT_TARGET_MODEL,
+                "recipe": "llamacpp",
+                "local_import": True,
+                "recipe_options": conflicting,
+            }
+        )
+        self._assert_conflict_saved_nothing(response, IMPORT_TARGET_MODEL)
+
+    def test_012_conflicting_collection_component_is_rejected(self):
+        """A collection import saves neither a conflicting component nor itself."""
+        checkpoint = self._checkpoint_of(FRAGMENT_MODEL)
+        saved = (COMPONENT_COLLECTION, COMPONENT_TARGET_MODEL)
+
+        def pull_collection(backend):
+            component = _bare(COMPONENT_TARGET_MODEL)
+            return _pull_request(
+                {
+                    "model_name": COMPONENT_COLLECTION,
+                    "recipe": "collection.omni",
+                    "components": [component],
+                    "models": [
+                        {
+                            "model_name": component,
+                            "recipe": "llamacpp",
+                            "checkpoint": checkpoint,
+                            "recipe_options": {"llamacpp_backend": backend},
+                        }
+                    ],
+                }
+            )
+
+        response = pull_collection(CONFLICTING_BACKEND)
+        self.assertNotEqual(response.status_code, 200, response.text)
+        self.assertIn("conflicts", response.text)
+        self.assertIn(COMPONENT_TARGET_MODEL, response.text)
+        for model_name in saved:
+            self.assertEqual(_model_status(model_name), 404, model_name)
+
+        response = pull_collection(BOUND_BACKEND)
+        self.assertEqual(response.status_code, 200, response.text)
+        for model_name in saved:
+            self.assertEqual(_model_status(model_name), 200, model_name)
+
+    def test_013_no_shared_llamacpp_keeps_bound_models(self):
         """Bound and rejected models keep their behavior without a shared llama.cpp."""
         # Runs after the other tests: it restarts lemond without the PATH
         # llama-server and without the *_bin override test_008 left in
@@ -624,9 +735,9 @@ class LlamaCppExecutableBindingTests(unittest.TestCase):
         for model_name in bound_or_rejected:
             self.assertNotIn(f"names no known model: '{model_name}'", log_text)
 
-    def test_012_map_error_fails_every_llamacpp_load(self):
+    def test_014_map_error_fails_every_llamacpp_load(self):
         """A binding error that no single model owns fails every llama.cpp load."""
-        # Runs last, after test_011 removed the shared llama.cpp: a fragment
+        # Runs last, after test_013 removed the shared llama.cpp: a fragment
         # path that is not a directory drops every fragment binding.
         system_backend._stop_server()
         type(self)._active = False
