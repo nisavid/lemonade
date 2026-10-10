@@ -3,6 +3,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <vector>
 #include <nlohmann/json.hpp>
 
 namespace lemon {
@@ -109,6 +110,15 @@ public:
     /// is merged on top when present.
     static json get_defaults();
 
+    struct DefaultsLayer {
+        std::string source;
+        json value;
+    };
+
+    /// The layers get_defaults() merges, lowest precedence first, each before
+    /// merging: base_defaults(), then each override file that is present.
+    static std::vector<DefaultsLayer> get_defaults_layers();
+
     /// Load raw config.json from config_dir without merging defaults.
     /// Returns an empty JSON object if the file does not exist or is empty.
     static json load_raw(const std::string& config_dir);
@@ -123,7 +133,8 @@ public:
     static void save(const std::string& config_dir, const json& config);
 
     /// Merge sparse overrides into <config_dir>/config.json, drop every key
-    /// that matches get_defaults(), and save. Concurrent callers are serialized
+    /// that matches get_defaults() except llamacpp.model_executables, and save.
+    /// Concurrent callers are serialized
     /// so read-modify-write updates of different keys are not lost.
     static void save_overrides(const std::string& config_dir, const json& overrides);
 

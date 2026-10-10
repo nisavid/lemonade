@@ -5,6 +5,7 @@
 #include "lemon/backends/backend_registry.h"
 #include "lemon/backends/backend_utils.h"
 #include "lemon/backends/llamacpp/llamacpp.h"
+#include "lemon/backends/llamacpp/llamacpp_executable_binding.h"
 #include "lemon/backends/llamacpp/llamacpp_gguf.h"
 #include "lemon/backends/llamacpp/llamacpp_request.h"
 #include "lemon/backends/llamacpp_reranking_adapter.h"
@@ -27,6 +28,7 @@
 #include <filesystem>
 #include <iostream>
 #include <lemon/utils/aixlog.hpp>
+#include <optional>
 #include <regex>
 #include <set>
 #include <system_error>
@@ -287,19 +289,38 @@ void LlamaCppServer::load(const std::string& model_name,
 
     std::string llamacpp_device = options.get_option("llamacpp_device");
     std::string llamacpp_backend_option = options.get_option("llamacpp_backend");
-    std::string llamacpp_backend = resolve_llamacpp_backend(llamacpp_backend_option);
     std::string llamacpp_args = options.get_option("llamacpp_args");
 
-    RuntimeConfig::validate_backend_choice("llamacpp", llamacpp_backend_option);
-
-    LOG(INFO, "LlamaCpp") << "Using LlamaCpp Backend: " << llamacpp_backend << std::endl;
+    const std::optional<llamacpp::ExecutableBinding> binding =
+        llamacpp::executable_bindings()->bound(model_name);
+    std::string llamacpp_backend;
+    if (binding) {
+        llamacpp_backend = binding->backend;
+        if (!llamacpp::bindable_backend_on_current_os(llamacpp_backend)) {
+            throw llamacpp::ExecutableBindingError(
+                "The llama.cpp backend '" + llamacpp_backend + "' bound to " +
+                model_name + " is not supported on this OS");
+        }
+        LOG(INFO, "LlamaCpp") << "Using bound executable " << binding->executable
+                              << " (backend " << llamacpp_backend << ", from "
+                              << binding->source << ")" << std::endl;
+    } else {
+        llamacpp_backend = resolve_llamacpp_backend(llamacpp_backend_option);
+        RuntimeConfig::validate_backend_choice("llamacpp", llamacpp_backend_option);
+        LOG(INFO, "LlamaCpp") << "Using LlamaCpp Backend: " << llamacpp_backend << std::endl;
+    }
+    // The runtime environment below is prepared only for Lemonade-managed
+    // installs; a bound executable brings its own.
+    const std::string managed_backend = binding ? std::string() : llamacpp_backend;
 
     // Update device type based on the actual backend selected.
     device_type_ = llamacpp::device_for_backend(llamacpp_backend);
     bool use_gpu = (device_type_ & DEVICE_GPU) != 0;
 
     // Install llama-server if needed (use per-model backend)
-    backend_manager_->install_backend(llamacpp::spec()->recipe, llamacpp_backend);
+    if (!binding) {
+        backend_manager_->install_backend(llamacpp::spec()->recipe, llamacpp_backend);
+    }
 
     // Use pre-resolved GGUF path. Skipped for hf_load models because llama-server
     // sources the weights itself via -hf; those models may not have local files.
@@ -318,7 +339,9 @@ void LlamaCppServer::load(const std::string& model_name,
 
     const int backend_port = choose_port();
 
-    std::string executable = BackendUtils::get_backend_binary_path(*llamacpp::spec(), llamacpp_backend);
+    std::string executable = binding
+        ? binding->executable
+        : BackendUtils::get_backend_binary_path(*llamacpp::spec(), llamacpp_backend);
 
     bool supports_embeddings = (model_info.type == ModelType::EMBEDDING);
     bool supports_reranking = (model_info.type == ModelType::RERANKING);
@@ -419,7 +442,7 @@ void LlamaCppServer::load(const std::string& model_name,
     // For ROCm on Linux, set LD_LIBRARY_PATH to include the ROCm library directory
     std::vector<std::pair<std::string, std::string>> env_vars;
 #ifndef _WIN32
-    if (is_llamacpp_rocm_backend(llamacpp_backend)) {
+    if (is_llamacpp_rocm_backend(managed_backend)) {
         // Get the directory containing the executable (where ROCm .so files are)
         fs::path exe_dir = fs::path(executable).parent_path();
         std::string lib_path = exe_dir.string();
@@ -443,7 +466,7 @@ void LlamaCppServer::load(const std::string& model_name,
 
         env_vars.push_back({"LD_LIBRARY_PATH", lib_path});
         LOG(DEBUG, "LlamaCpp") << "Setting LD_LIBRARY_PATH=" << lib_path << std::endl;
-    } else if (is_llamacpp_cuda_backend(llamacpp_backend)) {
+    } else if (is_llamacpp_cuda_backend(managed_backend)) {
         // The llama.cpp-builds Linux tarballs ship the bundled CUDA runtime
         // (libcudart.so, libcublas.so, etc.) alongside llama-server, so add the
         // executable's directory to LD_LIBRARY_PATH like we do for ROCm.
@@ -461,7 +484,7 @@ void LlamaCppServer::load(const std::string& model_name,
 #else
     // For ROCm on Windows with gfx1151, set OCL_SET_SVMSIZE
     // This is a patch to enable loading larger models
-    if (is_llamacpp_rocm_backend(llamacpp_backend)) {
+    if (is_llamacpp_rocm_backend(managed_backend)) {
         std::string new_path;
 
         if (llamacpp_backend == "rocm-stable") {
@@ -493,7 +516,7 @@ void LlamaCppServer::load(const std::string& model_name,
             env_vars.push_back({"OCL_SET_SVM_SIZE", "262144"});
             LOG(DEBUG, "LlamaCpp") << "Setting OCL_SET_SVM_SIZE=262144 for gfx1151/gfx1152 (enables loading larger models)" << std::endl;
         }
-    } else if (is_llamacpp_cuda_backend(llamacpp_backend)) {
+    } else if (is_llamacpp_cuda_backend(managed_backend)) {
         // CUDA Windows builds bundle cudart64_*.dll, cublas64_*.dll, etc. next to
         // llama-server.exe. Prepend the executable directory to PATH so the loader
         // resolves them before any system-wide CUDA install.
@@ -509,7 +532,7 @@ void LlamaCppServer::load(const std::string& model_name,
     }
 #endif
 
-    if (is_llamacpp_cuda_backend(llamacpp_backend)) {
+    if (is_llamacpp_cuda_backend(managed_backend)) {
         std::string existing_llama_device = utils::get_environment_variable_utf8("LLAMA_ARG_DEVICE");
         const bool has_llama_device_override = !existing_llama_device.empty();
 

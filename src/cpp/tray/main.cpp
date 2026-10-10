@@ -25,6 +25,7 @@
 
 #ifdef _WIN32
 // Windows embeds the server
+#include <lemon/backends/llamacpp/llamacpp_executable_binding.h>
 #include <lemon/cli_parser.h>
 #include <lemon/config_file.h>
 #include <lemon/logging_config.h>
@@ -206,6 +207,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
     rot_cfg.max_files = runtime_config->log_max_files();
     lemon::configure_application_logging(
         runtime_config->log_level(), lemon::LoggingMode::embedded_tray_server, rot_cfg);
+
+    lemon::backends::llamacpp::install_executable_bindings(cli_config.config_dir);
 
     // Initialize Winsock (required by httplib)
     WSADATA wsa;

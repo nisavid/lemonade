@@ -291,6 +291,10 @@ public:
     // Check if model exists (in filtered list based on system capabilities)
     bool model_exists(const std::string& model_name);
 
+    // Like model_exists, but true only for a cache key itself: a public name
+    // or alias that resolves to a model is not one.
+    bool is_cache_key(const std::string& cache_key);
+
     // Validate a collection (recipe="collection.omni") registration request.
     // Returns nullopt on success, or a user-facing error message on failure.
     // Used by /pull request validation and as a defensive guard in download_model.
