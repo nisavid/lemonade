@@ -71,7 +71,7 @@ struct LlamaCppExecutableBindingTestHook {
             return std::make_unique<StubLlamaServer>(state);
         };
         router.available_memory_sampler_ =
-            [](DeviceType, GpuMemoryVendor, const std::string&) { return 64.0; };
+            [](DeviceType) { return 64.0; };
     }
 
     static void add_ready_server(Router& router, const std::string& model_name,
