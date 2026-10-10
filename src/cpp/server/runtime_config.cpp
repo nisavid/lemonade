@@ -1169,6 +1169,11 @@ void RuntimeConfig::validate(const std::string& key, const json& value) const {
 
 void RuntimeConfig::validate_backend(const std::string& backend, const std::string& key,
                                       const json& value) const {
+    if (backend == "llamacpp" && key == "model_executables") {
+        throw std::invalid_argument(
+            "'llamacpp.model_executables' cannot be changed at runtime; "
+            "edit config.json and restart lemond");
+    }
     if (key == "backend") {
         if (!value.is_string()) {
             throw std::invalid_argument("'" + backend + "." + key + "' must be a string");

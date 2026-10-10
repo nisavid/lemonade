@@ -1,5 +1,6 @@
 #include <lemon/server.h>
 
+#include <lemon/backends/llamacpp/llamacpp_executable_binding.h>
 #include <lemon/cli_parser.h>
 #include <lemon/config_file.h>
 #include <lemon/logging_config.h>
@@ -184,6 +185,8 @@ int main(int argc, char** argv) {
         configure_application_logging(config->log_level(), LoggingMode::direct_server, rot_cfg);
 
         utils::set_models_dir(config->models_dir());
+
+        backends::llamacpp::install_executable_bindings(cli_config.config_dir);
 
         LOG(INFO) << "Starting Lemonade Server..." << std::endl;
         LOG(INFO) << "  Version: " << LEMON_VERSION_STRING << std::endl;

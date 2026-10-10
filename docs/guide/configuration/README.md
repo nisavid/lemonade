@@ -355,6 +355,8 @@ Every `*_bin` key (e.g. `llamacpp.vulkan_bin`, `whispercpp.cpu_bin`, `sdcpp.rocm
 
 > Note: `llamacpp.rocm_bin` version tags are channel-specific. Each ROCm channel downloads from a different GitHub repository, so you must set the correct `rocm_channel` before pinning `rocm_bin` to a specific tag. See [Pinning to a Specific Version Tag](./llamacpp.md#pinning-to-a-specific-version-tag) for details.
 
+> Note: a model with a per-model llama.cpp executable binding runs its bound `llama-server` and ignores every `llamacpp.*_bin` value. See [Per-Model Executable Bindings](./llamacpp.md#per-model-executable-bindings).
+
 Examples:
 
 ```bash
