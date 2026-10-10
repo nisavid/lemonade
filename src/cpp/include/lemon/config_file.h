@@ -133,7 +133,8 @@ public:
     static void save(const std::string& config_dir, const json& config);
 
     /// Merge sparse overrides into <config_dir>/config.json, drop every key
-    /// that matches get_defaults(), and save. Concurrent callers are serialized
+    /// that matches get_defaults() except llamacpp.model_executables, and save.
+    /// Concurrent callers are serialized
     /// so read-modify-write updates of different keys are not lost.
     static void save_overrides(const std::string& config_dir, const json& overrides);
 

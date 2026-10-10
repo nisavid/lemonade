@@ -310,7 +310,16 @@ void ConfigFile::save(const std::string& config_dir, const json& config) {
 void ConfigFile::save_overrides(const std::string& config_dir, const json& overrides) {
     std::lock_guard<std::mutex> lock(overrides_mutex_);
     json user_cfg = utils::JsonUtils::merge(load_raw(config_dir), overrides);
-    utils::JsonUtils::prune_matching(user_cfg, get_defaults());
+
+    // A defaults file that wrongly carries llamacpp.model_executables must not
+    // prune the matching fields out of a config.json binding entry.
+    json defaults = get_defaults();
+    auto llamacpp_section = defaults.find("llamacpp");
+    if (llamacpp_section != defaults.end() && llamacpp_section->is_object()) {
+        llamacpp_section->erase("model_executables");
+    }
+
+    utils::JsonUtils::prune_matching(user_cfg, defaults);
     save(config_dir, user_cfg);
 }
 

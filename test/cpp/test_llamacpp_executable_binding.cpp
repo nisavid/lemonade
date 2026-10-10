@@ -559,6 +559,29 @@ int main() {
     }
 
     {
+        const json binding = entry(shared_exe, backend);
+        const fs::path env_defaults = root / "binding-defaults.json";
+        write_json(env_defaults, fragment("Kept-Model", binding));
+        set_env_var("LEMONADE_DEFAULTS_PATH", utf8(env_defaults).c_str());
+
+        const fs::path config_dir = root / "binding-prune-config";
+        fs::create_directories(config_dir);
+        write_json(config_dir / "config.json", fragment("Kept-Model", binding));
+
+        json overrides = json::object();
+        overrides["pinned_models"] = json::array({"Kept-Model"});
+        lemon::ConfigFile::save_overrides(utf8(config_dir), overrides);
+
+        json saved = lemon::ConfigFile::load_raw(utf8(config_dir));
+        check(saved["pinned_models"] == overrides["pinned_models"],
+              "saving an unrelated override keeps that override");
+        check(saved["llamacpp"]["model_executables"]["Kept-Model"] == binding,
+              "a defaults file that repeats a config.json binding entry never prunes it");
+
+        set_env_var("LEMONADE_DEFAULTS_PATH", nullptr);
+    }
+
+    {
         auto rejects = [&](const json& value, const char* label) {
             json config = json::object();
             config["Candidate"] = value;
