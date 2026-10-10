@@ -4582,6 +4582,25 @@ static bool collection_component_def_is_valid(const json& def) {
     return false;
 }
 
+// "" unless a component's inline definition names a llama.cpp backend other
+// than the one bound to `canonical`, the user model it would register as.
+static std::string collection_component_backend_conflict(const std::string& name,
+                                                         const std::string& canonical,
+                                                         const json& def) {
+    if (!def.is_object() || !def.contains("recipe_options") ||
+        !def["recipe_options"].is_object() ||
+        !def["recipe_options"].contains("llamacpp_backend")) {
+        return "";
+    }
+    const std::string conflict = backends::llamacpp::backend_conflict_error(
+        *backends::llamacpp::executable_bindings(), canonical,
+        def["recipe_options"]["llamacpp_backend"]);
+    if (conflict.empty()) {
+        return "";
+    }
+    return "Collection component '" + name + "': " + conflict;
+}
+
 json ModelManager::fetch_collection_manifest(const std::string& repo_id,
                                              const std::string& registry_source,
                                              bool do_not_upgrade) {
@@ -4725,15 +4744,10 @@ std::vector<std::string> ModelManager::register_components(const json& component
                     "Collection component '" + name + "' has an incomplete inline "
                     "definition (a recipe and at least one checkpoint are required).");
             }
-            if (def.contains("recipe_options") && def["recipe_options"].is_object() &&
-                def["recipe_options"].contains("llamacpp_backend")) {
-                const std::string conflict = backends::llamacpp::backend_conflict_error(
-                    *backends::llamacpp::executable_bindings(), canonical,
-                    def["recipe_options"]["llamacpp_backend"]);
-                if (!conflict.empty()) {
-                    throw std::runtime_error(
-                        "Collection component '" + name + "': " + conflict);
-                }
+            const std::string conflict =
+                collection_component_backend_conflict(name, canonical, def);
+            if (!conflict.empty()) {
+                throw std::runtime_error(conflict);
             }
             pending_registrations.emplace_back(canonical, def);
             components.push_back(canonical);
@@ -6599,6 +6613,19 @@ std::optional<std::string> ModelManager::validate_collection_request(
                 normalized_definition_labels(*def, &illegal);
                 if (!illegal.empty()) {
                     return describe_illegal_labels(component_name, illegal);
+                }
+            }
+            // Registration refuses this conflict too, but only after the
+            // collection itself is saved. A reserved name is never registered,
+            // so it has nothing to conflict with.
+            if (!model_exists(bare) && def != nullptr) {
+                const std::string canonical = "user." + bare;
+                if (!is_reserved_registration_name(canonical)) {
+                    std::string conflict =
+                        collection_component_backend_conflict(bare, canonical, *def);
+                    if (!conflict.empty()) {
+                        return conflict;
+                    }
                 }
             }
         } else if (!model_exists(component_name)) {

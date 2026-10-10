@@ -643,7 +643,7 @@ class LlamaCppExecutableBindingTests(unittest.TestCase):
             )
 
         response = pull_collection(CONFLICTING_BACKEND)
-        self.assertNotEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("conflicts", response.text)
         self.assertIn(COMPONENT_TARGET_MODEL, response.text)
         for model_name in saved:
