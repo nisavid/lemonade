@@ -79,8 +79,7 @@ public:
     const std::map<std::string, BindingEntry>& entries() const { return entries_; }
     bool empty() const { return entries_.empty() && map_error_.empty(); }
 
-    // The effective table for GET /internal/config. `source` and `error` are
-    // output-only fields.
+    // `source` and `error` are output-only fields.
     nlohmann::json to_json() const;
 
     const std::vector<std::string>& info_messages() const { return info_; }
