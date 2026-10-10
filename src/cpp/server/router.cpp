@@ -2401,8 +2401,8 @@ RecipeOptions Router::resolve_effective_options(const ModelInfo& model_info,
                                                 const std::string& cache_key) const {
     const std::string backend_option = model_info.recipe + "_backend";
 
-    // Never throws for binding state: model listings and the options endpoint
-    // call this too, so binding errors surface only on load.
+    // Never throws for binding state: a throw here would fail read-only views
+    // of a model's options, so binding errors surface only on load.
     std::optional<backends::llamacpp::ExecutableBinding> binding;
     if (model_info.recipe == backends::llamacpp::descriptor.recipe) {
         const auto bindings = backends::llamacpp::executable_bindings();
