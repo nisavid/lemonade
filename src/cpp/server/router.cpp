@@ -4,6 +4,7 @@
 #include "lemon/backends/backend_registry.h"
 #include "lemon/backends/cloud/cloud_server.h"
 #include "lemon/backends/llamacpp/llamacpp.h"
+#include "lemon/backends/llamacpp/llamacpp_executable_binding.h"
 #include "lemon/backends/llamacpp/llamacpp_server.h"
 #include "lemon/backends/fastflowlm/fastflowlm_server.h"
 #include "lemon/backends/ryzenai/ryzenai_server.h"
@@ -1409,7 +1410,17 @@ void Router::load_model_impl(
             ? *preparation.watchdog_options_
             : options;
     RecipeOptions effective_options =
-        resolve_effective_options(model_info, requested_options);
+        resolve_effective_options(model_info, requested_options, canonical_model_name);
+
+    const auto bindings = backends::llamacpp::executable_bindings();
+    backends::llamacpp::check_binding_for_load(
+        *bindings, canonical_model_name, model_info.recipe, requested_options,
+        model_info.recipe_options);
+    const std::optional<backends::llamacpp::ExecutableBinding> binding =
+        bindings->bound(canonical_model_name);
+    if (binding) {
+        effective_options.set_option("llamacpp_backend", binding->backend);
+    }
 
     // LOAD SERIALIZATION STRATEGY (from spec: point #2 in Additional Considerations)
     std::unique_lock<std::mutex> lock(load_mutex_);
@@ -1531,6 +1542,15 @@ void Router::load_model_impl(
         std::unique_ptr<WrappedServer> new_server = create_backend_server(model_info);
         ModelType model_type = model_info.type;
         DeviceType device_type = new_server->effective_device(effective_options);
+        if (binding) {
+            const std::string executable_error =
+                backends::llamacpp::executable_file_error(binding->executable);
+            if (!executable_error.empty()) {
+                throw backends::llamacpp::ExecutableBindingError(
+                    "Cannot load " + canonical_model_name + " (binding from " +
+                    binding->source + "): " + executable_error);
+            }
+        }
         std::optional<int64_t> bound_npu_auto_ctx;
 
         if (device_type & DEVICE_NPU) {
@@ -1847,6 +1867,13 @@ void Router::load_model_impl(
 
             if (is_file_not_found) {
                 LOG(ERROR, "Router") << "File not found error, NOT evicting other models" << std::endl;
+                throw std::runtime_error(error_message);
+            }
+
+            if (binding) {
+                LOG(ERROR, "Router") << "Bound executable " << binding->executable
+                                     << " failed for " << canonical_model_name
+                                     << ", NOT evicting other models" << std::endl;
                 throw std::runtime_error(error_message);
             }
 
@@ -2365,13 +2392,27 @@ bool Router::is_model_tracked(const std::string& model_name) const {
 }
 
 RecipeOptions Router::resolve_effective_options(const ModelInfo& model_info,
-                                                const RecipeOptions& request_options) const {
+                                                const RecipeOptions& request_options,
+                                                const std::string& cache_key) const {
     const std::string backend_option = model_info.recipe + "_backend";
+
+    // Never throws for binding state: a throw here would fail read-only views
+    // of a model's options, so binding errors surface only on load.
+    std::optional<backends::llamacpp::ExecutableBinding> binding;
+    if (model_info.recipe == backends::llamacpp::descriptor.recipe) {
+        const auto bindings = backends::llamacpp::executable_bindings();
+        if (!bindings->entries().empty()) {
+            binding = bindings->bound(cache_key);
+        }
+    }
 
     RecipeOptions tentative = request_options.inherit(model_info.recipe_options.inherit(
         RecipeOptions(model_info.recipe, config_->recipe_options(""))));
     json backend_json = tentative.get_option(backend_option);
-    const std::string backend = backend_json.is_string() ? backend_json.get<std::string>() : "";
+    std::string backend = backend_json.is_string() ? backend_json.get<std::string>() : "";
+    if (binding) {
+        backend = binding->backend;
+    }
 
     RecipeOptions default_opt(model_info.recipe, config_->recipe_options(backend));
     RecipeOptions arch_opts(
@@ -2427,6 +2468,10 @@ RecipeOptions Router::resolve_effective_options(const ModelInfo& model_info,
         // Keep empty results: explicit "" is a meaningful clear value and the
         // effective layer is also used as replayable load input.
         effective.set_option(key, resolved_args);
+    }
+
+    if (binding) {
+        effective.set_option(backend_option, binding->backend);
     }
 
     if (const auto* ops = backends::ops_for(model_info.recipe)) {
