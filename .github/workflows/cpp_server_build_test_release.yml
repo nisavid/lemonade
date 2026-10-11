@@ -2200,6 +2200,13 @@ jobs:
           .venv/bin/python -m test.utils.reset_server_state --best-effort --label "ubuntu llamacpp-system"
           .venv/bin/python test/test_llamacpp_system_backend.py --cli-binary lemonade
 
+      # Runs its own lemond on an OS-assigned port, so it needs no shared server.
+      - name: Test llamacpp executable bindings
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        shell: bash
+        run: |
+          .venv/bin/python test/test_llamacpp_executable_bindings.py --cli-binary lemonade
+
       - name: Capture and upload server logs
         if: always()
         uses: ./.github/actions/capture-server-logs

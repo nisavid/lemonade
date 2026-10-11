@@ -178,6 +178,70 @@ lemonade config set rocm_channel=nightly
 lemonade config set llamacpp.rocm_bin=b1260
 ```
 
+## Per-Model Executable Bindings
+
+A binding runs one model on a specific `llama-server` executable instead of the shared llama.cpp install. Every other model keeps the normal backend selection. Bindings suit a model that needs its own llama.cpp build, such as one with a feature the shared build lacks.
+
+A binding is keyed by the model's cache key: the bare name for a built-in model (for example `Qwen3-4B-Instruct-2507-GGUF`, never `builtin.Qwen3-4B-Instruct-2507-GGUF`), or the `user.` or `extra.` ID otherwise. Each entry has exactly two fields:
+
+| Field | Meaning |
+|-------|---------|
+| `executable` | Absolute path of the `llama-server` file to run, written without `.` or `..` segments. It names the file itself, never a directory, and is never looked up on `PATH`. |
+| `backend` | `cpu`, `vulkan`, `rocm`, `cuda`, or `metal`, limited to the backends llama.cpp supports on this OS. It sets the device class and which `llamacpp.<backend>_args` apply. It never installs or selects a build, resolves a ROCm channel, or adds library paths: the executable brings its own runtime. |
+
+### Where Bindings Come From
+
+- **Package fragments.** Lemonade reads every `*.json` file (except dot files) in `/usr/share/lemonade/llamacpp-bindings.d/` on Linux and macOS, in name order. Set `LEMONADE_LLAMACPP_BINDINGS_DIR` to read another directory instead; on Windows that is the only fragment directory. Each fragment binds exactly one model and is named after its cache key, so `example-model.json` holds:
+
+  ```json
+  {
+    "llamacpp": {
+      "model_executables": {
+        "example-model": {
+          "executable": "/opt/example-llama/bin/llama-server",
+          "backend": "vulkan"
+        }
+      }
+    }
+  }
+  ```
+
+- **`config.json`.** The same `llamacpp.model_executables` map. An entry replaces a fragment's entry for that model whole, with no field merge, and `null` unbinds the model so it uses the shared install again:
+
+  ```json
+  {
+    "llamacpp": {
+      "model_executables": {
+        "example-model": null,
+        "user.my-local-model": {
+          "executable": "/opt/my-build/bin/llama-server",
+          "backend": "rocm"
+        }
+      }
+    }
+  }
+  ```
+
+Nothing outranks `config.json`. Bindings are read once at startup, so restart `lemond` after changing them; `lemonade config set` and `/internal/set` reject the key. The key cannot appear in a defaults file, request options, saved model options, or a model registration.
+
+### How a Bound Model Loads
+
+- `lemond` starts the bound executable, whether or not the shared backend is installed, including with `no_fetch_executables` on.
+- The bound backend replaces `llamacpp.backend`, architecture defaults, and any saved or registered `llamacpp_backend` for that model; a conflicting saved value is ignored with a warning in the log. `llamacpp.<backend>_args` for the bound backend apply as for any other model on that backend, and so does `llamacpp.device`, which must match the bound backend.
+- `lemond` prepares no backend-specific environment for a bound executable: it adds no library paths and, for `cuda`, sets neither a `CUDA_VISIBLE_DEVICES` restriction nor `__NV_PRIME_RENDER_OFFLOAD`. The executable inherits `lemond`'s own environment, and `llamacpp.device` still applies.
+- A request that names a different `llamacpp_backend` for a bound model fails with an error, on `/load` and on every path that saves model options: `POST /models/{id}/options`, `POST /models/register`, pull, import, and collection component registration. Omitting the option, or sending `null`, `""`, `auto`, or `-1`, proceeds. To clear a stale saved backend, send `null` to `POST /models/{id}/options`.
+- Each load checks that the executable is a regular file that `lemond` can run. When that check fails, the load fails with that error before any other model is evicted. When the bound executable fails to start, the load fails with its original error, and `lemond` does not evict every other model and retry; models that were already unloaded to make room for it stay unloaded.
+- Changing a `llamacpp.*_bin` value or uninstalling a llama.cpp backend never unloads a bound model.
+
+### Errors and Visibility
+
+- A malformed fragment fails only the loads of the model its file name names, until it is fixed and `lemond` restarts. A valid `config.json` entry or `null` for that model takes precedence. A malformed `config.json` entry fails only its own model's loads and never falls back to a fragment or the shared install.
+- A per-model key under `llamacpp.model_executables` in a defaults file is rejected whatever its value and fails that model's loads, even when a fragment binds the model, until it is removed and `lemond` restarts. A `config.json` entry or `null` for that model takes precedence.
+- Some binding errors name no model: `llamacpp.model_executables` in `config.json` or a defaults file is not an object, the fragment path exists but is not a directory, the fragment directory cannot be read, or a fragment file name or a `config.json` or defaults-file key names no model, such as `builtin..json` or `user.`. Each one fails every llama.cpp load until the problem is fixed and `lemond` restarts, and every llama.cpp model stays listed so its loads report the error. Other backends keep working. An unparseable `config.json` is still renamed to `config.json.corrupted` and read as empty, as for any other setting, so only fragment bindings apply.
+- At startup, `lemond` logs each binding with its source and warns about rejected entries, overridden fragments, executables that do not exist yet, and keys that match no model's cache key, such as a registered model's name without its `user.` prefix. Such a key binds nothing until a model with that exact cache key exists, and a public name without its prefix never matches the model it names.
+- `lemonade config` (`GET /internal/config`) shows the effective table: each bound model's `executable`, `backend`, and `source` (the fragment path or `config.json`), `null` for a model unbound in `config.json`, and `error` with `source` for a rejected entry. While a binding error that names no model is active, `model_executables` shows only that `error` and its `source`, with no per-model entries.
+- `/health` reports each loaded model's `launch_command`, which starts with the bound executable.
+
 ## Choosing the Right Backend
 
 ### Decision Tree

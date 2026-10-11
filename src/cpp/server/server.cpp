@@ -20,6 +20,7 @@
 #include "lemon/backends/sdcpp/sdcpp_server.h"
 #include "lemon/backends/thenoise/thenoise_server.h"
 #include "lemon/backends/backend_utils.h"
+#include "lemon/backends/llamacpp/llamacpp_executable_binding.h"
 #include <cstring>
 #include "lemon/utils/conversation_fingerprint.h"
 #include "lemon/utils/image_sniff.h"
@@ -821,6 +822,15 @@ void Server::start_model_cache_warmup() {
             LOG(DEBUG, "Server") << "Warming model list cache..." << std::endl;
             model_manager_->get_supported_models();
             LOG(DEBUG, "Server") << "Model list cache warmup complete" << std::endl;
+            const auto bindings = backends::llamacpp::executable_bindings();
+            for (const auto& [key, entry] : bindings->entries()) {
+                if (entry.state != backends::llamacpp::BindingState::Unbound &&
+                    !model_manager_->is_cache_key(key)) {
+                    LOG(WARNING, "Server") << "llama.cpp executable binding in "
+                                           << entry.source << " names no known model: '"
+                                           << key << "'" << std::endl;
+                }
+            }
         } catch (const std::exception& e) {
             LOG(WARNING, "Server") << "Model list cache warmup failed: " << e.what() << std::endl;
         } catch (...) {
@@ -3677,6 +3687,18 @@ std::string Server::register_model_definition_internal(
             model_name);
     }
 
+    if (request_json.contains("recipe_options") &&
+        request_json["recipe_options"].is_object() &&
+        request_json["recipe_options"].contains("llamacpp_backend")) {
+        const std::string conflict = backends::llamacpp::backend_conflict_error(
+            *backends::llamacpp::executable_bindings(),
+            model_manager_->resolve_model_name(model_name),
+            request_json["recipe_options"]["llamacpp_backend"]);
+        if (!conflict.empty()) {
+            throw std::invalid_argument(conflict);
+        }
+    }
+
     if (request_json.contains("models") && !allow_embedded_models) {
         throw std::invalid_argument(
             "`models` embeds additional model definitions and is not accepted by "
@@ -3779,8 +3801,10 @@ int64_t Server::resolve_context_length(const std::string& model_id, const ModelI
         }
 
         const RecipeOptions no_request_options(info.recipe, nlohmann::json::object());
-        const int64_t configured_ctx =
-            ctx_size_of(router_->resolve_effective_options(info, no_request_options));
+        const std::string cache_key =
+            model_manager_->resolve_model_name(resolve_alias_target(model_id));
+        const int64_t configured_ctx = ctx_size_of(
+            router_->resolve_effective_options(info, no_request_options, cache_key));
         if (configured_ctx > 0) {
             return configured_ctx;
         }
@@ -4077,11 +4101,13 @@ void Server::respond_with_model_options(
         if (mutation && !mutation(model_key, info, res)) return;
 
         const RecipeOptions no_request_options(info.recipe, nlohmann::json::object());
-        RecipeOptions effective = router_->resolve_effective_options(info, no_request_options);
+        RecipeOptions effective =
+            router_->resolve_effective_options(info, no_request_options, model_key);
 
         ModelInfo without_saved = info;
         without_saved.recipe_options = model_manager_->get_model_default_options(info);
-        RecipeOptions defaults = router_->resolve_effective_options(without_saved, no_request_options);
+        RecipeOptions defaults =
+            router_->resolve_effective_options(without_saved, no_request_options, model_key);
 
         // `effective` and `defaults` double as replayable /v1/load bodies.
         nlohmann::json effective_json = resolve_all_recipe_options(effective);
@@ -4201,6 +4227,17 @@ void Server::handle_model_options_post(const httplib::Request& req, httplib::Res
                     return false;
                 }
                 changes[key] = value;
+            }
+
+            if (changes.contains("llamacpp_backend")) {
+                const std::string conflict = backends::llamacpp::backend_conflict_error(
+                    *backends::llamacpp::executable_bindings(), model_key,
+                    changes["llamacpp_backend"]);
+                if (!conflict.empty()) {
+                    r.status = 400;
+                    r.set_content(nlohmann::json{{"error", conflict}}.dump(), "application/json");
+                    return false;
+                }
             }
 
             if (dry_run) {
@@ -6892,6 +6929,26 @@ void Server::handle_load(const httplib::Request& req, httplib::Response& res) {
             return;
         }
 
+        // Reject before save_options can persist a backend the binding overrides.
+        const std::string backend_conflict = backends::llamacpp::backend_conflict_error(
+            *backends::llamacpp::executable_bindings(),
+            model_manager_->resolve_model_name(model_name),
+            request_json.contains("llamacpp_backend") ? request_json["llamacpp_backend"]
+                                                      : nlohmann::json());
+        if (!backend_conflict.empty()) {
+            LOG(ERROR, "Server") << backend_conflict << std::endl;
+            res.status = 400;
+            nlohmann::json error = {{"error", {
+                {"message", backend_conflict},
+                {"type", "invalid_request_error"},
+                {"param", "llamacpp_backend"},
+                {"code", "invalid_request"},
+                {"requested_model", model_name}
+            }}};
+            res.set_content(error.dump(), "application/json");
+            return;
+        }
+
         auto preparation = router_->prepare_model_load(
             model_name, LoadPurpose::UserInference,
             Router::ExistingModelPolicy::ReconcileOptions);
@@ -7980,6 +8037,13 @@ void Server::handle_config_set(const httplib::Request& req, httplib::Response& r
 void Server::handle_config_get(const httplib::Request& /*req*/, httplib::Response& res) {
     try {
         auto snap = config_->snapshot();
+        const auto bindings = backends::llamacpp::executable_bindings();
+        if (!bindings->empty()) {
+            if (!snap.contains("llamacpp") || !snap["llamacpp"].is_object()) {
+                snap["llamacpp"] = nlohmann::json::object();
+            }
+            snap["llamacpp"]["model_executables"] = bindings->to_json();
+        }
         res.set_content(snap.dump(), "application/json");
     } catch (const std::exception& e) {
         LOG(ERROR, "Server") << "ERROR in handle_config_get: " << e.what() << std::endl;
@@ -8068,6 +8132,7 @@ void Server::handle_bin_change(const std::string& section,
     std::vector<Saved> previously_loaded;
     auto loaded = router_->get_all_loaded_models();
     std::string backend_option_key = recipe + "_backend";
+    const auto bindings = backends::llamacpp::executable_bindings();
     for (const auto& m : loaded) {
         if (m.value("recipe", "") != recipe) continue;
         std::string mb;
@@ -8077,6 +8142,8 @@ void Server::handle_bin_change(const std::string& section,
         if (!mb.empty() && mb != backend) continue;
         std::string name = m.value("model_name", "");
         if (name.empty()) continue;
+        // A bound model never runs the binary this key selects.
+        if (bindings->bound(model_manager_->resolve_model_name(name))) continue;
         previously_loaded.push_back({name, router_->get_model_recipe_options(name)});
     }
 
@@ -9089,6 +9156,7 @@ void Server::handle_uninstall(const httplib::Request& req, httplib::Response& re
         // Check if any loaded models use this recipe+backend and unload them first
         auto loaded_models = router_->get_all_loaded_models();
         std::string backend_option_key = recipe + "_backend";
+        const auto bindings = backends::llamacpp::executable_bindings();
         for (const auto& model : loaded_models) {
             if (model.value("recipe", "") == recipe) {
                 // Check if the model's backend matches the one being uninstalled
@@ -9100,6 +9168,10 @@ void Server::handle_uninstall(const httplib::Request& req, httplib::Response& re
                     continue;  // Different backend, skip
                 }
                 std::string model_name = model.value("model_name", "");
+                // A bound model does not run from the shared install.
+                if (bindings->bound(model_manager_->resolve_model_name(model_name))) {
+                    continue;
+                }
                 LOG(INFO, "Server") << "Unloading model " << model_name
                           << " before uninstalling " << recipe << ":" << backend << std::endl;
                 router_->unload_model(model_name);
