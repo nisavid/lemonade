@@ -64,9 +64,7 @@ and `Router::load_model_impl` in `src/cpp/server/router.cpp`. Runtime `set()`
 validation and startup-value consumption are separate paths. The router reads
 only the selected unbound llama.cpp binary setting before admission eviction;
 bound models and the `system` backend bypass shared binary settings. Keep the
-environment-override precedence and ROCm channel-to-key mapping. The prepared-load
-regression in `test/cpp/test_llamacpp_executable_binding.cpp` checks resident
-preservation both with a spare slot and at the count limit.
+environment-override precedence and ROCm channel-to-key mapping.
 
 For timeout changes, follow `effective_timeout` and the streaming low-speed
 options in `src/cpp/server/utils/http_client.cpp`: zero selects the configured

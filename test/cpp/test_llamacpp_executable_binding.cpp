@@ -314,6 +314,21 @@ void run_bound_load_ignores_shared_bin_test(const fs::path& runtime, const std::
           "a bound model keeps its bound backend beside a malformed shared binary configuration");
 }
 
+void run_system_backend_ignores_shared_bin_test() {
+    lemon::RuntimeConfig config(malformed_shared_bin_config("system", 2));
+    ScopedRouterConfig restore(config, "LEMONADE_LLAMACPP_SYSTEM_BIN");
+    lemon::Router router(&config, nullptr, nullptr);
+    auto state = std::make_shared<lemon::StubBackendState>();
+    lemon::LlamaCppExecutableBindingTestHook::set_backend(router, state);
+
+    check(try_load(router, "System-Shared-Bin",
+                   {{"llamacpp_backend", "system"}, {"ctx_size", 1024}}).empty() &&
+              router.is_model_loaded("System-Shared-Bin"),
+          "a system-backend model loads despite a malformed shared binary configuration");
+    check(state->last_backend == "system",
+          "a system-backend model keeps the system backend beside a malformed shared binary configuration");
+}
+
 void run_router_tests(const fs::path& runtime, const std::string& backend) {
     json values = lemon::ConfigFile::get_defaults();
     values["max_loaded_models"] = 1;
@@ -489,6 +504,7 @@ int main() {
 
     run_shared_bin_preserves_residents_test(backend);
     run_bound_load_ignores_shared_bin_test(runtime, backend);
+    run_system_backend_ignores_shared_bin_test();
 
     {
         const auto none = ExecutableBindings::resolve({}, "", {});
