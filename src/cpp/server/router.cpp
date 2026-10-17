@@ -2,6 +2,7 @@
 #include "lemon/cloud_provider_registry.h"
 #include "lemon/backends/backend_ops.h"
 #include "lemon/backends/backend_registry.h"
+#include "lemon/backends/backend_utils.h"
 #include "lemon/backends/cloud/cloud_server.h"
 #include "lemon/backends/llamacpp/llamacpp.h"
 #include "lemon/backends/llamacpp/llamacpp_executable_binding.h"
@@ -1542,6 +1543,14 @@ void Router::load_model_impl(
             complete_bound_reload();
             finish_loading();
             return;
+        }
+
+        if (!binding && model_info.recipe == backends::llamacpp::descriptor.recipe) {
+            const std::string backend = effective_options.get_option("llamacpp_backend");
+            // A shared configuration error must be rejected before admission evicts residents.
+            if (backend != "system") {
+                (void)backends::BackendUtils::get_bin_config_value(model_info.recipe, backend);
+            }
         }
 
         std::unique_ptr<WrappedServer> new_server = create_backend_server(model_info);

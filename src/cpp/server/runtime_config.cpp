@@ -272,7 +272,7 @@ void RuntimeConfig::validate_bin_path(const std::string& config_section,
     //   "latest"  — resolve to the most-recent upstream release at lemond start
     if (value.empty() || value == "builtin" || value == "latest") return;
 
-    // Absolute-path values are treated as user-supplied binary directories and
+    // Absolute-path values are treated as user-supplied executable files and
     // must exist. Relative-looking values intentionally fall through to the
     // version-tag branch so backend pins are not interpreted relative to
     // lemond's launch directory.
@@ -728,7 +728,12 @@ std::string RuntimeConfig::backend_string(const std::string& backend,
                                            const std::string& key) const {
     std::shared_lock lock(mutex_);
     if (config_.contains(backend) && config_[backend].contains(key)) {
-        return config_[backend][key].get<std::string>();
+        const auto& value = config_[backend][key];
+        if (key.size() >= 4 && key.compare(key.size() - 4, 4, "_bin") == 0 &&
+            !value.is_string()) {
+            throw std::invalid_argument("'" + backend + "." + key + "' must be a string");
+        }
+        return value.get<std::string>();
     }
     return "";
 }

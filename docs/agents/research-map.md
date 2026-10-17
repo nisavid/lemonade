@@ -57,6 +57,22 @@ These documents define accepted design and evidence gates. They do not claim tha
 - `docs/guide/configuration/llamacpp.md`: llama.cpp backend choices and ROCm channels.
 - `docs/guide/configuration/vllm.md`: experimental vLLM ROCm path and gotchas.
 
+Before changing shared binary configuration or load-error handling, trace
+`RuntimeConfig::backend_string` in `src/cpp/server/runtime_config.cpp`,
+`BackendUtils::get_bin_config_value` in `src/cpp/server/backends/backend_utils.cpp`,
+and `Router::load_model_impl` in `src/cpp/server/router.cpp`. Runtime `set()`
+validation and startup-value consumption are separate paths. The router reads
+only the selected unbound llama.cpp binary setting before admission eviction;
+bound models and the `system` backend bypass shared binary settings. Keep the
+environment-override precedence and ROCm channel-to-key mapping. The prepared-load
+regression in `test/cpp/test_llamacpp_executable_binding.cpp` checks resident
+preservation both with a spare slot and at the count limit.
+
+For timeout changes, follow `effective_timeout` and the streaming low-speed
+options in `src/cpp/server/utils/http_client.cpp`: zero selects the configured
+default, and `kNoTimeout` disables the timeout. llama.cpp's `wait_for_ready`
+call uses the separate polling budget declared in `src/cpp/include/lemon/wrapped_server.h`.
+
 ### API surfaces
 
 - `docs/api/README.md`: endpoint families and design philosophy.

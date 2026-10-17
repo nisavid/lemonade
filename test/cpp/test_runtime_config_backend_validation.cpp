@@ -103,5 +103,57 @@ int main() {
         std::puts("[PASS] invalid ROCm install method config value is rejected");
     }
 
+    const std::string bin_field_error = "'llamacpp.vulkan_bin' must be a string";
+    for (const json& malformed :
+         {json(7), json(true), json(nullptr), json::object(), json::array()}) {
+        json values = json::object();
+        values["llamacpp"]["vulkan_bin"] = malformed;
+        RuntimeConfig bin_config(values);
+        try {
+            (void)bin_config.backend_string("llamacpp", "vulkan_bin");
+            std::printf("[FAIL] loaded llamacpp.vulkan_bin %s was accepted\n",
+                        malformed.dump().c_str());
+            ++failures;
+        } catch (const std::invalid_argument& error) {
+            if (error.what() == bin_field_error) {
+                std::printf("[PASS] loaded llamacpp.vulkan_bin %s reports its field\n",
+                            malformed.dump().c_str());
+            } else {
+                std::printf("[FAIL] loaded llamacpp.vulkan_bin %s reported: %s\n",
+                            malformed.dump().c_str(), error.what());
+                ++failures;
+            }
+        }
+    }
+
+    json absent_bin = json::object();
+    absent_bin["llamacpp"] = json::object();
+    if (RuntimeConfig(absent_bin).backend_string("llamacpp", "vulkan_bin").empty()) {
+        std::puts("[PASS] an absent llamacpp.vulkan_bin reads as empty");
+    } else {
+        std::puts("[FAIL] an absent llamacpp.vulkan_bin read as non-empty");
+        ++failures;
+    }
+
+    json pinned_bin = json::object();
+    pinned_bin["llamacpp"]["vulkan_bin"] = "builtin";
+    RuntimeConfig set_config(pinned_bin);
+    json malformed_change = json::object();
+    malformed_change["llamacpp"]["vulkan_bin"] = 7;
+    try {
+        (void)set_config.set(malformed_change);
+        std::puts("[FAIL] runtime set accepted a non-string llamacpp.vulkan_bin");
+        ++failures;
+    } catch (const std::invalid_argument& error) {
+        if (error.what() == bin_field_error &&
+            set_config.backend_string("llamacpp", "vulkan_bin") == "builtin") {
+            std::puts("[PASS] runtime set rejects a non-string llamacpp.vulkan_bin unchanged");
+        } else {
+            std::printf("[FAIL] runtime set rejection reported %s or changed the value\n",
+                        error.what());
+            ++failures;
+        }
+    }
+
     return failures == 0 ? 0 : 1;
 }

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -16,6 +17,7 @@
 #include <unistd.h>
 #endif
 
+#include <lemon/backends/backend_utils.h>
 #include <lemon/backends/llamacpp/llamacpp_executable_binding.h>
 #include <lemon/config_file.h>
 #include <lemon/recipe_options.h>
@@ -39,6 +41,7 @@ struct StubBackendState {
     std::atomic<int> loads{0};
     std::atomic<int> unloads{0};
     std::atomic<bool> fail_load{false};
+    bool read_shared_bin = false;
     std::string last_backend;
 };
 
@@ -47,11 +50,15 @@ public:
     explicit StubLlamaServer(std::shared_ptr<StubBackendState> state)
         : WrappedServer("stub", "error", nullptr, nullptr), state_(std::move(state)) {}
 
-    void load(const std::string&, const ModelInfo&, const RecipeOptions& options,
+    void load(const std::string& name, const ModelInfo&, const RecipeOptions& options,
               bool) override {
         ++state_->loads;
         const json backend = options.get_option("llamacpp_backend");
         state_->last_backend = backend.is_string() ? backend.get<std::string>() : "";
+        if (state_->read_shared_bin &&
+            !backends::llamacpp::executable_bindings()->bound(name)) {
+            (void)backends::BackendUtils::get_bin_config_value("llamacpp", state_->last_backend);
+        }
         if (state_->fail_load.load()) {
             throw std::runtime_error("llama-server failed to start");
         }
@@ -108,6 +115,33 @@ void set_env_var(const char* name, const char* value) {
     }
 #endif
 }
+
+class ScopedRouterConfig {
+public:
+    ScopedRouterConfig(lemon::RuntimeConfig& config, const char* env_name)
+        : previous_config_(lemon::RuntimeConfig::global()),
+          previous_bindings_(lemon::backends::llamacpp::executable_bindings()),
+          env_name_(env_name) {
+        if (const char* value = std::getenv(env_name_)) {
+            previous_env_ = value;
+        }
+        set_env_var(env_name_, nullptr);
+        lemon::RuntimeConfig::set_global(&config);
+        lemon::backends::llamacpp::set_executable_bindings(nullptr);
+    }
+
+    ~ScopedRouterConfig() {
+        lemon::backends::llamacpp::set_executable_bindings(previous_bindings_);
+        lemon::RuntimeConfig::set_global(previous_config_);
+        set_env_var(env_name_, previous_env_ ? previous_env_->c_str() : nullptr);
+    }
+
+private:
+    lemon::RuntimeConfig* previous_config_;
+    std::shared_ptr<const ExecutableBindings> previous_bindings_;
+    const char* env_name_;
+    std::optional<std::string> previous_env_;
+};
 
 std::string utf8(const fs::path& path) {
     return lemon::utils::path_to_utf8(path);
@@ -201,6 +235,83 @@ void install_bindings(const json& config_map) {
     lemon::backends::llamacpp::set_executable_bindings(
         std::make_shared<ExecutableBindings>(
             ExecutableBindings::resolve({}, "", layer(config_map, "config.json"))));
+}
+
+const char* shared_bin_env(const std::string& backend) {
+    return backend == "metal" ? "LEMONADE_LLAMACPP_METAL_BIN" : "LEMONADE_LLAMACPP_VULKAN_BIN";
+}
+
+json malformed_shared_bin_config(const std::string& backend, int limit) {
+    json values = lemon::ConfigFile::base_defaults();
+    values["max_loaded_models"] = limit;
+    values["log_level"] = "error";
+    values["auto_evict"] = false;
+    values["inhibit_suspend"] = false;
+    values["offline"] = true;
+    values["no_fetch_executables"] = true;
+    values["llamacpp"][backend + "_bin"] = 7;
+    return values;
+}
+
+void run_shared_bin_preserves_residents_test(const std::string& backend) {
+    for (const int limit : {1, 2}) {
+        lemon::RuntimeConfig config(malformed_shared_bin_config(backend, limit));
+        ScopedRouterConfig restore(config, shared_bin_env(backend));
+        lemon::Router router(&config, nullptr, nullptr);
+        auto incoming = std::make_shared<lemon::StubBackendState>();
+        incoming->read_shared_bin = true;
+        lemon::LlamaCppExecutableBindingTestHook::set_backend(router, incoming);
+        auto resident = std::make_shared<lemon::StubBackendState>();
+        lemon::LlamaCppExecutableBindingTestHook::add_ready_server(
+            router, "Resident", resident);
+
+        const std::string error = try_load(
+            router, "Malformed-Shared-Bin",
+            {{"llamacpp_backend", backend}, {"ctx_size", 1024}});
+        const std::string context = limit == 1 ? "at the count limit" : "with a spare slot";
+        check(has_text(error, "llamacpp." + backend + "_bin") &&
+                  has_text(error, "must be a string"),
+              ("malformed shared binary configuration reports its field " + context).c_str());
+        check(resident->unloads.load() == 0 && router.is_model_loaded("Resident"),
+              ("malformed shared binary configuration preserves the resident " + context).c_str());
+        check(!router.is_model_loaded("Malformed-Shared-Bin"),
+              ("malformed shared binary configuration leaves the incoming model absent " + context).c_str());
+        check(incoming->loads.load() <= 1,
+              ("malformed shared binary configuration is never retried " + context).c_str());
+
+        json corrected = json::object();
+        corrected["llamacpp"][backend + "_bin"] = "builtin";
+        config.set(corrected);
+        check(try_load(router, "Malformed-Shared-Bin",
+                       {{"llamacpp_backend", backend}, {"ctx_size", 1024}}).empty() &&
+                  router.is_model_loaded("Malformed-Shared-Bin"),
+              ("a corrected shared binary configuration loads the model " + context).c_str());
+    }
+}
+
+void run_bound_load_ignores_shared_bin_test(const fs::path& runtime, const std::string& backend) {
+    lemon::RuntimeConfig config(malformed_shared_bin_config(backend, 2));
+    ScopedRouterConfig restore(config, shared_bin_env(backend));
+
+    const fs::path executable = runtime / "shared-bin-bound-llama-server";
+    write_text(executable, "#!/bin/sh\n");
+    std::error_code perms_ec;
+    fs::permissions(executable, fs::perms::owner_exec | fs::perms::owner_read,
+                    fs::perm_options::add, perms_ec);
+    json bindings = json::object();
+    bindings["Bound-Shared-Bin"] = entry(utf8(executable), backend);
+    install_bindings(bindings);
+
+    lemon::Router router(&config, nullptr, nullptr);
+    auto state = std::make_shared<lemon::StubBackendState>();
+    state->read_shared_bin = true;
+    lemon::LlamaCppExecutableBindingTestHook::set_backend(router, state);
+
+    check(try_load(router, "Bound-Shared-Bin", {{"ctx_size", 1024}}).empty() &&
+              router.is_model_loaded("Bound-Shared-Bin"),
+          "a bound model loads despite a malformed shared binary configuration");
+    check(state->last_backend == backend,
+          "a bound model keeps its bound backend beside a malformed shared binary configuration");
 }
 
 void run_router_tests(const fs::path& runtime, const std::string& backend) {
@@ -375,6 +486,9 @@ int main() {
     write_text(runtime / "llama-server", "#!/bin/sh\n");
     write_text(runtime / "other-llama-server", "#!/bin/sh\n");
     const std::string backend = host_backend();
+
+    run_shared_bin_preserves_residents_test(backend);
+    run_bound_load_ignores_shared_bin_test(runtime, backend);
 
     {
         const auto none = ExecutableBindings::resolve({}, "", {});

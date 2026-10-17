@@ -823,7 +823,6 @@ void WrappedServer::forward_streaming_request(const std::string& endpoint,
 
         if (sse) {
             // Use StreamingProxy to forward the SSE stream with telemetry callback
-            // Use INFERENCE_TIMEOUT_SECONDS (0 = infinite) as chat completions can take a long time
             StreamingProxy::forward_sse_stream(url, request_body, sink,
                 [telemetry_callback](const StreamingProxy::TelemetryData& telemetry) {
                     if (telemetry_callback) {
