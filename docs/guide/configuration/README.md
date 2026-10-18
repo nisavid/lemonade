@@ -207,7 +207,7 @@ When `lemond` starts, effective configuration is resolved by deep-merging settin
 | `log_file` | string | "auto" | File logging mode: "auto" (console-only for direct server runs, lemonade-server.log for embedded tray app), "disabled", "enabled", or custom target file path |
 | `log_max_file_size_mb` | int | 10 | Max active log file size in MB before triggering rotation (steady-state footprint bounded to ~`log_max_file_size_mb * (log_max_files + 1)`) |
 | `log_max_files` | int | 5 | Max number of rotated log backup files to retain (.1 through .N); legacy oversized files are rotated into .1 and pruned over cycles |
-| `global_timeout` | int | 600 | Default timeout in seconds for HTTP and inference requests, and for vLLM and ds4 startup readiness. Streaming uses this as a low-speed window. Other backends use their own readiness budgets; llama.cpp waits up to 600 seconds. |
+| `global_timeout` | int | 600 | Default timeout in seconds for HTTP and inference requests, and for vLLM and ds4 startup readiness. Streaming uses this as a low-speed window. Other backends use their own readiness budgets; llama.cpp polls against a 600-second budget, and the time each health probe takes can make the actual wait longer. |
 | `max_loaded_models` | int | 1 | Max models per type slot. Use -1 for unlimited |
 | `max_gpu_memory_occupancy_gb` | number | -1.0 | Max GPU memory occupancy in GB. Use -1 for auto, which uses detected GPU capacity |
 | `pinned_models` | array | [] | Model IDs to load at startup and protect from automatic eviction |
