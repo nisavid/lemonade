@@ -134,7 +134,7 @@ public:
     ///   - "" or "builtin" — use the lemonade-pinned version
     ///   - "latest"        — resolve to most-recent upstream release at lemond start
     ///   - "b8664" / "v1.8.2" / etc. — a specific upstream release tag (verbatim)
-    ///   - "/path/to/bin"  — an existing pre-downloaded binary directory
+    ///   - "/path/to/executable" — an existing pre-downloaded executable file
     /// Throws std::invalid_argument when the value looks like a path but the
     /// path does not exist.
     static void validate_bin_path(const std::string& config_section,
