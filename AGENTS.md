@@ -189,7 +189,7 @@ Pass `DEPENDS` only when the CI build needs targets beyond the `COMMAND` executa
 
 **Never write comments that explain WHAT the code does** — well-named identifiers already do that. Don't reference the current task, fix, or callers ("used by X", "added for the Y flow", "handles the case from issue #123") — those belong in the PR description and rot as the codebase evolves.
 
-**PR descriptions should be concise.** 1-3 sentences for the summary. No essays. The diff shows what changed; the description explains why and any non-obvious context. Bullet points over paragraphs. When creating a PR, use `.github/pull_request_template.md` and fill every section — Summary (with `Fixes #` link), Scope, Testing (confirm build + describe what was tested), Documentation (select one), Breaking Changes (select one), and AI-assisted contribution.
+**PR descriptions should be concise.** 1-3 sentences for the summary. No essays. The diff shows what changed; the description explains why and any non-obvious context. Bullet points over paragraphs. Use the destination repository’s PR template. For this fork, complete the sections in [.github/pull_request_template.md](.github/pull_request_template.md) and report the build and test results.
 
 ### C++
 - C++17, `lemon::` namespace
@@ -251,6 +251,7 @@ These MUST be maintained in all changes:
 
 ## Contributing
 
+- Follow the [AI content policy for the destination](docs/dev/ai-content-policy.md) when writing issues, pull requests, and reviews.
 - Open an Issue before submitting major PRs
 - UI/frontend changes are handled by core maintainers only
 - Python formatting with Black is required

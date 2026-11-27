@@ -1,6 +1,6 @@
 <!--
 
-PR bodies must be written by humans per the docs/dev/ai-content-policy.md.
+For PRs to nisavid/lemonade, agents may write PR descriptions and reviews. You are responsible for what you submit.
 
 Before submitting this PR, please read:
 - docs/dev/contribute.md

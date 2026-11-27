@@ -1,15 +1,23 @@
 # AI Content Policy
 
+## Contributions to this fork
+
+You may use agents to write issues and pull requests in `nisavid/lemonade`, including comments and reviews on those submissions. You are responsible for the code and prose you submit. Follow the [AI coding guidance](#ai-coding) when using AI-assisted code.
+
+## Contributions to upstream Lemonade
+
+The policy below applies to `lemonade-sdk/lemonade` and its community channels, including Discord. Consult the [upstream AI content policy](https://github.com/lemonade-sdk/lemonade/blob/main/docs/dev/ai-content-policy.md) before posting there.
+
 This policy is designed to keep humans at the center of the Lemonade community. It is built on the first principle that if a human wants another human to spend time reading and understanding something, then they need to write it themselves.
 
-## Goals
+### Goals
 
 The maintainers of this project make every effort to read and understand the prose you send us. We want to reserve this effort for genuine human ideas and connections, rather than spending it on a high volume (both quantity and length) of AI-generated prose.
 
 > [!NOTE]
 > This policy is an experiment. 30 days after it is introduced we will evaluate whether we want to keep, modify, or drop it.
 
-## Rule 1
+### Rule 1
 
 No human involved in this project should expect any other human to read AI-generated prose.
 
@@ -19,11 +27,11 @@ AI prose is not permitted in any Issue, Discussion, PR body, PR comment, or Disc
 
 > Note: AI tools that operate by posting their feedback directly to the PR are an exception to this rule, however nobody other than the person who invoked the agent is expected to read its output. Examples: `@claude review this`, assigning copilot as a reviewer, or codex's auto-review on newly opened PRs.
 
-## Additional Policies
+### Additional Policies
 
 Contributors can use AI tools, however you are fully responsible for the code and prose you submit.
 
-### AI Coding
+#### AI Coding
 
 If you use AI-assisted coding, please make sure that you:
 
@@ -34,14 +42,14 @@ If you use AI-assisted coding, please make sure that you:
 
 AI can make it easy to generate large changes, but large or unfocused changes are harder for maintainers to review and are less likely to be accepted quickly.
 
-### AI Code Review
+#### AI Code Review
 
 Use of AI code review tools is strongly encouraged, however the human is responsible for understanding the AI's output, improving the signal-to-noise ratio by filtering to what is important, and then rewriting their output in their own words.
 
-### AI Reporting
+#### AI Reporting
 
 AI is extremely useful for finding/reporting bugs and performing other complex analysis tasks over a large codebase like Lemonade. You are encouraged to use AI for analysis and reporting as part of your own work. However, you must synthesize your findings and write them in your own words if you want another human to read them.
 
-### AI Chat and Brainstorming
+#### AI Chat and Brainstorming
 
 How you come up with your ideas is up to you, but you must hand-write the prose you post and you are responsible for it once you post it.

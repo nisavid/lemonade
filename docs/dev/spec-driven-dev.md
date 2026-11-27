@@ -2,7 +2,7 @@
 
 Lemonade's maintainers strive to ensure that Lemonade has a great user experience, a coherent scope, and a high degree of robustness. One of our main tools to accomplish this is specification-driven development: the idea that changes to Lemonade's scope, surface area, and/or user experience should be discussed upfront before a PR is opened.
 
-These conversations take place on request for comment (RFC) discussions [on the Lemonade repository](https://github.com/lemonade-sdk/lemonade/discussions). These RFCs stay open until maintainers have had an opportunity to review, comment, and approve. Please note that the [AI content policy](./ai-content-policy.md) strictly applies in these discussions.
+These conversations take place on request for comment (RFC) discussions [on the upstream Lemonade repository](https://github.com/lemonade-sdk/lemonade/discussions). These RFCs stay open until maintainers have had an opportunity to review, comment, and approve. The [upstream AI content policy](https://github.com/lemonade-sdk/lemonade/blob/main/docs/dev/ai-content-policy.md) governs those discussions.
 
 > [!TIP]
 > Bug fixes that align the realized user experience to the intended experience are exempt from this policy.
@@ -67,7 +67,7 @@ The following maintainers are required to review RFCs within their subject area.
 
 This section helps you understand how to write a polished RFC that is likely to get a good reception with the community. The `Request for Comment (RFC)` discussion category also has a template that will guide you.
 
-Reminder: the [AI content policy](./ai-content-policy.md) strictly applies to RFCs. Important decisions in Lemonade must be made through human-to-human discourse.
+Write RFCs posted to `lemonade-sdk/lemonade` in your own words, as required by the [upstream AI content policy](https://github.com/lemonade-sdk/lemonade/blob/main/docs/dev/ai-content-policy.md).
 
 <!-- if you ever edit this section, make sure to update the template too! -->
 

@@ -66,6 +66,8 @@ For user-requested upstream `main` sync work:
 git merge-base --is-ancestor upstream/main HEAD
 ```
 
+When syncing contribution guidance or templates, preserve the fork’s [AI content policy](../dev/ai-content-policy.md). Agents may write issues, pull requests, and reviews for `nisavid/lemonade`. Upstream’s authorship rules apply to submissions to `lemonade-sdk/lemonade` and its community channels.
+
 This fork preserves legacy `LEMONADE_*` configuration environment migration as
 an active compatibility contract. Keep `ConfigFile::migrate_from_env()` and
 `test/server_env_vars.py` working when syncing upstream release changes around

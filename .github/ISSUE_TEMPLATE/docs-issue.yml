@@ -7,7 +7,7 @@ body:
       value: |
         Help us improve the Lemonade documentation! Let us know what's missing or could be better.
 
-        Please write this issue in your own words, per the [AI content policy](https://github.com/lemonade-sdk/lemonade/blob/main/docs/dev/ai-content-policy.md).
+        You may use an agent to write issues for this fork. You are responsible for the information you submit.
 
   - type: input
     id: page
