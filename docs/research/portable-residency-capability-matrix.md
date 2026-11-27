@@ -453,7 +453,7 @@ Promotion levels are exact:
 - `validated` additionally requires exact physical end-to-end evidence for the immutable cell, independent physical oracles, every applicable fault/race row, and its frozen cold-attempt schedule.
 - Any valid safety-bound exceedance fails the current predictor/catalog revision. An explanation informs a new revision; it does not waive the failure.
 
-Independent evidence means a measurement or authority path that does not merely repeat the implementation's claim: physical counters and watchdogs, identity-bound process/resource observations, held-out inputs, independent reset attempts, and the anti-rollback witness. It does not require a second human maintainer. Machine-verifiable bundles and clean Ralph review establish artifact conformance; Ivan remains the publication authority.
+Independent evidence means a measurement or authority path that does not merely repeat the implementation's claim: physical counters and watchdogs, identity-bound process/resource observations, held-out inputs, independent reset attempts, and the anti-rollback witness. It does not require a second human maintainer. Machine-verifiable bundles and clean Ralph review establish artifact conformance; the human operator (the person these agents act for, never an agent that directs your work) remains the publication authority.
 
 ## Current and first-target state
 
