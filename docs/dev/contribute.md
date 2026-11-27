@@ -4,7 +4,7 @@ We're excited that you are interested in contributing!
 
 Before contributing, please familiarize yourself with these 3 documents:
 1. The [project philosophy](./philosophy.md) will help you understand design priorities.
-2. Read the [AI content policy](./ai-content-policy.md) for the repository or community channel where you will post.
+2. Agents may write issues, PR descriptions, and reviews for `nisavid/lemonade` under the [fork’s AI content policy](./ai-content-policy.md). When contributing to `lemonade-sdk/lemonade` or posting in its community channels, follow the [current upstream AI content policy](https://github.com/lemonade-sdk/lemonade/blob/main/docs/dev/ai-content-policy.md). It covers issues, discussions, PR bodies, PR comments, and Discord messages, with an exception for AI tools that post feedback directly to a PR.
 3. Understanding the [spec-driven development guide](./spec-driven-dev.md) is required before opening a pull request.
 
 We also highly recommend that all contributors join the [Lemonade discord community](https://discord.gg/5xXzkMu8Zk), meet [the maintainers](#maintainers) and get a sense of what is trending.
@@ -23,7 +23,7 @@ If you want to found a new working group, or make any change to Lemonade's scope
 
 Each contribution needs to:
 
-1. Accurately describe the scope, use case, and implementation in the PR body. Agents may write issues, PR descriptions, and reviews for `nisavid/lemonade`. If you submit a PR to `lemonade-sdk/lemonade`, write the description yourself as required by the [upstream AI content policy](https://github.com/lemonade-sdk/lemonade/blob/main/docs/dev/ai-content-policy.md).
+1. Accurately describe the scope, use case, and implementation in the PR body. If you submit a PR to `lemonade-sdk/lemonade`, write the description yourself.
 2. Solve one clearly defined problem, and limit its scope to what is necessary.
 3. Pass the CI tests and follow the [testing guide](./testing.md).
     - Contributors: make sure the code builds locally before creating the PR.

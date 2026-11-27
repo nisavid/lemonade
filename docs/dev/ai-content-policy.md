@@ -6,7 +6,7 @@ You may use agents to write issues and pull requests in `nisavid/lemonade`, incl
 
 ## Contributions to upstream Lemonade
 
-The policy below applies to `lemonade-sdk/lemonade` and its community channels, including Discord. Consult the [upstream AI content policy](https://github.com/lemonade-sdk/lemonade/blob/main/docs/dev/ai-content-policy.md) before posting there.
+The [current upstream AI content policy](https://github.com/lemonade-sdk/lemonade/blob/main/docs/dev/ai-content-policy.md) governs contributions to `lemonade-sdk/lemonade` and posts in its community channels, including Discord. The text below is the fork’s reference copy.
 
 This policy is designed to keep humans at the center of the Lemonade community. It is built on the first principle that if a human wants another human to spend time reading and understanding something, then they need to write it themselves.
 
